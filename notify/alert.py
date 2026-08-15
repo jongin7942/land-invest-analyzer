@@ -45,18 +45,36 @@ def _access_token() -> str:
     return access
 
 
+def _use_public() -> bool:
+    return bool(config.PUBLIC_BASE_URL)
+
+
+def list_url() -> str:
+    """전체 목록 링크. PUBLIC_BASE_URL(GitHub Pages) 있으면 그걸 우선(PC 꺼져있어도 됨)."""
+    if _use_public():
+        return f"{config.PUBLIC_BASE_URL}/index.html"
+    return f"{config.BASE_URL}/"
+
+
+def candidate_url(cid: int) -> str:
+    """정적 사이트는 candidate/<id>.html, 라이브 Flask는 /candidate/<id>."""
+    if _use_public():
+        return f"{config.PUBLIC_BASE_URL}/candidate/{cid}.html"
+    return f"{config.BASE_URL}/candidate/{cid}"
+
+
 def format_message(rows, header: str | None = None) -> str:
     """카톡은 내용이 길면 읽기 힘드니, 후보마다 한줄 요약 + 상세는 링크로 뺀다.
     폰에서 링크를 누르면 모바일 웹으로 왜 급매인지/체크리스트까지 다 볼 수 있다."""
     today = dt.date.today().isoformat()
-    lines = [header or f"[토지 급매 알림] {today}", f"전체 목록: {config.BASE_URL}/"]
+    lines = [header or f"[토지 급매 알림] {today}", f"전체 목록: {list_url()}"]
     for i, r in enumerate(rows, 1):
         dev = f"개발{r['score']:.0f}" if r["score"] is not None else "개발-"
         comp = f"보상{r['comp_score']:.0f}" if r["comp_score"] is not None else "보상-"
         flag = " ⚠지분" if r["name"] and "지분" in r["name"] else ""
         lines.append(f"\n{i}. {r['address']} ({r['zoning'] or '용도미상'}){flag}")
         lines.append(f"   {dev} · {comp} · {r['road_grade'] or '?'}")
-        lines.append(f"   {config.BASE_URL}/candidate/{r['id']}")
+        lines.append(f"   {candidate_url(r['id'])}")
     return "\n".join(lines)
 
 
@@ -68,7 +86,7 @@ def send_top_candidates(limit: int = 5, min_score: float | None = None):
         return None
     msg = format_message(rows)
     access = _access_token()
-    return kakao.send_memo(access, msg, link_url=f"{config.BASE_URL}/")
+    return kakao.send_memo(access, msg, link_url=list_url())
 
 
 def send_test():
@@ -76,8 +94,8 @@ def send_test():
     return kakao.send_memo(
         access,
         f"[토지급매탐지기] 연동 테스트 메시지\n{dt.datetime.now():%Y-%m-%d %H:%M}\n"
-        f"이 메시지가 왔다면 카카오 연동 성공입니다.\n웹앱: {config.BASE_URL}/",
-        link_url=f"{config.BASE_URL}/",
+        f"이 메시지가 왔다면 카카오 연동 성공입니다.\n웹앱: {list_url()}",
+        link_url=list_url(),
     )
 
 

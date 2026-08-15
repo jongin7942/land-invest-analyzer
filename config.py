@@ -35,8 +35,12 @@ _db_path_raw = os.getenv("DB_PATH", "").strip() or "land_invest.db"
 DB_PATH = _db_path_raw if os.path.isabs(_db_path_raw) else str(BASE_DIR / _db_path_raw)
 
 # 카톡 알림에 넣을 웹앱 링크의 기준 주소. .env 에 BASE_URL 을 직접 지정하면 그걸 쓰고,
-# 없으면 이 PC의 LAN IP로 자동 구성한다(같은 와이파이의 폰에서 접속 가능).
+# 없으면 이 PC의 LAN IP로 자동 구성한다(같은 와이파이의 폰에서 접속 가능, PC 켜져있어야 함).
 BASE_URL = os.getenv("BASE_URL", "").strip() or f"http://{_lan_ip()}:5000"
+
+# GitHub Pages 공개 링크(정적 사이트, build_static.py 로 생성). 설정돼 있으면 카톡 알림이
+# LAN 링크 대신 이걸 우선 사용 — PC가 꺼져 있어도, 다른 사람도 열람 가능.
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").strip()
 
 
 def require_data_go_kr_key() -> str:
