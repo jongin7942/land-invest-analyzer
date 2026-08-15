@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <div style="display:flex; gap:8px; margin-bottom:14px;">
+    <button id="btn-dev" class="badge b-ok" style="border:none;cursor:pointer">🏗 개발용 관점</button>
+    <button id="btn-comp" class="badge b-gray" style="border:none;cursor:pointer">🏛 토지보상용 관점</button>
+  </div>
+  <div class="filters">
+    <div>
+      <label>최소 점수</label>
+      <input type="number" id="f-minscore" step="1" style="width:90px">
+    </div>
+    <div>
+      <label>용도지역</label>
+      <select id="f-zoning"><option value="">전체</option></select>
+    </div>
+    <div>
+      <label><input type="checkbox" id="f-mengji"> 맹지 제외</label>
+    </div>
+  </div>
+  <p class="muted" id="f-count"></p>
+</div>
+
+<div class="card">
+<table>
+<thead><tr>
+  <th id="th-score">개발점수</th><th>도로</th><th>지가군</th>
+  <th>저평가</th><th>뉴스</th><th>용도</th><th>면적(평)</th><th>최저입찰</th><th>주소</th>
+</tr></thead>
+<tbody id="tbody"></tbody>
+</table>
+</div>
+
+<script id="rows-data" type="application/json">{{ rows_json|safe }}</script>
+<script>
+const ROWS = JSON.parse(document.getElementById('rows-data').textContent);
+let view = 'dev';
+
+function fmt(v, digits) { return (v === null || v === undefined) ? '-' : v.toFixed(digits); }
+function fmtPct(v) { return (v === null || v === undefined) ? '-' : (v >= 0 ? '+' : '') + v.toFixed(0) + '%'; }
+function fmtWon(v) { return v ? v.toLocaleString('ko-KR') + '원' : '-'; }
+function badgeClass(g) {
+  if (g === '건축양호') return 'b-ok';
+  if (g === '확인필요') return 'b-warn';
+  if (g === '건축애로') return 'b-danger';
+  if (g === '맹지') return 'b-block';
+  return 'b-gray';
+}
+
+function populateZoningOptions() {
+  const zonings = [...new Set(ROWS.map(r => r.zoning).filter(Boolean))].sort();
+  const sel = document.getElementById('f-zoning');
+  for (const z of zonings) {
+    const opt = document.createElement('option');
+    opt.value = z; opt.textContent = z;
+    sel.appendChild(opt);
+  }
+}
+
+function render() {
+  const minScore = parseFloat(document.getElementById('f-minscore').value);
+  const zoning = document.getElementById('f-zoning').value;
+  const excludeMengji = document.getElementById('f-mengji').checked;
+  document.getElementById('th-score').textContent = view === 'comp' ? '보상점수' : '개발점수';
+
+  let rows = ROWS.filter(r => {
+    const sc = view === 'comp' ? r.comp_score : r.score;
+    if (sc === null || sc === undefined) return false;
+    if (!isNaN(minScore) && sc < minScore) return false;
+    if (zoning && r.zoning !== zoning) return false;
+    if (excludeMengji && r.road_grade === '맹지') return false;
+    return true;
+  });
+  rows.sort((a, b) => (view === 'comp' ? b.comp_score - a.comp_score : b.score - a.score));
+  rows = rows.slice(0, 300);
+
+  document.getElementById('f-count').textContent =
+    `전체 ${ROWS.length}건 중 ${rows.length}건 표시 (${view === 'comp' ? '토지보상용' : '개발용'} 점수순)`;
+
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = '';
+  for (const r of rows) {
+    const sc = view === 'comp' ? r.comp_score : r.score;
+    const pb = view === 'comp' ? r.comp_discount : r.pct_below;
+    const tr = document.createElement('tr');
+    tr.style.cursor = 'pointer';
+    tr.onclick = () => location.href = 'candidate/' + r.id + '.html';
+    const flag = (r.name && r.name.includes('지분')) ?
+      ' <span class="badge b-danger">⚠지분</span>' : '';
+    tr.innerHTML = `
+      <td class="score">${fmt(sc, 0)}</td>
+      <td><span class="badge ${badgeClass(r.road_grade)}">${r.road_grade || '미상'}</span></td>
+      <td class="muted">${r.land_group || '-'}</td>
+      <td>${fmtPct(pb)}</td>
+      <td>${r.news_count ? '📰 ' + r.news_count : '-'}</td>
+      <td>${r.zoning || '-'}</td>
+      <td>${r.area_m2 ? Math.round(r.area_m2 / 3.3058) : '-'}</td>
+      <td>${fmtWon(r.min_bid)}</td>
+      <td><a href="candidate/${r.id}.html">${r.address}</a>${flag}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+document.getElementById('btn-dev').onclick = () => {
+  view = 'dev';
+  document.getElementById('btn-dev').className = 'badge b-ok';
+  document.getElementById('btn-comp').className = 'badge b-gray';
+  render();
+};
+document.getElementById('btn-comp').onclick = () => {
+  view = 'comp';
+  document.getElementById('btn-comp').className = 'badge b-ok';
+  document.getElementById('btn-dev').className = 'badge b-gray';
+  render();
+};
+['f-minscore', 'f-zoning', 'f-mengji'].forEach(id =>
+  document.getElementById(id).addEventListener('input', render));
+
+populateZoningOptions();
+render();
+</script>
+{% endblock %}

@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block content %}
+<a class="back" href="{{ list_link }}">&larr; 목록으로</a>
+
+<div class="card">
+  <h2 style="margin-top:0">{{ r['address'] }}</h2>
+  <p class="muted">{{ r['name'] }}</p>
+  <div class="stat-row">
+    <div class="stat"><div class="k">개발용 점수</div><div class="v">{{ '%.1f'|format(r['score']) if r['score'] is not none else '-' }}</div></div>
+    <div class="stat"><div class="k">토지보상용 점수</div><div class="v">{{ '%.1f'|format(r['comp_score']) if r['comp_score'] is not none else '-' }}</div></div>
+    <div class="stat"><div class="k">용도지역</div><div class="v">{{ r['zoning'] or '-' }}</div></div>
+    <div class="stat"><div class="k">도로접면</div><div class="v">{{ r['road_side'] or '-' }} ({{ r['road_grade'] or '미상' }})</div></div>
+    <div class="stat"><div class="k">지목</div><div class="v">{{ r['jimok'] or '-' }}</div></div>
+    <div class="stat"><div class="k">면적</div><div class="v">{{ '%.0f'|format(r['area_m2']/3.3058) if r['area_m2'] else '-' }}평</div></div>
+    <div class="stat"><div class="k">최저입찰가</div><div class="v">{{ '{:,}'.format(r['min_bid']) + '원' if r['min_bid'] else '-' }}</div></div>
+    <div class="stat"><div class="k">감정가</div><div class="v">{{ '{:,}'.format(r['appraisal']) + '원' if r['appraisal'] else '-' }}</div></div>
+    {% if r['round'] %}<div class="stat"><div class="k">유찰회차</div><div class="v">{{ r['round'] }}회</div></div>{% endif %}
+    {% if r['status'] %}<div class="stat"><div class="k">입찰상태</div><div class="v">{{ r['status'] }}</div></div>{% endif %}
+    {% if r['land_price_m2'] %}<div class="stat"><div class="k">개별공시지가({{ r['land_price_yr'] }})</div><div class="v">{{ '{:,}'.format(r['land_price_m2']|int) }}원/㎡</div></div>{% endif %}
+  </div>
+  <p class="muted">물건관리번호 {{ r['mgmt_no'] }} · 재산유형 {{ r['use_name'] or '' }}</p>
+  {% if '지분' in (r['name'] or '') %}
+  <p style="margin-top:10px"><span class="badge b-danger">⚠ 공유지분 물건</span>
+    <span class="muted">공유자 우선매수신고 위험 — 아래 체크리스트 확인</span></p>
+  {% endif %}
+</div>
+
+<div class="card section">
+  <h3>💰 왜 급매인가</h3>
+  <ul>{% for line in narrative['why'] %}<li>{{ line|mdbold|safe }}</li>{% endfor %}</ul>
+</div>
+
+<div class="card section">
+  <h3>🧭 옥탑방보보스(김종률)라면 이렇게 볼 것</h3>
+  <ul>{% for line in narrative['view'] %}<li>{{ line|mdbold|safe }}</li>{% endfor %}</ul>
+</div>
+
+<div class="card section">
+  <h3>🏛 토지보상용 관점 — 개발 안 하고 수용을 기다린다면</h3>
+  <ul>{% for line in narrative['compensation'] %}<li>{{ line|mdbold|safe }}</li>{% endfor %}</ul>
+</div>
+
+<div class="card section">
+  <h3>📰 개발호재 뉴스</h3>
+  {% if narrative['news'] %}
+  <ul>
+    {% for n in narrative['news'] %}
+    <li><a href="{{ n['link'] }}" target="_blank" rel="noopener">{{ n['title'] }}</a>
+      <div class="muted">{{ n['pub_date'] }} · {{ n['description'] }}</div></li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">매칭된 뉴스가 없습니다(또는 뉴스 API 미설정). 아래 링크로 직접 확인해보세요.</p>
+  {% endif %}
+</div>
+
+<div class="card section">
+  <h3>🔗 지자체 고시·개발계획 바로가기</h3>
+  <ul>
+    {% for l in gosi_links %}
+    <li><a href="{{ l['url'] }}" target="_blank" rel="noopener">{{ l['label'] }}</a></li>
+    {% endfor %}
+  </ul>
+</div>
+
+<div class="card section">
+  <h3>⚖️ 낙찰 후 확인·해결 (이주왕식 공법 체크리스트)</h3>
+  <p class="muted" style="margin-top:-4px">등기부에 안 보이는 공법상 제약까지 — 낙찰되면 이 순서로 확인하세요.</p>
+
+  <div style="background:#faf6ee;border:1px solid #eadfc4;border-radius:8px;padding:10px 12px;margin:10px 0 14px">
+    <div style="font-size:12px;color:var(--muted);margin-bottom:6px">🔍 직접 확인하는 링크(이 프로그램이 자동판정 못 하는 부분)</div>
+    {% for l in narrative['post_award']['links'] %}
+    <div style="margin-bottom:6px">
+      <a href="{{ l['url'] }}" target="_blank" rel="noopener"><strong>{{ l['label'] }}</strong></a>
+      <div class="muted" style="font-size:12px">{{ l['note'] }}</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <h4 style="margin:14px 0 6px;font-size:13px;color:var(--muted)">경매·공매 공통</h4>
+  <ul>{% for line in narrative['post_award']['common'] %}<li>{{ line|mdbold|safe }}</li>{% endfor %}</ul>
+
+  {% if narrative['post_award']['ownership'] %}
+  <h4 style="margin:14px 0 6px;font-size:13px;color:var(--danger)">⚠ 공유지분 주의</h4>
+  <ul>{% for line in narrative['post_award']['ownership'] %}<li>{{ line|mdbold|safe }}</li>{% endfor %}</ul>
+  {% endif %}
+
+  {% if narrative['post_award']['build_purpose'] %}
+  <h4 style="margin:14px 0 6px;font-size:13px;color:var(--muted)">🏗 건축 목적이라면</h4>
+  <ul>{% for line in narrative['post_award']['build_purpose'] %}<li>{{ line|mdbold|safe }}</li>{% endfor %}</ul>
+  {% endif %}
+
+  {% if narrative['post_award']['compensation_purpose'] %}
+  <h4 style="margin:14px 0 6px;font-size:13px;color:var(--muted)">🏛 토지보상 목적이라면</h4>
+  <ul>{% for line in narrative['post_award']['compensation_purpose'] %}<li>{{ line|mdbold|safe }}</li>{% endfor %}</ul>
+  {% endif %}
+</div>
+
+<div class="card section">
+  <h3>✅ 직접 확인할 것</h3>
+  <ul>{% for line in narrative['checklist'] %}<li>{{ line|mdbold|safe }}</li>{% endfor %}</ul>
+</div>
+{% endblock %}

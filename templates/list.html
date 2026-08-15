@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <div style="display:flex; gap:8px; margin-bottom:14px;">
+    <a href="?view=dev" class="badge {% if view != 'comp' %}b-ok{% else %}b-gray{% endif %}" style="text-decoration:none">🏗 개발용 관점</a>
+    <a href="?view=comp" class="badge {% if view == 'comp' %}b-ok{% else %}b-gray{% endif %}" style="text-decoration:none">🏛 토지보상용 관점</a>
+  </div>
+  <form class="filters" method="get">
+    <input type="hidden" name="view" value="{{ view }}">
+    <div>
+      <label>최소 점수</label>
+      <input type="number" name="min_score" value="{{ min_score }}" step="1" style="width:90px">
+    </div>
+    <div>
+      <label>용도지역</label>
+      <select name="zoning">
+        <option value="">전체</option>
+        {% for z in zonings %}
+        <option value="{{ z }}" {% if z == zoning %}selected{% endif %}>{{ z }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label><input type="checkbox" name="exclude_mengji" {% if exclude_mengji %}checked{% endif %}> 맹지 제외</label>
+    </div>
+    <div>
+      <button type="submit">필터 적용</button>
+    </div>
+  </form>
+  <p class="muted">전체 {{ total }}건 중 {{ shown }}건 표시
+    ({{ '토지보상용' if view == 'comp' else '개발용' }} 점수순)</p>
+</div>
+
+<div class="card">
+<table>
+<thead><tr>
+  <th>{{ '보상점수' if view == 'comp' else '개발점수' }}</th><th>도로</th><th>지가군</th>
+  <th>저평가</th><th>뉴스</th><th>용도</th><th>면적(평)</th><th>최저입찰</th><th>주소</th>
+</tr></thead>
+<tbody>
+{% for r in rows %}
+{% set sc = r['comp_score'] if view == 'comp' else r['score'] %}
+{% set pb = r['comp_discount'] if view == 'comp' else r['pct_below'] %}
+<tr onclick="location.href='{{ link_prefix }}{{ r['id'] }}{{ link_suffix }}'" style="cursor:pointer">
+  <td class="score">{{ '%.0f'|format(sc) if sc is not none else '-' }}</td>
+  <td>
+    {% set g = r['road_grade'] %}
+    {% if g == '건축양호' %}<span class="badge b-ok">{{ g }}</span>
+    {% elif g == '확인필요' %}<span class="badge b-warn">{{ g }}</span>
+    {% elif g == '건축애로' %}<span class="badge b-danger">{{ g }}</span>
+    {% elif g == '맹지' %}<span class="badge b-block">{{ g }}</span>
+    {% else %}<span class="badge b-gray">{{ g or '미상' }}</span>{% endif %}
+  </td>
+  <td class="muted">{{ r['land_group'] or '-' }}</td>
+  <td>{{ '%+.0f%%'|format(pb) if pb is not none else '-' }}</td>
+  <td>{{ '📰 ' + r['news_count']|string if r['news_count'] else '-' }}</td>
+  <td>{{ r['zoning'] or '-' }}</td>
+  <td>{{ '%.0f'|format(r['area_m2']/3.3058) if r['area_m2'] else '-' }}</td>
+  <td>{{ '{:,}'.format(r['min_bid']) + '원' if r['min_bid'] else '-' }}</td>
+  <td><a href="{{ link_prefix }}{{ r['id'] }}{{ link_suffix }}">{{ r['address'] }}</a>
+    {% if '지분' in (r['name'] or '') %}<span class="badge b-danger" title="공유지분 물건">⚠지분</span>{% endif %}
+  </td>
+</tr>
+{% else %}
+<tr><td colspan="9" class="muted">조건에 맞는 후보가 없습니다.</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+{% endblock %}

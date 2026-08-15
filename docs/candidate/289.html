@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>김종률식 토지 급매 탐지기</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --card: #ffffff; --text: #1a1a1a; --muted: #6b6b6b;
+    --border: #e5e3de; --accent: #2f6f4f;
+    --ok: #1f8a4c; --warn: #b8860b; --danger: #c0392b; --block: #8e44ad; --gray: #888;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+         background: var(--bg); color: var(--text); margin: 0; padding: 0 0 60px; }
+  header { background: var(--accent); color: white; padding: 18px 28px; }
+  header h1 { margin: 0; font-size: 20px; }
+  header p { margin: 4px 0 0; font-size: 13px; opacity: .85; }
+  .wrap { max-width: 1100px; margin: 24px auto; padding: 0 20px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+          padding: 18px 20px; margin-bottom: 16px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; }
+  tr:hover td { background: #fafaf7; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px;
+           font-weight: 600; color: white; white-space: nowrap; }
+  .b-ok { background: var(--ok); }
+  .b-warn { background: var(--warn); }
+  .b-danger { background: var(--danger); }
+  .b-block { background: var(--block); }
+  .b-gray { background: var(--gray); }
+  .filters { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; margin-bottom: 14px; }
+  .filters label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .filters input, .filters select { padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; }
+  .filters button { padding: 7px 16px; border: none; border-radius: 6px; background: var(--accent);
+                     color: white; cursor: pointer; font-size: 13px; }
+  .score { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .section h3 { margin: 0 0 10px; font-size: 15px; }
+  .section ul { margin: 0; padding-left: 20px; }
+  .section li { margin-bottom: 10px; line-height: 1.65; font-size: 14px; }
+  .stat-row { display: flex; gap: 28px; flex-wrap: wrap; margin-bottom: 6px; }
+  .stat .k { font-size: 12px; color: var(--muted); }
+  .stat .v { font-size: 16px; font-weight: 600; }
+  .back { display: inline-block; margin-bottom: 14px; }
+  strong { color: var(--accent); }
+  @media (max-width: 700px) {
+    .wrap { margin: 14px auto; padding: 0 12px; }
+    header { padding: 14px 16px; }
+    header h1 { font-size: 17px; }
+    header p { font-size: 12px; }
+    table { display: block; overflow-x: auto; white-space: nowrap; }
+    .card { padding: 14px 15px; margin-bottom: 12px; }
+    .section li { font-size: 15px; line-height: 1.7; }
+    .stat-row { gap: 16px 22px; }
+    .stat .v { font-size: 15px; }
+    h2 { font-size: 18px; }
+    h3 { font-size: 15px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>김종률식 토지 급매 탐지기</h1>
+  <p>경기도 공매 물건 · 시세 기준선 · 건축가능성 판정</p>
+</header>
+<div class="wrap">
+
+<a class="back" href="../index.html">&larr; 목록으로</a>
+
+<div class="card">
+  <h2 style="margin-top:0">경기도 파주시 문산읍</h2>
+  <p class="muted">경기도 파주시 문산읍 선유리 902-10, 902-11, 903-30, 903-34, 903-33, 902-23, 902-22, 903-37 대지</p>
+  <div class="stat-row">
+    <div class="stat"><div class="k">개발용 점수</div><div class="v">-5.0</div></div>
+    <div class="stat"><div class="k">토지보상용 점수</div><div class="v">-</div></div>
+    <div class="stat"><div class="k">용도지역</div><div class="v">-</div></div>
+    <div class="stat"><div class="k">도로접면</div><div class="v">- (미상)</div></div>
+    <div class="stat"><div class="k">지목</div><div class="v">대지</div></div>
+    <div class="stat"><div class="k">면적</div><div class="v">30평</div></div>
+    <div class="stat"><div class="k">최저입찰가</div><div class="v">77,709,469원</div></div>
+    <div class="stat"><div class="k">감정가</div><div class="v">113,850,000원</div></div>
+    <div class="stat"><div class="k">유찰회차</div><div class="v">12회</div></div>
+    <div class="stat"><div class="k">입찰상태</div><div class="v">입찰준비중</div></div>
+    
+  </div>
+  <p class="muted">물건관리번호 2026-0700-037083 · 재산유형 대지</p>
+  
+</div>
+
+<div class="card section">
+  <h3>💰 왜 급매인가</h3>
+  <ul><li>이 지역·용도의 실거래가 표본이 부족해 정량적 저평가율은 계산되지 않았습니다.</li><li>감정가 113,850,000원 대비 최저입찰가는 <strong>68%</strong> 수준입니다.</li><li><strong>12회 유찰</strong>된 물건입니다. 반복 유찰은 (a) 수요가 없어서일 수도, (b) 아직 아무도 눈치채지 못한 저평가일 수도 있습니다 — 유찰 사유(도로·형상·용도 문제 등)를 구분해서 봐야 합니다.</li></ul>
+</div>
+
+<div class="card section">
+  <h3>🧭 옥탑방보보스(김종률)라면 이렇게 볼 것</h3>
+  <ul><li><strong>도로접면(미상)</strong>: 도로접면 정보가 조회되지 않았습니다. 지적도·스카이뷰를 함께 보라는 그의 조언대로, 직접 지도에서 진입로 여부부터 확인해야 합니다.</li></ul>
+</div>
+
+<div class="card section">
+  <h3>🏛 토지보상용 관점 — 개발 안 하고 수용을 기다린다면</h3>
+  <ul><li>개별공시지가 데이터가 없어(또는 최저입찰가 정보 부족) 토지보상용 평가를 계산할 수 없습니다.</li></ul>
+</div>
+
+<div class="card section">
+  <h3>📰 개발호재 뉴스</h3>
+  
+  <ul>
+    
+    <li><a href="https://www.ekn.kr/web/view.php?key=20260721028514171" target="_blank" rel="noopener">[패트롤] 경기도-동두천시-의정부시-파주시-포천시</a>
+      <div class="muted">Tue, 21 Jul 2026 05:34:00 +0900 · 파주시는 2023년 운정어린이물놀이장(목동동 953) 개장을 시작으로, 2024년 문산어린이물놀이장(문산읍... 토지와 개발계획 연관성 여부 의혹 제기. ○ 사실관계: 기사에서 언급된 최초 토지 취득 시점은 2022년 5월로... </div></li>
+    
+    <li><a href="https://www.donga.com/news/Society/article/all/20260720/134331516/2" target="_blank" rel="noopener">파주 평화경제특구 민간사업자 사전 공모</a>
+      <div class="muted">Tue, 21 Jul 2026 04:31:00 +0900 · 사업 대상지는 월롱면과 파주읍, 문산읍 일원 약 7.6㎢다. 파주시는 이곳을 6개 단위 사업 지구로 나눠 개발을 추진한다. 주요 개발계획은 △문화·관광지구(복합리조트·체육시설) △남북물류지구(수도권 북부 내륙 거점... </div></li>
+    
+    <li><a href="https://www.donga.com/news/Society/article/all/20260720/134326190/1" target="_blank" rel="noopener">경기 파주시, 평화경제특구 민간 사업시행예정자 공모</a>
+      <div class="muted">Mon, 20 Jul 2026 15:37:00 +0900 · 사업 대상지는 월롱면과 파주읍, 문산읍 일원 약 7.6㎢다. 파주시는 이곳을 6개 단위 사업 지구로 나눠 개발을 추진한다. 주요 개발계획은 △문화·관광지구(복합리조트·체육시설) △남북물류지구(수도권 북부 내륙 거점... </div></li>
+    
+    <li><a href="https://www.tournews21.com/news/articleView.html?idxno=138774" target="_blank" rel="noopener">파주시, 평화경제특구 민간 참여 본격화…손배찬 시장, &#39;평화경제도시&#39;...</a>
+      <div class="muted">Thu, 16 Jul 2026 21:50:00 +0900 · 전에 개발사업에 참여할 민간 주체를 확보하기 위한 사전 단계다. 대상지는 월롱면과 파주읍, 문산읍 일원 약... 사업시행자의 개발계획에 따라 확정된다. 파주시는 이번 공모가 개발사업 시행권을 부여하는 절차는... </div></li>
+    
+    <li><a href="https://www.kmib.co.kr/article/view.asp?arcid=0030121295&amp;code=61122013&amp;cp=nv" target="_blank" rel="noopener">파주시, 평화경제특구 민간 참여 본격화…사전 공모 추진</a>
+      <div class="muted">Thu, 16 Jul 2026 17:50:00 +0900 · 개발계획에 반영할 사업시행예정자를 사전에 확보하기 위해 마련됐다. 대상지는 월롱면·파주읍·문산읍... 파주시는 평화경제특구를 산업·관광·주거 기능이 융합된 복합개발 형태로 조성할 계획이다. 사업 규모를... </div></li>
+    
+  </ul>
+  
+</div>
+
+<div class="card section">
+  <h3>🔗 지자체 고시·개발계획 바로가기</h3>
+  <ul>
+    
+    <li><a href="https://search.naver.com/search.naver?query=%ED%8C%8C%EC%A3%BC%EC%8B%9C%20%EB%AC%B8%EC%82%B0%EC%9D%8D%20%EA%B3%A0%EC%8B%9C%EA%B3%B5%EA%B3%A0" target="_blank" rel="noopener">고시공고 검색</a></li>
+    
+    <li><a href="https://search.naver.com/search.naver?query=%ED%8C%8C%EC%A3%BC%EC%8B%9C%20%EB%AC%B8%EC%82%B0%EC%9D%8D%20%EB%8F%84%EC%8B%9C%EA%B3%84%ED%9A%8D%20%EC%A7%80%EA%B5%AC%EB%8B%A8%EC%9C%84%EA%B3%84%ED%9A%8D" target="_blank" rel="noopener">도시계획 확인</a></li>
+    
+    <li><a href="https://search.naver.com/search.naver?query=%ED%8C%8C%EC%A3%BC%EC%8B%9C%20%EB%AC%B8%EC%82%B0%EC%9D%8D%20%EA%B0%9C%EB%B0%9C%EA%B3%84%ED%9A%8D" target="_blank" rel="noopener">개발계획 뉴스 더보기</a></li>
+    
+  </ul>
+</div>
+
+<div class="card section">
+  <h3>⚖️ 낙찰 후 확인·해결 (이주왕식 공법 체크리스트)</h3>
+  <p class="muted" style="margin-top:-4px">등기부에 안 보이는 공법상 제약까지 — 낙찰되면 이 순서로 확인하세요.</p>
+
+  <div style="background:#faf6ee;border:1px solid #eadfc4;border-radius:8px;padding:10px 12px;margin:10px 0 14px">
+    <div style="font-size:12px;color:var(--muted);margin-bottom:6px">🔍 직접 확인하는 링크(이 프로그램이 자동판정 못 하는 부분)</div>
+    
+    <div style="margin-bottom:6px">
+      <a href="https://www.onbid.co.kr/op/cltrpbancinf/pbanc/pbancdtlinf/PbancDtlInqController/mvmnPbancDtl.do?cltrScrnGrpCd=0&amp;cltrPrptDivCd=5&amp;onbidCltrno=2035311&amp;onbidPbancNo=895543&amp;pbctNo=10079305&amp;pbctCdtnNo=6089982" target="_blank" rel="noopener"><strong>온비드 공고 원문 열기 (유치권·특별매각조건·감정평가서)</strong></a>
+      <div class="muted" style="font-size:12px">이 물건의 실제 공고 상세페이지입니다. 유치권 신고, 법정지상권 성립 여지, 명도책임 등 특별매각조건이 여기 명시됩니다.</div>
+    </div>
+    
+    <div style="margin-bottom:6px">
+      <a href="https://www.iros.go.kr" target="_blank" rel="noopener"><strong>인터넷등기소에서 등기부등본 열람 (근저당권·대항력 있는 점유자 확인)</strong></a>
+      <div class="muted" style="font-size:12px">건당 열람 수수료(약 700~1,000원)가 듭니다. 근저당권·가압류·가처분 등 말소기준권리와 전입일자 대조는 등기부등본에서만 확인할 수 있습니다.</div>
+    </div>
+    
+  </div>
+
+  <h4 style="margin:14px 0 6px;font-size:13px;color:var(--muted)">경매·공매 공통</h4>
+  <ul><li><strong>공매는 인도명령 제도가 없습니다.</strong> 법원경매는 잔금납부 후 6개월 이내 인도명령을 신청하면 2~3주 만에 점유자를 내보낼 수 있지만, 온비드 공매(이 프로그램이 다루는 물건 전부)는 국세징수법 적용이라 인도명령 규정 자체가 없습니다. 점유자가 안 나가면 <strong>명도소송(5~6개월 이상)</strong> 밖에 방법이 없다는 걸 낙찰가에 미리 반영해야 합니다.</li><li><strong>유치권</strong>: 이 프로그램은 유치권 신고 유무를 자동으로 알 수 없습니다 — 아래 '온비드 공고 원문' 링크를 열어 특별매각조건·감정평가서에 유치권 신고가 명시돼 있는지 직접 확인하세요. 있다면 공사계약서·세금계산서·대금지급내역 같은 객관적 증거가 있는 진짜 채권인지, 낙찰가를 깎으려는 허위 신고인지부터 구분해야 합니다.</li><li><strong>법정지상권</strong>: 토지만 낙찰받는 경우, 그 위에 건물이 있고 토지·건물 소유자가 달랐던 이력이 있으면 건물 소유자에게 법정지상권이 성립해 철거시키지 못할 수 있습니다. 지적도·스카이뷰로 지상 건축물 유무부터 확인하고, 확실한 건 등기부 이력(아래 등기부등본 링크)으로 대조하세요.</li><li><strong>저당권·대항력 있는 점유자</strong>: 근저당권(말소기준권리)과 그보다 먼저 전입·인도받은 임차인이 있는지는 <strong>등기부등본에만</strong> 나옵니다. 이 프로그램의 어떤 데이터로도 대체 확인이 안 되니, 입찰 전 반드시 아래 등기부등본 링크에서 열람하세요(유료).</li></ul>
+
+  
+
+  
+
+  
+</div>
+
+<div class="card section">
+  <h3>✅ 직접 확인할 것</h3>
+  <ul><li>지적도와 스카이뷰(위성지도)를 같이 보고 실제 진입로가 있는지 확인 (그의 노트: "토지 지적도상으로도 보고, 스카이뷰로도 보기. 현황상 도로가 있을 수도 있다")</li><li>경기도 파주시 문산읍 관할 지자체 도시계획조례에서 정확한 건폐율·용적률 확인 (법정 상한이 아니라 조례가 실제 기준)</li><li>인근 개발계획(도로 신설·확장, 택지지구, 산업단지) 여부 — 도시기본계획·지구단위계획 확인</li><li>온비드(www.onbid.co.kr)에서 물건관리번호 2026-0700-037083 로 검색해 공고 원문·유치권/법정지상권 신고 여부 확인</li></ul>
+</div>
+
+</div>
+</body>
+</html>
