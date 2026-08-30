@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import json
 import time
 import xml.etree.ElementTree as ET
 
@@ -57,8 +58,56 @@ def to_int(s: str | None) -> int | None:
         return None
 
 
+def _parse_items_json(text: str) -> list[dict]:
+    """JSON 응답(K-apt AptListService4 계열)을 XML 경로와 같은 규약으로 파싱.
+
+    실거래가 API 는 XML 만 주지만 K-apt 단지목록은 JSON 만 준다(`_type=xml` 무시).
+    두 계열을 한 함수로 받기 위해, JSON 도 `[{필드: 값}, …]` 로 평탄화해서
+    돌려준다. resultCode 해석 규칙은 XML 쪽과 동일하게 맞춘다.
+    """
+    try:
+        doc = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise MolitError(f"JSON 파싱 실패: {e}\n앞부분: {text[:200]}") from e
+
+    resp = doc.get("response", doc)
+    header = resp.get("header") or {}
+    rc = str(header.get("resultCode", "")).strip()
+    msg = header.get("resultMsg") or "?"
+    if rc and rc not in ("00", "000"):
+        if rc in ("03",):
+            return []
+        if rc in ("30", "31", "20", "22"):
+            raise MolitAuthError(f"resultCode={rc} msg={msg}")
+        raise MolitError(f"resultCode={rc} msg={msg}")
+
+    body = resp.get("body") or {}
+    # 응답 모양이 세 가지다:
+    #   단지목록(AptListService4)      → body.items = […]
+    #   기본정보(AptBasisInfoServiceV5) → body.item  = {…}   (단수 dict)
+    #   일부 구형 API                  → body.items = {"item": […]}
+    items = body.get("items")
+    if isinstance(items, dict):          # {"item": …} 래핑
+        items = items.get("item")
+    if not items:
+        items = body.get("item")
+    if not items:                        # None / "" / [] / {}
+        return []
+    if isinstance(items, dict):          # 단수 레코드
+        items = [items]
+
+    # None 값은 빈 문자열로 — pick() 이 XML 경로와 동일하게 동작하도록
+    return [{k: ("" if v is None else v) for k, v in row.items()} for row in items]
+
+
 def parse_items(xml_text: str) -> list[dict]:
-    """<item> 하위 태그를 통째로 dict 로. 에러 응답이면 예외."""
+    """<item> 하위 태그를 통째로 dict 로. 에러 응답이면 예외.
+
+    JSON 응답이면 `_parse_items_json` 으로 넘긴다. 인증 오류는 JSON API 라도
+    XML(<OpenAPI_ServiceResponse>)로 오기 때문에 본문 첫 글자로 갈라야 한다.
+    """
+    if xml_text.lstrip()[:1] in ("{", "["):
+        return _parse_items_json(xml_text)
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError as e:

@@ -25,13 +25,23 @@ SOURCE_KEY = "kapt_complex"
 
 # 시군구 단지목록 — 앞에서부터 시도한다.
 URL_LIST = (
+    # ✅ 2026-08-31 라이브 검증됨 (인천 부평구 159단지, 전국 22,288단지).
+    #    JSON 응답, 필드: kaptCode/kaptName/bjdCode/as1~as4
+    "https://apis.data.go.kr/1613000/AptListService4/getSigunguAptList4",
     "https://apis.data.go.kr/1613000/AptListService3/getSigunguAptList3",
     "https://apis.data.go.kr/1613000/AptListService2/getSigunguAptList2",
     "https://apis.data.go.kr/1611000/AptListService2/getSigunguAptList",
 )
 
 # 단지 기본정보
+# ⚠ 2026-08-31 확인: V2/V3/V4 전부 NO_OPENAPI_SERVICE_ERROR.
+#   '공동주택 기본 정보제공 서비스'(data.go.kr/data/15058453)는 단지목록과 별개 API 라
+#   따로 활용신청이 필요하다. 승인 후 그 화면의 엔드포인트를 맨 앞에 추가할 것.
+#   그때까지는 `collect complexes --no-basis` 로 단지목록만 받는다.
 URL_BASIS = (
+    # ✅ 2026-08-31 라이브 검증됨. JSON, response.body.item(단수).
+    "https://apis.data.go.kr/1613000/AptBasisInfoServiceV5/getAphusBassInfoV5",
+    "https://apis.data.go.kr/1613000/AptBasisInfoServiceV4/getAphusBassInfoV4",
     "https://apis.data.go.kr/1613000/AptBasisInfoServiceV3/getAphusBassInfoV3",
     "https://apis.data.go.kr/1613000/AptBasisInfoServiceV2/getAphusBassInfoV2",
     "https://apis.data.go.kr/1611000/AptBasisInfoService1/getAphusBassInfo",
@@ -116,6 +126,11 @@ def fetch_complex_list(lawd_cd: str, *, num_of_rows: int = 1000,
     return rows
 
 
+def _positive(n: int | None) -> int | None:
+    """0 이하는 미입력으로 본다. 세대수·동수는 0 이 될 수 없는 값이다."""
+    return n if n and n > 0 else None
+
+
 def parse_basis(raw: dict) -> dict:
     """기본정보 <item> → complex 행 조각."""
     def f(name: str) -> str | None:
@@ -137,8 +152,12 @@ def parse_basis(raw: dict) -> dict:
         # ⚠ kaptdaCnt 는 그 단지의 공동주택 세대수다. 주상복합에서 오피스텔이
         # 섞여 들어올 여지가 있어, 확인되기 전까지 officetel_households 는 건드리지 않는다
         # (합산 컬럼이 아예 없으므로 잘못 더해질 일은 없다).
-        "apt_households": molit.to_int(f("households")),
-        "building_count": molit.to_int(f("buildings")),
+        # ⚠ kaptdaCnt 가 0 으로 오는 단지가 실제로 있다(예: A10020695 부평하우스토리,
+        #   hoCnt=211 인데 kaptdaCnt=0.0). 이건 "0세대"가 아니라 미입력이다.
+        #   0 을 그대로 저장하면 "1,000세대 이상" 필터에서 확인 없이 탈락한다.
+        #   알 수 없는 것은 None(확인 불가)으로 둔다 — 검증규칙 26-1 이 그때만 제대로 동작한다.
+        "apt_households": _positive(molit.to_int(f("households"))),
+        "building_count": _positive(molit.to_int(f("buildings"))),
         "approval_date": use_date,
         "approval_year": approval_year,
         "gross_floor_area_m2": molit.to_float(f("gross_area")),
