@@ -40,6 +40,12 @@
     python -m apt_engine.cli catalyst show "동아1단지"
     python -m apt_engine.cli market "동아1단지" --band 84         # 호가·괴리·변화·시장압력
 
+    # 재건축 — 1차는 전국 자동, 2차는 상위 후보만 수기
+    python -m apt_engine.cli redev screen --lawd 28237          # 1차 스크리닝
+    python -m apt_engine.cli redev template project 정비사업.csv  # 2차 입력 서식
+    python -m apt_engine.cli redev import  project 정비사업.csv
+    python -m apt_engine.cli redev show "동아1단지" --price 6.2  # 분담금 3구간·전환원가
+
     # 점검
     python -m apt_engine.cli status
     python -m apt_engine.cli validate
@@ -61,6 +67,9 @@ from apt_engine.db import migrate as mig
 from apt_engine.db.connection import get_conn
 from apt_engine.repo import apt as repo
 from apt_engine.price import snapshot as snap_mod
+from apt_engine.redev import far as redev_far
+from apt_engine.redev import feasibility as redev_feas
+from apt_engine.redev import screening as redev_screening
 from apt_engine.validation import rules as validation
 
 
@@ -899,6 +908,365 @@ def cmd_catalyst(args):
 
 # ── 파서 ──────────────────────────────────────────────────────────────
 
+def _resolve_complex(conn, query, complex_id):
+    """CLI 공통 — 이름으로 단지 하나를 고른다. 애매하면 목록만 보여준다."""
+    if complex_id:
+        row = conn.execute("SELECT * FROM complex WHERE id=?", (complex_id,)).fetchone()
+        if row is None:
+            print(f"단지 #{complex_id} 를 찾을 수 없습니다.")
+        return row
+    matches = repo.find_complexes(conn, query)
+    if not matches:
+        print(f"'{query}' 로 찾은 단지가 없습니다.")
+        return None
+    if len(matches) > 1:
+        print(f"'{query}' 로 {len(matches)}개 단지가 검색됐습니다. --complex-id 로 지정하세요.\n")
+        for m in matches[:20]:
+            print(f"  [{m['id']:>6}] {m['name']:<28s} {regions.name_of(m['lawd_cd']):16s} "
+                  f"{m['apt_households'] or '?'}세대 {m['approval_year'] or '?'}년")
+        return None
+    return conn.execute("SELECT * FROM complex WHERE id=?", (matches[0]["id"],)).fetchone()
+
+
+def _redev_assumptions(conn, args, row, far_basis):
+    """CLI 인자 + DB 참고치로 가정 한 벌을 만든다. 빠진 게 있으면 (None, 사유들)."""
+    from apt_engine import area as area_mod, units
+    from apt_engine.redev import feasibility as feas
+
+    missing, notes = [], []
+
+    # ── 평당 공사비 ──
+    cost_per_py, cost_year, other_rate = args.cost_per_py, args.cost_base_year, None
+    if cost_per_py:
+        cost_per_py = int(units.from_manwon(cost_per_py))
+        if not cost_year:
+            missing.append("--cost-base-year (공사비 기준연도 없이 쓰지 않습니다)")
+    else:
+        ref = feas.cost_reference(conn, region=regions.sido_of(row["lawd_cd"]),
+                                  allow_unverified=args.allow_unverified)
+        if ref is None:
+            missing.append("평당 공사비 — `redev template cost` 로 넣거나 --cost-per-py(만원/평)")
+        else:
+            cost_per_py, cost_year, other_rate, ev = ref
+            notes.append(f"공사비 {cost_per_py:,}원/평 ({cost_year}년 기준, {ev.source})")
+    if args.other_cost_rate is not None:
+        other_rate = args.other_cost_rate
+    if other_rate is None and cost_per_py:
+        missing.append("기타사업비율 — cost 표의 other_cost_rate 또는 --other-cost-rate")
+
+    # ── 일반분양가 ──
+    new_price = None
+    if args.new_price_py:
+        new_price = int(round(units.from_manwon(args.new_price_py) / units.PYEONG_M2))
+        notes.append(f"일반분양가 {args.new_price_py:g}만원/평 → {new_price:,}원/㎡")
+    elif args.new_price_m2:
+        new_price = int(args.new_price_m2)
+    else:
+        missing.append("일반분양가 — --new-price-py(만원/평) 또는 --new-price-m2(원/㎡)")
+
+    # ── 세대당 분양면적 ──
+    unit_area = args.new_unit_area
+    if not unit_area:
+        band = args.band or area_mod.DEFAULT_BAND
+        try:
+            exclusive = float(band)
+        except ValueError:
+            exclusive = None
+        if exclusive:
+            unit_area = round(exclusive * feas.SUPPLY_AREA_RATIO, 1)
+            notes.append(f"세대당 분양면적 {unit_area:g}㎡ = 전용 {exclusive:g}㎡ × "
+                         f"{feas.SUPPLY_AREA_RATIO} (가정)")
+        else:
+            missing.append("--new-unit-area (신축 세대당 분양면적 ㎡)")
+
+    # ── 조합원 종전자산 ──
+    prior = None
+    if args.prior_asset:
+        prior = int(units.from_eok(args.prior_asset))
+    else:
+        band = args.band or area_mod.DEFAULT_BAND
+        snap = repo.latest_price_snapshot(conn, row["id"], band)
+        if snap and snap["representative_price"]:
+            prior = int(snap["representative_price"])
+            notes.append(
+                f"종전자산을 대표가격 {units.fmt_eok(prior)} 로 갈음 "
+                f"({snap['as_of_ym']} {band}㎡) — 감정평가액은 통상 이보다 낮아 "
+                f"실제 추가분담금은 더 클 수 있습니다")
+        else:
+            missing.append("조합원 종전자산 — --prior-asset(억) 또는 대표가격 스냅샷")
+
+    member_count = args.member_count or row["apt_households"]
+    if not member_count:
+        missing.append("조합원수 — --member-count 또는 단지 세대수")
+
+    project = None
+    rental_ratio = args.rental_ratio
+    from apt_engine.redev import stage as stage_mod
+    project = stage_mod.load(conn, row["id"])
+    if project:
+        if rental_ratio is None and project.rental_ratio is not None:
+            rental_ratio = project.rental_ratio
+        if not args.member_count and project.member_count:
+            member_count = project.member_count
+
+    if missing:
+        return None, missing, notes, project
+
+    a = feas.Assumptions(
+        far=far_basis.far, far_kind=far_basis.kind,
+        cost_per_py=cost_per_py, cost_base_year=cost_year,
+        new_price_per_m2=new_price, avg_new_unit_area_m2=unit_area,
+        construction_area_factor=args.construction_factor,
+        other_cost_rate=other_rate, member_discount=args.member_discount,
+        prior_asset_per_member=prior, member_count=int(member_count),
+        rental_ratio=rental_ratio or 0.0,
+        prior_asset_total=(project.prior_asset_total if project else None))
+    return a, [], notes, project
+
+
+def cmd_redev(args):
+    """재건축 사업성 — 1차 스크리닝과 2차 정밀계산 (PHASE 6)."""
+    import json
+    from apt_engine import area as area_mod, units
+    from apt_engine.redev import (conversion, far as far_mod, feasibility as feas,
+                                  scenario as scen, screening, stage as stage_mod)
+    from apt_engine.repo import redev as redev_repo
+
+    if args.action == "template":
+        if not args.kind or not args.path:
+            sys.exit("사용법: redev template <far|project|duration|cost|landarea> <파일>")
+        path = redev_repo.write_template(args.kind, args.path)
+        print(f"서식을 만들었습니다: {path}")
+        if args.kind == "far":
+            print("★ kind 칸을 반드시 구분해 적으세요 — 법정상한/조례/정비계획/역세권특례.\n"
+                  "  법정 최대 용적률을 사업 용적률로 쓰면 사업성이 실제보다 크게 나옵니다.")
+        if args.kind == "landarea":
+            print("★ 대지면적은 이 엔진에서 가장 민감한 입력입니다. 건축물대장 총괄표제부\n"
+                  "  (정부24 · 세움터)의 대지면적을 그대로 적고 출처를 남기세요.")
+        return
+
+    if args.action == "import":
+        if not args.kind or not args.path:
+            sys.exit("사용법: redev import <far|project|duration|cost|landarea> <파일>")
+        with get_conn(args.db) as conn:
+            try:
+                if args.kind == "project":
+                    s = redev_repo.import_projects(conn, args.path)
+                elif args.kind == "landarea":
+                    s = redev_repo.import_land_area(conn, args.path)
+                else:
+                    s = redev_repo.import_csv(conn, args.kind, args.path)
+            except redev_repo.RedevImportError as e:
+                sys.exit(f"파일에 문제가 있습니다:\n  {e}")
+        print("  ".join(f"{k} {v}" for k, v in s.items()))
+        return
+
+    if args.action == "status":
+        with get_conn(args.db) as conn:
+            cov = redev_repo.coverage(conn)
+        print("PHASE 6 입력 현황 (전체 / 검증됨)")
+        for kind, c in cov.items():
+            mark = "OK" if c["verified"] else ("미검증" if c["total"] else "비어 있음")
+            print(f"  {kind:12s} {c['total']:>6,} / {c['verified']:>6,}   {mark}")
+        print("\n검증되지 않은 값으로는 계산하지 않습니다. `--allow-unverified` 로 강제할 수는\n"
+              "있지만 그 결과에는 '미검증' 표시가 붙습니다.")
+        return
+
+    if args.action == "screen":
+        as_of = args.as_of or _today()
+        with get_conn(args.db) as conn:
+            found = screening.screen(conn, as_of=as_of, lawd_cd=args.lawd,
+                                     min_age=args.min_age, max_far=args.max_far)
+            saved = screening.save(conn, found, as_of=as_of)
+        print(f"1차 스크리닝 (기준일 {as_of}) — 통과 {saved}개")
+        print(f"  조건: 사용승인 {args.min_age}년 이상 · 현재 용적률 {args.max_far:g}% 이하 · "
+              f"아파트 {screening.MIN_HOUSEHOLDS}세대 이상")
+        no_land = sum(1 for c in found if c.land_share_m2 is None)
+        if no_land:
+            print(f"  ※ {no_land}개 단지는 대지면적이 없어 대지지분을 뺀 점수입니다 — "
+                  f"낮은 게 아니라 자료가 없는 것입니다.")
+        print(f"\n{'순위':>4} {'점수':>6}  {'단지':<24s} {'지역':<14s} {'연식':>4} "
+              f"{'용적률':>7} {'대지지분':>9}  상태")
+        for i, c in enumerate(found[:args.limit], start=1):
+            share = f"{c.land_share_m2:.1f}㎡" if c.land_share_m2 else "확인 불가"
+            far = f"{c.current_far:g}%" if c.current_far else "미상"
+            print(f"{i:>4} {c.score:>6.3f}  {c.name[:24]:<24s} "
+                  f"{regions.name_of(c.lawd_cd)[:14]:<14s} {c.age_years:>3}년 "
+                  f"{far:>7} {share:>9}  {c.manual_status}")
+        print("\n여기까지가 1차입니다. 사업성 금액은 만들지 않았습니다 —\n"
+              "상위 후보에 대해 `redev template project/landarea` 로 정비계획·대지면적을\n"
+              "넣은 뒤 `redev show` 를 실행하세요(2차).")
+        return
+
+    # `redev show 동아1단지` 처럼 위치인자를 하나만 준 경우, argparse 는 그것을
+    # kind 로 받는다. show/mark 에서는 단지명으로 읽는다.
+    query = args.query or args.path or args.kind
+
+    if args.action == "mark":
+        with get_conn(args.db) as conn:
+            row = _resolve_complex(conn, query, args.complex_id)
+            if row is None:
+                return
+            n = redev_repo.set_manual_status(conn, row["id"], status=args.status,
+                                             note=args.note)
+        print(f"{row['name']}: {args.status}" if n else
+              "스크리닝 결과가 없습니다. `redev screen` 을 먼저 실행하세요.")
+        return
+
+    # ── show — 2차 정밀 ──
+    as_of = args.as_of or _today()
+    band = args.band or area_mod.DEFAULT_BAND
+    with get_conn(args.db) as conn:
+        row = _resolve_complex(conn, query, args.complex_id)
+        if row is None:
+            return
+        _print_complex_header(row)
+
+        # 1) 정비사업 단계 — 사실
+        project = stage_mod.load(conn, row["id"])
+        print("\n[정비사업 단계]")
+        if project is None:
+            print("  등록된 정비사업이 없습니다 — 확인 불가.")
+            print("  오래된 단지라는 이유만으로 재건축 가능성을 숫자로 만들지 않습니다.")
+            print("  `redev template project` 로 단계를 넣으세요.")
+        else:
+            print(f"  {project.project_type} · {project.stage}"
+                  f"  (단계 변경일 {project.stage_date or '확인 불가'})"
+                  + ("" if project.verified else "  ※ 미검증"))
+            dur = stage_mod.remaining(conn, project,
+                                      region=regions.sido_of(row["lawd_cd"]),
+                                      allow_unverified=args.allow_unverified)
+            print(f"  준공까지 남은 기간: {dur.label}")
+            risk = stage_mod.delay_risk(project, as_of=as_of)
+            print(f"  지연위험: {risk.level}")
+            for r in risk.reasons:
+                print(f"    · {r}")
+
+        # 2) 용적률 — 종류를 절대 섞지 않는다
+        print("\n[용적률]")
+        print(f"  현재 용적률: {row['current_far']:g}%" if row["current_far"]
+              else "  현재 용적률: 확인 불가")
+        options = far_mod.available(conn, zoning=row["zoning"] or "", as_of=as_of,
+                                    lawd_cd=row["lawd_cd"],
+                                    sido=regions.sido_of(row["lawd_cd"]),
+                                    allow_unverified=args.allow_unverified)
+        planned = far_mod.planned(conn, row["id"])
+        for b in ([planned] if planned else []) + options:
+            print(f"  {b.kind:8s} {b.far:>6g}%   {b.caveat}")
+        if not options and not planned:
+            print(f"  기준 미입력 — 확인 불가 (용도지역: {row['zoning'] or '미입력'})")
+
+        basis, why = far_mod.resolve(conn, row["id"], as_of=as_of, prefer=args.far_kind,
+                                     allow_unverified=args.allow_unverified)
+        if args.far:
+            basis = far_mod.FarBasis(far=args.far, kind=args.far_kind or "사용자입력",
+                                     zoning=row["zoning"] or "확인 불가", scope="사용자 지정",
+                                     public_contribution_rate=None, verified=True,
+                                     source_name="사용자 입력 용적률", source_url=None)
+            why = "사용자가 --far 로 지정"
+        print(f"  → 사업 용적률로 사용: "
+              f"{basis.label if basis else '확인 불가'}  ({why})")
+
+        # 3) 사업성 3구간
+        print("\n[사업성 시나리오]")
+        if basis is None:
+            print("  용적률 기준이 없어 계산하지 않았습니다.")
+            return
+        a, missing, notes, project = _redev_assumptions(conn, args, row, basis)
+        for n in notes:
+            print(f"  · {n}")
+        if a is None:
+            print("  계산하지 않았습니다 — 다음 값이 없습니다:")
+            for m in missing:
+                print(f"    · {m}")
+            print("\n  빠진 값을 그럴듯한 기본값으로 채우지 않습니다. "
+                  "재건축에서 근거 없는 분담금이 가장 위험합니다.")
+            return
+
+        land_area = row["land_area_m2"]
+        if not land_area:
+            print("  대지면적 미입력 — 사업성을 계산할 수 없습니다.")
+            print("  `redev template landarea` 로 건축물대장 대지면적을 넣으세요.")
+            return
+
+        band_result = scen.band(land_area_m2=land_area, base=a,
+                                evidence=(basis.evidence,))
+        print(f"  {band_result.label}")
+        if band_result.calc:
+            for key, detail in band_result.calc.intermediates["시나리오별"].items():
+                print(f"    {key:4s} 용적률 {detail['용적률']:>7s} · "
+                      f"공사비 {detail['평당공사비']:>12s}/평 · "
+                      f"분양가 {detail['일반분양가']:>13s} → "
+                      f"비례율 {detail['비례율']:>7s} · 분담금 {detail['추가분담금']:>9s}")
+        # 단서는 시나리오마다 다르다. 기준 시나리오에서만 안 보이는 경고
+        # (예: 보수 시나리오에서 조합원을 다 담지 못함)를 놓치지 않는다.
+        seen = []
+        for result in band_result.results.values():
+            for c in result.caveats:
+                if c not in seen:
+                    seen.append(c)
+        for c in seen:
+            print(f"    ※ {c}")
+        print(f"    ※ {scen.ADJUST_NOTE}")
+        print(f"    ※ {feas.ASSUMPTION_NOTE}")
+
+        # 4) 민감도
+        sens = scen.sensitivity_calc(land_area_m2=land_area, base=a)
+        print("\n[민감도 — 가정 하나를 ±20% 흔들면]")
+        for factor, swing in sens.intermediates["변동폭"].items():
+            print(f"  {factor:8s} {swing:>12s}")
+        print(f"  가장 민감한 항목: {sens.intermediates['가장 민감한 항목']} "
+              f"— 이 값부터 실제 자료로 확인하세요.")
+
+        # 5) 신축전환원가
+        base_result = band_result.results.get("기준")
+        print("\n[신축전환원가와 재건축 마진]")
+        if args.price is None:
+            print("  --price(매수가, 억) 를 주면 신축전환원가를 계산합니다.")
+        else:
+            price = int(units.from_eok(args.price))
+            years = None
+            if project:
+                dur = stage_mod.remaining(conn, project,
+                                          region=regions.sido_of(row["lawd_cd"]),
+                                          allow_unverified=args.allow_unverified)
+                years = None if dur.months is None else round(dur.months / 12)
+            future, future_note = conversion.future_value_of(a, per_m2=args.future_price_m2)
+            conv = conversion.compute(
+                conn, price=price, as_of=as_of, lawd_cd=row["lawd_cd"],
+                emd_name=row["emd_name"],
+                extra_charge=None if base_result is None else base_result.extra_charge,
+                house_count=args.house_count, exclusive_area_m2=float(band)
+                if band.isdigit() else None,
+                years=years, loan_amount=int(units.from_eok(args.loan or 0)),
+                loan_rate=args.loan_rate,
+                annual_holding_cost=(int(units.from_manwon(args.holding_cost))
+                                     if args.holding_cost else None),
+                future_value=future, allow_unverified=args.allow_unverified,
+                evidence=(basis.evidence,))
+            for item in conv.items:
+                amount = units.fmt_eok(item.amount) if item.known else "확인 불가"
+                print(f"    {'+' if item.sign > 0 else '−'} {item.name:<18s} {amount:>10s}"
+                      + (f"   {item.note}" if item.note else ""))
+            print(f"    = 신축전환원가        {conv.label}")
+            print(f"      준공 후 예상 가치    {units.fmt_eok(future)}  ({future_note})")
+            print(f"      재건축 마진          {conv.margin_label}")
+
+        # 6) 저장
+        if args.save:
+            for key, result in band_result.results.items():
+                redev_repo.save_scenario(
+                    conn, complex_id=row["id"], area_band=band, as_of=as_of,
+                    scenario_key=key, assumptions=scen.variant(a, key), result=result,
+                    calc_json=result.calc.to_json())
+            print(f"\n시나리오 {len(band_result.results)}건을 저장했습니다 "
+                  f"(등급 SCENARIO — 확정 금액이 아닙니다).")
+
+        if args.verbose and band_result.calc:
+            print("\n[계산 근거]")
+            print(band_result.calc.explain())
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="python -m apt_engine.cli",
@@ -1037,6 +1405,55 @@ def build_parser() -> argparse.ArgumentParser:
     ct.add_argument("--band", help="전용면적 밴드 (기본 84)")
     ct.add_argument("--verbose", action="store_true")
 
+    rd = sub.add_parser("redev", help="재건축 사업성 (1차 스크리닝 · 2차 정밀)")
+    rd.add_argument("action",
+                    choices=["template", "import", "status", "screen", "mark", "show"])
+    rd.add_argument("kind", nargs="?",
+                    help="template/import 대상: far|project|duration|cost|landarea")
+    rd.add_argument("path", nargs="?", help="template/import 파일 경로")
+    rd.add_argument("query", nargs="?", help="show/mark: 단지명 일부")
+    rd.add_argument("--complex-id", type=int)
+    rd.add_argument("--as-of", help="기준일 YYYY-MM-DD (기본 오늘)")
+    rd.add_argument("--band", help="전용면적 밴드 (기본 84)")
+    rd.add_argument("--lawd", help="screen: 시군구 코드로 한정")
+    rd.add_argument("--limit", type=int, default=30, help="screen: 표시 개수")
+    rd.add_argument("--min-age", type=int, default=redev_screening.MIN_AGE_YEARS,
+                    help="screen: 최소 연식(년)")
+    rd.add_argument("--max-far", type=float, default=redev_screening.MAX_CURRENT_FAR,
+                    help="screen: 현재 용적률 상한(%%)")
+    rd.add_argument("--status", default="조사중",
+                    choices=["미조사", "조사중", "완료", "제외"], help="mark: 조사 상태")
+    rd.add_argument("--note", help="mark: 메모")
+    # 사업성 가정 — 전부 사용자가 바꿀 수 있다
+    rd.add_argument("--far", type=float, help="사업 용적률(%%)을 직접 지정")
+    rd.add_argument("--far-kind", choices=list(redev_far.KINDS),
+                    help="어느 기준의 용적률을 쓸지")
+    rd.add_argument("--cost-per-py", type=float, help="평당 공사비(만원/평)")
+    rd.add_argument("--cost-base-year", type=int, help="공사비 기준연도")
+    rd.add_argument("--other-cost-rate", type=float, help="기타사업비/공사비 비율")
+    rd.add_argument("--new-price-py", type=float, help="일반분양가(만원/평)")
+    rd.add_argument("--new-price-m2", type=int, help="일반분양가(원/㎡)")
+    rd.add_argument("--new-unit-area", type=float, help="신축 세대당 분양면적(㎡)")
+    rd.add_argument("--construction-factor", type=float,
+                    default=redev_feas.CONSTRUCTION_AREA_RATIO,
+                    help="공사연면적/용적률연면적 비율 (가정)")
+    rd.add_argument("--member-discount", type=float, default=1.0,
+                    help="조합원분양가/일반분양가. 기본 1.0 = 할인 미반영(보수적)")
+    rd.add_argument("--rental-ratio", type=float, help="임대 세대 비율")
+    rd.add_argument("--prior-asset", type=float, help="조합원 종전자산 평가액(억)")
+    rd.add_argument("--member-count", type=int, help="조합원 세대수")
+    # 신축전환원가
+    rd.add_argument("--price", type=float, help="매수가(억)")
+    rd.add_argument("--house-count", type=int, default=1)
+    rd.add_argument("--loan", type=float, help="대출액(억)")
+    rd.add_argument("--loan-rate", type=float, help="대출금리(예: 0.045)")
+    rd.add_argument("--holding-cost", type=float, help="연간 보유비용(만원)")
+    rd.add_argument("--future-price-m2", type=int, help="준공 후 예상 시세(원/㎡)")
+    rd.add_argument("--save", action="store_true", help="시나리오를 DB에 저장")
+    rd.add_argument("--allow-unverified", action="store_true",
+                    help="미검증 규칙도 사용(결과에 표시됨)")
+    rd.add_argument("--verbose", action="store_true")
+
     sub.add_parser("validate", help="요구사항 26 검증 규칙 실행")
 
     re_ = sub.add_parser("report", help="진단 리포트")
@@ -1053,7 +1470,7 @@ HANDLERS = {
     "rule": cmd_rule, "regulation": cmd_regulation, "loan": cmd_loan, "cash": cmd_cash,
     "ladder": cmd_ladder, "relative": cmd_relative,
     "transit": cmd_transit, "supply": cmd_supply, "geocode": cmd_geocode,
-    "catalyst": cmd_catalyst,
+    "catalyst": cmd_catalyst, "redev": cmd_redev,
     "validate": cmd_validate, "report": cmd_report,
 }
 

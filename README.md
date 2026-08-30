@@ -116,7 +116,7 @@ DB 파일(`apt_invest.db`)도 별개다. 아파트 쪽 작업이 토지 파이�
 
 - 전체 설계·개발계획: [`docs_dev/00-현황분석-및-고도화계획.md`](docs_dev/00-현황분석-및-고도화계획.md)
 - 요구사항 60개 현황표: [`docs_dev/01-요구사항-60개-현황표.md`](docs_dev/01-요구사항-60개-현황표.md)
-- 진행 상황: **PHASE 0~5 완료** (기반·수집·대표가격·호가·규제세금대출·상대가치·촉매) · PHASE 6(재건축 사업성) 착수 예정
+- 진행 상황: **PHASE 0~6 완료** (기반·수집·대표가격·호가·규제세금대출·상대가치·촉매·재건축 사업성) · PHASE 7(현금흐름·세후 IRR) 착수 예정
 
 ## PHASE 0 — 기반
 
@@ -295,6 +295,54 @@ python -m apt_engine.cli catalyst show "동아1단지" --verbose
 - 직선거리와 도보거리를 구분한다. 직선 500m 를 "도보 7분 역세권"이라 부르지 않는다
 - 공급은 반경별로 세되 **어느 기준으로 셌는지 밝힌다**. 좌표 없는 공급을 뺐으면 그것도 알린다
 - 근거 없는 촉매는 `evidence_json` NOT NULL 이라 저장 자체가 안 된다
+
+## PHASE 6 — 재건축 사업성 (2단계 스크리닝)
+
+이 구간이 어려운 건 산식이 아니라 **입력**이다. 대지면적·정비계획 용적률·평당 공사비·
+종전자산 감정평가액은 공공 API 로 나오지 않는다. 그래서 두 단계로 나눈다.
+
+```bash
+# 1단계 — 전국 자동. 이미 수집된 값(연식·현재 용적률·대지지분)만 쓴다
+python -m apt_engine.cli redev screen --lawd 28237 --limit 50
+python -m apt_engine.cli redev mark "동아1단지" --status 조사중
+
+# 2단계 — 상위 후보만 사람이 채운다
+python -m apt_engine.cli redev template landarea 대지면적.csv   # 건축물대장
+python -m apt_engine.cli redev template project  정비사업.csv   # 단계·정비계획
+python -m apt_engine.cli redev template far      용적률.csv     # 조례/법정상한/특례
+python -m apt_engine.cli redev template cost     공사비.csv     # 평당 공사비(기준연도 필수)
+python -m apt_engine.cli redev template duration 소요기간.csv   # 단계별 기간 통계
+python -m apt_engine.cli redev import  project   정비사업.csv
+
+python -m apt_engine.cli redev status                          # 입력 진행률
+python -m apt_engine.cli redev show "동아1단지" \
+    --cost-per-py 750 --cost-base-year 2025 --other-cost-rate 0.25 \
+    --new-price-py 2200 --prior-asset 6.2 --price 6.2 --save
+```
+
+**1단계에서는 금액을 만들지 않는다.** 스크리닝 결과는 "후보인가"와 순위뿐이고,
+추가분담금·비례율 같은 숫자는 2단계 자료가 들어온 단지에서만 나온다.
+
+**법정 최대 용적률을 사업 용적률로 쓰지 않는다.** `far_standard.kind` 가
+`법정상한 / 조례 / 정비계획 / 역세권특례` 네 종류를 다른 행으로 저장하고,
+숫자는 언제나 종류를 달고 다닌다(`250% (조례)`). 조례·정비계획이 없고 법정상한만
+있으면 엔진은 **자동으로 고르지 않고 거부한다** — 쓰려면 `--far-kind` 로 명시해야 한다.
+정비계획 용적률은 정비구역지정 이후 단계에만 저장할 수 있다(스키마 CHECK).
+
+**추가분담금은 하나의 숫자가 아니라 구간이다.** 보수/기준/낙관 3구간과
+민감도(공사비·분양가·용적률을 하나씩 ±20%)를 함께 낸다. 저장 등급은
+`SCENARIO` 하나뿐이라, 분담금을 확정 금액처럼 저장할 방법이 스키마에 없다.
+
+**신축전환원가** = 매수가 + 취득비용 + 추가분담금 + 금융비용 + 보유비용.
+모르는 항목은 0으로 세지 않고 "N억 이상"으로만 말한다. 재건축 마진은
+`준공 후 예상 가치 − 신축전환원가` 이고, 준공 후 가치에 **미래 상승률을 곱하지 않는다**
+(별도 시세 가정이 없으면 일반분양가로 갈음하고 그 사실을 밝힌다).
+
+**사업기간은 지어내지 않는다.** `stage_duration_ref`(단계별 소요기간 통계, 수기)가
+비어 있으면 "약 10년" 같은 숫자를 만들지 않고 `확인 불가` 로 답한다. 참고치가 있는
+구간만 더하고 없는 구간은 "N개 구간 참고치 없음"으로 밝힌다.
+지연위험은 점수를 지어내지 않고 관측 사실 세 가지(현재 단계 / 스스로 적은 예정일이
+지났는가 / 마지막 단계 변경 이후 경과)로만 판정한다.
 
 ### PHASE 1 이 막는 것
 

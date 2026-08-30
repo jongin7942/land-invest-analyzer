@@ -277,6 +277,84 @@ def jeonse_ratio_sane(conn):
             for r in rows[:20]]
 
 
+# ── PHASE 6 · 재건축 사업성 ────────────────────────────────────────────
+
+@rule("62-7", "법정 최대 용적률이 정비계획 용적률로 둔갑하지 않았다")
+def far_kind_not_confused(conn):
+    if not _has_table(conn, "redevelopment_project"):
+        return []
+    out = []
+    rows = conn.execute(
+        "SELECT p.complex_id, p.planned_far, p.stage, f.max_far, f.kind "
+        "  FROM redevelopment_project p "
+        "  JOIN complex c ON c.id = p.complex_id "
+        "  JOIN far_standard f ON f.zoning = c.zoning "
+        " WHERE p.planned_far IS NOT NULL AND f.kind = '법정상한' "
+        "   AND abs(p.planned_far - f.max_far) < 0.01").fetchall()
+    for r in rows:
+        out.append(f"단지 {r['complex_id']}: 정비계획 용적률 {r['planned_far']:g}% 가 "
+                   f"법정상한과 같습니다 — 상한을 고시값으로 적은 것은 아닌지 확인하세요")
+    return out
+
+
+@rule("62-7", "정비계획 용적률은 구역지정 이후 단계에만 있다")
+def planned_far_needs_stage(conn):
+    if not _has_table(conn, "redevelopment_project"):
+        return []
+    rows = conn.execute(
+        "SELECT complex_id, stage, planned_far FROM redevelopment_project "
+        " WHERE planned_far IS NOT NULL "
+        "   AND stage IN ('미지정','예비안전진단','정밀안전진단')").fetchall()
+    return [f"단지 {r['complex_id']}: '{r['stage']}' 단계인데 정비계획 용적률 "
+            f"{r['planned_far']:g}% 가 있습니다" for r in rows]
+
+
+@rule("18/62-5", "재건축 사업성은 시나리오 등급으로만 저장돼 있다")
+def scenario_grade_only(conn):
+    if not _has_table(conn, "redevelopment_scenario"):
+        return []
+    n = conn.execute(
+        "SELECT COUNT(*) FROM redevelopment_scenario "
+        " WHERE data_grade != 'SCENARIO' OR calc_trace IS NULL "
+        "    OR trim(calc_trace) = ''").fetchone()[0]
+    return ([f"redevelopment_scenario 에 확정 등급이거나 근거 없는 행 {n}건 — "
+             f"추가분담금을 확정 금액처럼 저장할 수 없습니다"] if n else [])
+
+
+@rule("18", "한 단지의 분담금이 구간(3개 시나리오)으로 저장돼 있다", severity="WARN")
+def scenario_is_a_band(conn):
+    if not _has_table(conn, "redevelopment_scenario"):
+        return []
+    rows = conn.execute(
+        "SELECT complex_id, area_band, as_of, COUNT(*) AS n "
+        "  FROM redevelopment_scenario GROUP BY 1,2,3 HAVING n < 3").fetchall()
+    return [f"단지 {r['complex_id']}({r['area_band']}·{r['as_of']}): 시나리오가 "
+            f"{r['n']}개뿐입니다 — 분담금은 하나의 숫자로 말하지 않습니다" for r in rows[:20]]
+
+
+@rule("30", "대지면적에 출처가 남아 있다", severity="WARN")
+def land_area_has_source(conn):
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(complex)")}
+    if "land_area_source" not in cols:
+        return []
+    n = conn.execute(
+        "SELECT COUNT(*) FROM complex WHERE land_area_m2 IS NOT NULL "
+        " AND (land_area_source IS NULL OR trim(land_area_source) = '')").fetchone()[0]
+    return ([f"출처 없는 대지면적 {n}건 — 대지지분은 사업성의 뿌리라 검증이 필요합니다"]
+            if n else [])
+
+
+@rule("17", "정비사업 단계에는 그 단계가 된 날이 함께 있다")
+def stage_has_date(conn):
+    if not _has_table(conn, "redevelopment_project"):
+        return []
+    n = conn.execute(
+        "SELECT COUNT(*) FROM redevelopment_project "
+        " WHERE stage != '미지정' AND (stage_date IS NULL OR trim(stage_date) = '')"
+    ).fetchone()[0]
+    return ([f"단계일자 없는 정비사업 {n}건"] if n else [])
+
+
 def _has_table(conn, name: str) -> bool:
     return conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone() is not None
