@@ -512,17 +512,31 @@ def cmd_rule(args):
     if args.action == "status":
         with get_conn(args.db) as conn:
             cov = rule_repo.coverage(conn)
-        print("규칙 입력 현황 (검증/전체)\n")
         labels = {"regulation": "규제지역", "permit": "토지거래허가구역",
                   "tax": "세법", "loan": "대출규제", "cost": "취득 부대비용"}
+        print("규칙 입력 현황\n")
+        print(f"  {'':<16s} {'전체':>4} {'계산가능':>6} {'원문확인':>6} {'시행전':>5}  상태")
         for kind, c in cov.items():
             state = ("미입력" if c["total"] == 0
                      else "사용 가능" if c["verified"] == c["total"]
-                     else f"일부 미검증")
-            print(f"  {labels[kind]:<16s} {c['verified']:>3}/{c['total']:<3}  {state}")
+                     else "일부 미검증")
+            confirmed = c.get("confirmed")
+            pending = c.get("pending")
+            if confirmed is not None and confirmed < c["verified"]:
+                state += " · 원문 미확인 있음"
+            print(f"  {labels[kind]:<16s} {c['total']:>4} {c['verified']:>6} "
+                  f"{('-' if confirmed is None else confirmed):>6} "
+                  f"{('-' if pending is None else pending):>5}  {state}")
+        print("\n  계산가능 = last_verified 가 있어 엔진이 쓰는 규칙")
+        print("  원문확인 = verification 이 VERIFIED 인 규칙. 이게 모자라면 실투자금이")
+        print("             '확정'이 아니라 '예상'으로만 표시됩니다")
+        print("  시행전   = status 가 ENACTED 가 아닌 규칙. 금액에 넣지 않습니다")
         if all(c["total"] == 0 for c in cov.values()):
             print("\n전부 비어 있습니다. 세금·대출·실투자금 계산이 '확인 불가'로 나옵니다.\n"
                   "`rule template <종류> <파일>` 로 서식을 받아 채워 넣으세요.")
+        if cov.get("loan", {}).get("total") == 0:
+            print("\n  ★ 대출 규칙이 비어 있어 대출 가능액이 '확인 불가'입니다.\n"
+                  "    docs_dev/02-확인필요-정책값.md 의 1-1 을 보세요.")
 
 
 def cmd_regulation(args):
@@ -587,10 +601,58 @@ def cmd_loan(args):
             print(f"    {line}")
 
 
-def cmd_cash(args):
-    """실제 필요한 현금 (요구사항 27)."""
+def _print_capital(cap, *, verbose=False):
+    """실투자금 출력 — 항목·신뢰도·확정 여부를 함께 보여준다(§17)."""
     from apt_engine import units
-    from apt_engine.cash import equity as equity_mod
+    from apt_engine.regulation import mortgage as mortgage_mod
+
+    print(f"\n  ── 총취득비용 (TOTAL_PURCHASE_COST) ──")
+    for item in cap.cost_items:
+        print(f"    + {item.name:<20s} {item.label:>13s}   [{item.verification}]"
+              + (f"  {item.formula}" if item.formula else ""))
+    print(f"    {'=':>2} {'총취득비용':<20s} "
+          f"{units.fmt_eok(cap.total_purchase_cost):>13s}"
+          + (" 이상" if cap.unknown else ""))
+
+    print(f"\n  ── 자금 조달 ──")
+    if cap.mortgage is not None:
+        m = cap.mortgage
+        for limit in m.limits:
+            print(f"      {limit.name:<20s} {limit.label:>13s}"
+                  + (f"   {limit.formula}" if limit.formula else ""))
+        print(f"    − {'POLICY_MAX_MORTGAGE':<20s} "
+              f"{m.calc.intermediates['POLICY_MAX_MORTGAGE']:>13s}"
+              + (f"   ← {m.binding} 이 결정" if m.binding else ""))
+        print(f"    − {'EXPECTED_MORTGAGE':<20s} "
+              f"{m.calc.intermediates['EXPECTED_MORTGAGE']:>13s}")
+        print(f"      ※ {mortgage_mod.DISCLAIMER}")
+    else:
+        print(f"    − {'주택담보대출':<20s} {'0원':>13s}   대출 미사용 조건")
+    print(f"    − {'승계 전세보증금':<20s} "
+          f"{(units.fmt_eok(cap.assumable_deposit) if cap.assumable_deposit is not None else '확인 불가'):>13s}")
+
+    print(f"\n  ── {cap.title} (SELF_CAPITAL_REQUIRED) ──")
+    print(f"    {cap.label}")
+    print(f"    대출 없이 살 경우   {units.fmt_eok(cap.required_without_loan)}")
+    for note in cap.notes:
+        print(f"    · {note}")
+    if cap.unknown:
+        print(f"\n    ⚠ {cap.calc.intermediates['주의']}")
+        print(f"      확인 불가: {', '.join(cap.unknown)}")
+    if cap.pending_policies:
+        print(f"\n    [향후 정책 변경 가능 — 금액에 넣지 않았습니다]")
+        for line in cap.pending_policies:
+            print(f"      · {line}")
+    if verbose:
+        print("\n    ── 계산 근거 ──")
+        for line in cap.calc.explain().splitlines():
+            print(f"    {line}")
+
+
+def cmd_cash(args):
+    """총취득비용과 실투자금 (요구사항 27, 지시 §11·§12·§17)."""
+    from apt_engine import units
+    from apt_engine.cash import self_capital as capital_mod
     from apt_engine.listing.provider import parse_price
 
     price = parse_price(args.price)
@@ -601,32 +663,131 @@ def cmd_cash(args):
         _print_complex_header(row)
 
         jeonse = parse_price(args.jeonse) if args.jeonse else None
-        if jeonse is None:
+        assume_jeonse = args.assume_jeonse or args.jeonse is not None
+        if assume_jeonse and jeonse is None:
             js = repo.latest_jeonse_snapshot(conn, row["id"], args.band or "84")
             jeonse = js["representative_deposit"] if js else None
 
-        eq = equity_mod.compute(
+        cap = capital_mod.compute(
             conn, price=price, as_of=args.as_of or _today(),
-            house_count=args.house_count, lawd_cd=row["lawd_cd"],
-            emd_name=row["emd_name"], exclusive_area_m2=args.area,
-            jeonse_deposit=jeonse,
-            loan_amount=parse_price(args.loan) if args.loan else None,
-            repair_cost=parse_price(args.repair) if args.repair else 0,
-            buffer_cost=parse_price(args.buffer) if args.buffer else 0)
+            lawd_cd=row["lawd_cd"], emd_name=row["emd_name"],
+            current_home_count=max(args.house_count - 1, 0),
+            exclusive_area_m2=args.area, first_home_buyer=args.first_home,
+            annual_income=parse_price(args.income) if args.income else None,
+            existing_annual_payment=(parse_price(args.existing_payment)
+                                     if args.existing_payment else 0),
+            interest_rate=args.rate, mortgage_term_years=args.years,
+            repayment_type=args.repayment,
+            requested_mortgage=parse_price(args.loan) if args.loan else None,
+            use_mortgage=not args.no_loan,
+            jeonse_deposit=jeonse, assume_jeonse=assume_jeonse,
+            other_required_costs=((parse_price(args.repair) if args.repair else 0)
+                                  + (parse_price(args.buffer) if args.buffer else 0)),
+            allow_unverified=args.allow_unverified)
 
-    print(f"\n  ── 실제 필요한 현금 ──")
-    for item in eq.items:
-        sign = "+" if item.sign > 0 else "−"
-        value = units.fmt_eok(item.amount) if item.known else "확인 불가"
-        print(f"    {sign} {item.name:<18s} {value:>12s}"
-              + (f"   {item.note}" if item.note else ""))
-    print(f"    {'=':>2} {'실투자금':<18s} {eq.label:>12s}")
-    if not eq.complete:
-        print(f"\n    ⚠ {eq.calc.intermediates['주의']}")
-    if args.verbose:
-        print("\n    ── 계산 근거 ──")
-        for line in eq.calc.explain().splitlines():
-            print(f"    {line}")
+        _print_capital(cap, verbose=args.verbose)
+
+        if args.cash:
+            budget = parse_price(args.cash)
+            use = cap.cash_utilization(budget)
+            verdict = cap.affordable(budget)
+            print(f"\n  ── 내 현금 {units.fmt_eok(budget)} 기준 ──")
+            if verdict is None:
+                print("    매수 가능 여부: 확인 불가 — 실투자금을 확정하지 못했습니다")
+            else:
+                print(f"    매수 {'가능' if verdict else '불가'} · "
+                      f"투자금 사용 효율 {use:.1%}")
+
+
+def cmd_profile(args):
+    """사용자 프로필 (요구사항 24) — 소득·현금·주택수를 코드에 넣지 않는다."""
+    from apt_engine import units
+    from apt_engine.invest.budget import Profile
+    from apt_engine.listing.provider import parse_price
+
+    with get_conn(args.db) as conn:
+        if args.action == "set":
+            p = Profile(
+                name=args.name,
+                available_cash=parse_price(args.cash) if args.cash else None,
+                annual_income=parse_price(args.income) if args.income else None,
+                existing_annual_payment=(parse_price(args.existing_payment)
+                                         if args.existing_payment else 0),
+                current_home_count=args.home_count,
+                first_home_buyer=args.first_home,
+                mortgage_term_years=args.years, interest_rate=args.rate,
+                repayment_type=args.repayment, region=args.region)
+            p.save(conn)
+            print(f"프로필 '{args.name}' 저장했습니다.")
+            return
+
+        p = Profile.load(conn, args.name)
+    if p is None:
+        print(f"프로필 '{args.name}' 이 없습니다. `profile set` 으로 만드세요.")
+        return
+    print(f"■ 프로필 {p.name}")
+    print(f"  가용 현금   {units.fmt_eok(p.available_cash) if p.available_cash else '미입력'}")
+    print(f"  연소득      {units.fmt_eok(p.annual_income) if p.annual_income else '미입력'}")
+    print(f"  기존 원리금 {units.fmt_won(p.existing_annual_payment)}/년")
+    print(f"  보유주택    {p.current_home_count}채 · 생애최초 {'예' if p.first_home_buyer else '아니오'}")
+    print(f"  대출 조건   {p.mortgage_term_years}년 · "
+          f"{f'{p.interest_rate:.2%}' if p.interest_rate else '금리 미입력'} · {p.repayment_type}")
+
+
+def cmd_budget(args):
+    """내 현금으로 살 수 있는 아파트 (지시 §13·§14).
+
+    매매가가 아니라 **실투자금** 으로 거른다.
+    """
+    from apt_engine import units
+    from apt_engine.invest import budget as budget_mod
+    from apt_engine.listing.provider import parse_price
+
+    with get_conn(args.db) as conn:
+        profile = budget_mod.Profile.load(conn, args.profile)
+        if profile is None:
+            if not args.cash:
+                print(f"프로필 '{args.profile}' 이 없습니다. "
+                      f"`profile set` 을 먼저 하거나 --cash 를 주세요.")
+                return
+            profile = budget_mod.Profile(name=args.profile)
+        if args.cash:
+            from dataclasses import replace
+            profile = replace(profile, available_cash=parse_price(args.cash))
+        if args.income:
+            from dataclasses import replace
+            profile = replace(profile, annual_income=parse_price(args.income))
+        if args.rate is not None:
+            from dataclasses import replace
+            profile = replace(profile, interest_rate=args.rate)
+
+        try:
+            result = budget_mod.screen(
+                conn, profile=profile, as_of=args.as_of or _today(),
+                area_band=args.band, lawd_cd=args.lawd,
+                assume_jeonse=args.assume_jeonse, use_mortgage=not args.no_loan,
+                limit=args.scan, allow_unverified=args.allow_unverified)
+        except ValueError as e:
+            print(str(e))
+            return
+
+    print(f"\n{result.summary}")
+    print("  ※ 매매가가 아니라 실투자금(SELF_CAPITAL_REQUIRED) 기준입니다.")
+    if not result.affordable and not result.undecidable:
+        print("\n  매수 가능한 단지가 없습니다. 대표가격 스냅샷이 있는지 확인하세요.")
+    if result.affordable:
+        print(f"\n  ── 매수 가능 (실투자금 ≤ {units.fmt_eok(result.cash)}) ──")
+        print(f"  {'단지':<24s} {'지역':<12s} {'매매가':>9s} {'실투자금':>11s} {'사용효율':>7s}")
+        for c in result.affordable[:args.limit]:
+            use = c.utilization(result.cash)
+            print(f"  {c.name[:24]:<24s} {c.region_name[:12]:<12s} "
+                  f"{units.fmt_eok(c.price):>9s} {units.fmt_eok(c.required):>11s} "
+                  f"{use:>7.1%}")
+    if result.undecidable:
+        print(f"\n  ── 확인 불가 {len(result.undecidable)}개 (판단하지 않았습니다) ──")
+        for c in result.undecidable[:5]:
+            print(f"  {c.name[:24]:<24s} — {', '.join(c.capital.unknown[:3])}")
+        print("  ※ 모르는 비용을 0원으로, 모르는 대출을 최대치로 세지 않았습니다.")
 
 
 def _resolve_complex(conn, args):
@@ -908,8 +1069,12 @@ def cmd_catalyst(args):
 
 # ── 파서 ──────────────────────────────────────────────────────────────
 
-def _resolve_complex(conn, query, complex_id):
-    """CLI 공통 — 이름으로 단지 하나를 고른다. 애매하면 목록만 보여준다."""
+def _pick_complex(conn, query, complex_id):
+    """이름 문자열로 단지 하나를 고른다(위치인자가 유동적인 redev 전용).
+
+    이름이 `_resolve_complex` 와 겹치면 나중 정의가 앞의 것을 덮어써서
+    cash·loan·relative·catalyst 가 통째로 깨진다. 실제로 한 번 그랬다.
+    """
     if complex_id:
         row = conn.execute("SELECT * FROM complex WHERE id=?", (complex_id,)).fetchone()
         if row is None:
@@ -1104,7 +1269,7 @@ def cmd_redev(args):
 
     if args.action == "mark":
         with get_conn(args.db) as conn:
-            row = _resolve_complex(conn, query, args.complex_id)
+            row = _pick_complex(conn, query, args.complex_id)
             if row is None:
                 return
             n = redev_repo.set_manual_status(conn, row["id"], status=args.status,
@@ -1117,7 +1282,7 @@ def cmd_redev(args):
     as_of = args.as_of or _today()
     band = args.band or area_mod.DEFAULT_BAND
     with get_conn(args.db) as conn:
-        row = _resolve_complex(conn, query, args.complex_id)
+        row = _pick_complex(conn, query, args.complex_id)
         if row is None:
             return
         _print_complex_header(row)
@@ -1358,19 +1523,59 @@ def build_parser() -> argparse.ArgumentParser:
     ln.add_argument("--as-of", help="기준일 YYYY-MM-DD")
     ln.add_argument("--verbose", action="store_true")
 
-    ca = sub.add_parser("cash", help="실제 필요한 현금")
+    ca = sub.add_parser("cash", help="총취득비용 · 실투자금 (SELF_CAPITAL_REQUIRED)")
     ca.add_argument("query", help="단지명 일부")
     ca.add_argument("--complex-id", type=int)
     ca.add_argument("--price", required=True, help="매수가 (6.2 = 6.2억)")
     ca.add_argument("--house-count", type=int, default=1, help="취득 후 주택 수")
     ca.add_argument("--band", help="전용면적 밴드 (전세 대표가 조회용, 기본 84)")
-    ca.add_argument("--area", type=float, help="전용면적 ㎡ (농특세 판정)")
-    ca.add_argument("--jeonse", help="승계 전세보증금. 미지정시 대표 전세가 사용")
-    ca.add_argument("--loan", help="주택담보대출액")
+    ca.add_argument("--area", type=float, help="전용면적 ㎡ (농특세 85㎡ 판정)")
+    ca.add_argument("--first-home", action="store_true", help="생애최초 취득")
+    ca.add_argument("--jeonse", help="승계 전세보증금. 주면 전세 승계 매수로 본다")
+    ca.add_argument("--assume-jeonse", action="store_true",
+                    help="전세 승계 매수 (대표 전세가 사용)")
+    ca.add_argument("--loan", help="받겠다는 대출액 (한도와 비교해 작은 값을 쓴다)")
+    ca.add_argument("--no-loan", action="store_true", help="대출 없이 계산")
+    ca.add_argument("--income", help="연소득 (DSR 한도 계산에 필요)")
+    ca.add_argument("--existing-payment", help="기존 대출 연간 원리금")
+    ca.add_argument("--rate", type=float, help="예상 대출금리 (예: 0.045)")
+    ca.add_argument("--years", type=int, default=30, help="대출기간(년)")
+    ca.add_argument("--repayment", default="원리금균등",
+                    choices=["원리금균등", "원금균등", "만기일시"])
+    ca.add_argument("--cash", help="내 가용 현금 — 매수 가능 여부·사용효율을 함께 본다")
     ca.add_argument("--repair", help="수리비")
     ca.add_argument("--buffer", help="안전자금")
     ca.add_argument("--as-of", help="기준일 YYYY-MM-DD")
+    ca.add_argument("--allow-unverified", action="store_true")
     ca.add_argument("--verbose", action="store_true")
+
+    pf = sub.add_parser("profile", help="사용자 프로필 (현금·소득·주택수)")
+    pf.add_argument("action", choices=["set", "show"])
+    pf.add_argument("--name", default="기본")
+    pf.add_argument("--cash", help="가용 현금 (3 = 3억)")
+    pf.add_argument("--income", help="연소득 (0.8 = 8천만원)")
+    pf.add_argument("--existing-payment", help="기존 대출 연간 원리금")
+    pf.add_argument("--home-count", type=int, default=0, help="현재 보유 주택 수")
+    pf.add_argument("--first-home", action="store_true")
+    pf.add_argument("--rate", type=float, help="예상 대출금리")
+    pf.add_argument("--years", type=int, default=30)
+    pf.add_argument("--repayment", default="원리금균등",
+                    choices=["원리금균등", "원금균등", "만기일시"])
+    pf.add_argument("--region", help="시도 (중개보수 조례 선택)")
+
+    bg = sub.add_parser("budget", help="내 현금으로 살 수 있는 아파트 (실투자금 기준)")
+    bg.add_argument("--profile", default="기본")
+    bg.add_argument("--cash", help="가용 현금 (프로필보다 우선)")
+    bg.add_argument("--income", help="연소득 (프로필보다 우선)")
+    bg.add_argument("--rate", type=float, help="예상 대출금리")
+    bg.add_argument("--band", help="전용면적 밴드 (기본 84)")
+    bg.add_argument("--lawd", help="시군구 코드로 한정")
+    bg.add_argument("--assume-jeonse", action="store_true", help="전세 승계 매수 가정")
+    bg.add_argument("--no-loan", action="store_true", help="대출 없이 계산")
+    bg.add_argument("--scan", type=int, default=200, help="검토할 단지 수")
+    bg.add_argument("--limit", type=int, default=30, help="표시 개수")
+    bg.add_argument("--as-of", help="기준일 YYYY-MM-DD")
+    bg.add_argument("--allow-unverified", action="store_true")
 
     la = sub.add_parser("ladder", help="가격사다리 축 정의 (도메인 지식 수기 입력)")
     la.add_argument("action", choices=["template", "import", "list"])
@@ -1468,6 +1673,7 @@ HANDLERS = {
     "snapshot": cmd_snapshot, "price": cmd_price,
     "listing": cmd_listing, "market": cmd_market,
     "rule": cmd_rule, "regulation": cmd_regulation, "loan": cmd_loan, "cash": cmd_cash,
+    "profile": cmd_profile, "budget": cmd_budget,
     "ladder": cmd_ladder, "relative": cmd_relative,
     "transit": cmd_transit, "supply": cmd_supply, "geocode": cmd_geocode,
     "catalyst": cmd_catalyst, "redev": cmd_redev,

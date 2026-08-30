@@ -23,28 +23,40 @@ TABLES = {
     "tax": ("tax_rule",
             ("tax_kind", "rule_key", "conditions_json", "bracket_min", "bracket_max",
              "rate", "progressive_deduction", "fixed_amount", "rate_formula",
-             "effective_from", "effective_to",
-             "source_name", "source_url", "last_verified", "note")),
+             "max_amount", "base_kind", "effective_from", "effective_to",
+             "source_name", "source_url", "last_verified", "status", "verification",
+             "note")),
     "loan": ("loan_rule",
-             ("rule_key", "conditions_json", "price_min", "price_max", "ltv", "dsr", "dti",
+             ("rule_key", "rule_type", "value", "conditions_json",
+              "region", "regulated_area", "home_status", "first_home_buyer",
+              "price_min", "price_max", "ltv", "dsr", "dti",
               "stress_rate_bp", "max_loan_amount", "residence_required",
               "effective_from", "effective_to",
-              "source_name", "source_url", "last_verified", "note")),
+              "source_name", "source_url", "last_verified", "status", "verification",
+              "note")),
     "cost": ("cost_rule",
-             ("cost_kind", "rule_key", "region", "price_min", "price_max", "rate",
-              "max_amount", "fixed_amount", "effective_from", "effective_to",
-              "source_name", "source_url", "last_verified", "note")),
+             ("cost_kind", "rule_key", "region", "conditions_json",
+              "price_min", "price_max", "rate",
+              "max_amount", "fixed_amount", "vat_applicable",
+              "effective_from", "effective_to",
+              "source_name", "source_url", "last_verified", "status", "verification",
+              "note")),
 }
 
 INT_COLUMNS = {
     "bracket_min", "bracket_max", "progressive_deduction", "fixed_amount",
     "price_min", "price_max", "stress_rate_bp", "max_loan_amount",
     "residence_duty_months", "jeonse_succession_allowed", "residence_required",
-    "max_amount",
+    "max_amount", "regulated_area", "first_home_buyer", "vat_applicable",
 }
-FLOAT_COLUMNS = {"rate", "ltv", "dsr", "dti"}
+FLOAT_COLUMNS = {"rate", "ltv", "dsr", "dti", "value"}
 DEFAULT_ZERO = {"bracket_min", "price_min", "progressive_deduction",
-                "stress_rate_bp", "residence_required", "jeonse_succession_allowed"}
+                "stress_rate_bp", "residence_required", "jeonse_succession_allowed",
+                "vat_applicable"}
+
+# NOT NULL 컬럼은 비어 있을 때 채울 값이 있어야 한다.
+# status 를 비우면 '시행 중'으로 본다 — 발표·예정 정책은 반드시 명시해야 한다.
+DEFAULT_TEXT = {"status": "ENACTED"}
 
 
 class RuleImportError(ValueError):
@@ -54,7 +66,9 @@ class RuleImportError(ValueError):
 def _coerce(column: str, value):
     text = "" if value is None else str(value).strip()
     if text == "":
-        return 0 if column in DEFAULT_ZERO else None
+        if column in DEFAULT_ZERO:
+            return 0
+        return DEFAULT_TEXT.get(column)
     if column in INT_COLUMNS:
         try:
             return int(float(text.replace(",", "")))
@@ -90,9 +104,27 @@ def import_csv(conn: sqlite3.Connection, kind: str, path: str | Path) -> dict:
     prepared, errors = [], []
     for i, raw in enumerate(raw_rows, start=2):
         try:
-            prepared.append([_coerce(c, raw.get(c)) for c in columns])
+            values = [_coerce(c, raw.get(c)) for c in columns]
         except RuleImportError as e:
             errors.append(f"  {i}행: {e}")
+            continue
+        row = dict(zip(columns, values))
+        # 신뢰도를 비워 두면 확인일에서 유도한다. 확인일이 없는데 VERIFIED 로
+        # 적어 두는 실수를 막기 위해, 둘이 어긋나면 거부한다.
+        if "verification" in row:
+            if not row["verification"]:
+                row["verification"] = ("VERIFIED" if row.get("last_verified")
+                                       else "NEEDS_VERIFICATION")
+            elif row["verification"] == "VERIFIED" and not row.get("last_verified"):
+                errors.append(f"  {i}행: verification=VERIFIED 인데 last_verified 가 "
+                              f"비어 있습니다. 확인한 날짜를 적으세요")
+                continue
+            values = [row[c] for c in columns]
+        if row.get("status") not in (None, "ENACTED", "ANNOUNCED", "PROPOSED", "EXPIRED"):
+            errors.append(f"  {i}행: status 는 ENACTED/ANNOUNCED/PROPOSED/EXPIRED "
+                          f"중 하나여야 합니다 — {row['status']!r}")
+            continue
+        prepared.append(values)
     if errors:
         raise RuleImportError(f"{path} 에서 {len(errors)}개 줄을 읽지 못했습니다:\n"
                               + "\n".join(errors[:20]))
@@ -108,10 +140,17 @@ def import_csv(conn: sqlite3.Connection, kind: str, path: str | Path) -> dict:
 
 def mark_verified(conn: sqlite3.Connection, kind: str, *, rule_id: int,
                   verified_on: str) -> int:
-    """원문을 확인했다고 표시. 이걸 해야 엔진이 계산에 쓴다."""
-    table, _ = TABLES[kind]
-    return conn.execute(f"UPDATE {table} SET last_verified = ? WHERE id = ?",
-                        (verified_on, rule_id)).rowcount
+    """원문을 확인했다고 표시. 이걸 해야 엔진이 계산에 쓴다.
+
+    확인일과 신뢰도는 항상 같이 움직인다 — 하나만 올리면 화면에는 '확정'인데
+    출처는 미확인인 상태가 만들어진다.
+    """
+    table, columns = TABLES[kind]
+    has_verification = "verification" in columns
+    sql = f"UPDATE {table} SET last_verified = ?"
+    if has_verification:
+        sql += ", verification = 'VERIFIED'"
+    return conn.execute(sql + " WHERE id = ?", (verified_on, rule_id)).rowcount
 
 
 def list_rules(conn: sqlite3.Connection, kind: str) -> list[sqlite3.Row]:
@@ -122,12 +161,21 @@ def list_rules(conn: sqlite3.Connection, kind: str) -> list[sqlite3.Row]:
 def coverage(conn: sqlite3.Connection) -> dict:
     """규칙이 얼마나 채워졌나 — PHASE 3 진행률."""
     out = {}
-    for kind, (table, _) in TABLES.items():
+    for kind, (table, columns) in TABLES.items():
         total = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
         verified = conn.execute(
             f"SELECT COUNT(*) FROM {table} WHERE last_verified IS NOT NULL "
             f"AND trim(last_verified) != ''").fetchone()[0]
-        out[kind] = {"total": total, "verified": verified}
+        row = {"total": total, "verified": verified}
+        if "verification" in columns:
+            # '계산에 쓸 수 있는가'(last_verified)와 '원문을 확인했는가'(verification)는
+            # 다른 질문이다. 둘을 따로 센다.
+            row["confirmed"] = conn.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE verification = 'VERIFIED'"
+            ).fetchone()[0]
+            row["pending"] = conn.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE status != 'ENACTED'").fetchone()[0]
+        out[kind] = row
     return out
 
 
@@ -156,28 +204,56 @@ TEMPLATES = {
         "# jeonse_succession_allowed: 1=전세 끼고 매수 가능, 0=실거주 의무로 불가\n"),
     "tax": (
         "tax_kind,rule_key,conditions_json,bracket_min,bracket_max,rate,"
-        "progressive_deduction,fixed_amount,rate_formula,effective_from,effective_to,"
-        "source_name,source_url,last_verified,note\n"
-        "# 예) 취득세,acq/1주택/6억이하,\"{\"\"house_count\"\":1}\",0,600000000,0.01,0,,,"
-        "2020-08-12,,지방세법 제11조,https://www.law.go.kr/...,2026-08-30,\n"
-        "# tax_kind: 취득세/지방교육세/농어촌특별세/재산세/종합부동산세/양도소득세/지방소득세\n"
+        "progressive_deduction,fixed_amount,rate_formula,max_amount,base_kind,"
+        "effective_from,effective_to,source_name,source_url,last_verified,"
+        "status,verification,note\n"
+        "# 예) 취득세,acq/1주택/6억이하,\"{\"\"house_count\"\":1}\",0,600000000,0.01,0,,,,"
+        "취득가액,2020-08-12,,지방세법 제11조,https://www.law.go.kr/...,2026-08-30,"
+        "ENACTED,VERIFIED,\n"
+        "# tax_kind: 취득세/취득세감면/지방교육세/농어촌특별세/재산세/종합부동산세/"
+        "양도소득세/지방소득세/부가가치세/인지세\n"
+        "# status: ENACTED(시행 중) / ANNOUNCED(발표·시행 전) / PROPOSED / EXPIRED\n"
+        "#   → 계산에 쓰는 것은 ENACTED 뿐. 나머지는 '향후 정책 변경 가능' 안내로만 나온다\n"
+        "# verification: VERIFIED / ESTIMATED / UNKNOWN / NEEDS_VERIFICATION\n"
+        "#   → VERIFIED 로 적으려면 last_verified 에 확인한 날짜가 있어야 한다\n"
         "# bracket_min~max 는 과세표준 구간(원). max 를 비우면 무한\n"
         "# rate 는 0.01 또는 1% 둘 다 됨. conditions_json 연산자: _gte _lte _gt _lt _in\n"
+        "# 구간 안에서 세율이 연속 변하면 rate_formula 를 쓴다 (변수는 base 하나뿐)\n"
+        "#   예: 취득세 6~9억 = (base * 2 / 300000000 - 3) / 100\n"
+        "# 감면분 농어촌특별세는 rule_key 에 '감면' 을 넣어야 일반분과 구분된다\n"
         "# ★ 세율은 반드시 국가법령정보센터 원문을 보고 채운다. 기억으로 적지 말 것\n"),
     "loan": (
-        "rule_key,conditions_json,price_min,price_max,ltv,dsr,dti,stress_rate_bp,"
+        "rule_key,rule_type,value,conditions_json,region,regulated_area,home_status,"
+        "first_home_buyer,price_min,price_max,ltv,dsr,dti,stress_rate_bp,"
         "max_loan_amount,residence_required,effective_from,effective_to,"
-        "source_name,source_url,last_verified,note\n"
-        "# 예) ltv/무주택/비규제,\"{\"\"house_count\"\":0,\"\"regulated\"\":false}\",0,,0.70,0.40,,"
-        "150,,0,2024-09-01,,금융위원회 보도자료,https://...,2026-08-30,\n"
-        "# ltv/dsr 은 0.70 또는 70% 둘 다 됨. stress_rate_bp 는 스트레스 DSR 가산금리(bp)\n"),
+        "source_name,source_url,last_verified,status,verification,note\n"
+        "# 예) ltv/무주택/비규제,LTV,0.70,,,0,무주택,,0,,,,,,,0,2024-09-01,,"
+        "금융위원회 보도자료,https://www.fsc.go.kr/...,2026-08-30,ENACTED,VERIFIED,\n"
+        "# ★ 한 행에 정책 하나. rule_type 을 반드시 적는다:\n"
+        "#   LTV          value = 0.70 또는 70\n"
+        "#   DSR          value = 0.40 또는 40\n"
+        "#   STRESS_DSR   value = 가산금리 bp (150 = 1.5%p). 한도 계산에만 쓰인다\n"
+        "#   MORTGAGE_CAP value = 대출 총액 상한(원)\n"
+        "#   DTI          value = 0.60 또는 60\n"
+        "# 조건 컬럼을 비우면 '무관'. 값을 적으면 반드시 맞아야 그 규칙이 잡힌다\n"
+        "#   region / regulated_area(1·0) / home_status(무주택·1주택·다주택) /\n"
+        "#   first_home_buyer(1·0) / price_min~max\n"
+        "# 최종 한도 = min(LTV, DSR, 절대상한, 요청액). 하나라도 없으면 '확인 불가'다\n"
+        "# ★ 백테스트가 이 표에 의존한다. 정책이 바뀌면 기존 행의 effective_to 를\n"
+        "#   채우고 새 행을 추가한다. 덮어쓰면 과거 분석이 조용히 틀려진다\n"),
     "cost": (
-        "cost_kind,rule_key,region,price_min,price_max,rate,max_amount,fixed_amount,"
-        "effective_from,effective_to,source_name,source_url,last_verified,note\n"
-        "# 예) 중개보수,brok/6억~9억,서울,600000000,900000000,0.005,,,"
-        "2021-10-19,,공인중개사법 시행규칙,https://...,2026-08-30,\n"
-        "# cost_kind: 중개보수 / 법무비 / 인지세 / 국민주택채권 / 기타\n"
-        "# region 을 비우면 전국 적용\n"),
+        "cost_kind,rule_key,region,conditions_json,price_min,price_max,rate,"
+        "max_amount,fixed_amount,vat_applicable,effective_from,effective_to,"
+        "source_name,source_url,last_verified,status,verification,note\n"
+        "# 예) 중개보수,brok/6억~9억,서울,,600000000,900000000,0.005,,,1,"
+        "2021-10-19,,공인중개사법 시행규칙,https://...,2026-08-30,ENACTED,VERIFIED,\n"
+        "# cost_kind: 중개보수 / 법무비 / 인지세 / 국민주택채권 / 등기신청수수료 /"
+        " 증명서발급 / 기타\n"
+        "# region 을 비우면 전국 적용. 중개보수는 시·도 조례라 지역을 반드시 적는다\n"
+        "# vat_applicable=1 이면 부가가치세가 별도로 붙는다"
+        " (세율은 tax 표의 부가가치세 규칙에서 온다)\n"
+        "# 법무비는 대한법무사협회 보수표의 구간별 기본보수를 넣는다."
+        " 정액 30만원 같은 임의값을 쓰지 않는다\n"),
 }
 
 

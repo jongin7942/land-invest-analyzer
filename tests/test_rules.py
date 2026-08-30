@@ -447,7 +447,12 @@ class TestRuleImport:
             add_tax(conn, key="a", verified=VERIFIED)
             add_tax(conn, key="b", verified=None)
             cov = rule_repo.coverage(conn)
-        assert cov["tax"] == {"total": 2, "verified": 1}
+        # verified = last_verified 가 있어 계산에 쓸 수 있는 규칙
+        # confirmed = verification 이 VERIFIED 인 규칙 (직접 INSERT 는 기본값이 미확인)
+        assert cov["tax"]["total"] == 2
+        assert cov["tax"]["verified"] == 1
+        assert cov["tax"]["confirmed"] == 0
+        assert cov["tax"]["pending"] == 0
 
 
 class TestSchemaGuards:

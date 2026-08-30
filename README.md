@@ -116,7 +116,7 @@ DB 파일(`apt_invest.db`)도 별개다. 아파트 쪽 작업이 토지 파이�
 
 - 전체 설계·개발계획: [`docs_dev/00-현황분석-및-고도화계획.md`](docs_dev/00-현황분석-및-고도화계획.md)
 - 요구사항 60개 현황표: [`docs_dev/01-요구사항-60개-현황표.md`](docs_dev/01-요구사항-60개-현황표.md)
-- 진행 상황: **PHASE 0~6 완료** (기반·수집·대표가격·호가·규제세금대출·상대가치·촉매·재건축 사업성) · PHASE 7(현금흐름·세후 IRR) 착수 예정
+- 진행 상황: **PHASE 0~6 + 3.9 완료** (기반·수집·대표가격·호가·규제세금대출·상대가치·촉매·재건축 사업성·실투자금/ROE) · PHASE 7(현금흐름·세후 IRR) 착수 예정
 
 ## PHASE 0 — 기반
 
@@ -248,6 +248,99 @@ python -m apt_engine.cli cash "동아1단지" --price 6.2 --house-count 1 --verb
 - 토허를 모르면 전세보증금을 차감하지도, 차감했다고 말하지도 않는다
 - LTV 한도와 DSR 한도를 각각 내고 **더 작은 쪽**을 쓴다
 - 모르는 항목을 0으로 세지 않는다 — 확인 불가 항목이 있으면 "N억 이상"으로만 말한다
+
+## PHASE 3.9 — 대출 · 세금 · 취득비용 · 실투자금 (FINANCING / TAX / SELF CAPITAL)
+
+이 프로그램의 질문은 **"매매가가 얼마인가"가 아니라 "내 현금이 실제로 얼마 들어가는가"** 다.
+
+```bash
+python -m apt_engine.cli rule status                          # 규칙이 얼마나 찼나
+python -m apt_engine.cli rule template loan 대출.csv           # ★ 지금 비어 있는 곳
+python -m apt_engine.cli rule import   loan 대출.csv
+
+python -m apt_engine.cli profile set --name 종인 \
+    --cash 3 --income 0.8 --rate 0.045 --home-count 0          # 현금·소득 (하드코딩 금지)
+
+python -m apt_engine.cli cash "동아1단지" --price 6.2 --area 84.9 \
+    --income 0.8 --rate 0.045 --cash 3                         # 총취득비용 · 실투자금
+python -m apt_engine.cli budget --profile 종인 --band 84       # 살 수 있는 단지만
+```
+
+### 취득세는 세 세목을 따로 계산한다
+
+`취득세` / `지방교육세` / `농어촌특별세` 를 **하나의 합산세율로 저장하지 않는다.**
+셋의 과세표준과 감면이 서로 다르기 때문이다. 특히 농특세는 두 갈래로 나뉜다.
+
+| 항목 | 언제 생기나 |
+|---|---|
+| `rural_special_tax_regular` | 일반분. 전용 **85㎡ 이하는 비과세** |
+| `rural_special_tax_from_exemption` | 취득세를 **감면받으면 그 감면액에** 붙는다 |
+
+6억~9억 구간은 2% 고정이 아니라 **점증세율**이다 — `(취득가액 × 2 ÷ 3억 − 3) %`.
+7억은 1.6667%, 7.5억은 2%, 8억은 2.3333%. 구간 안에서 세율이 연속으로 변해 표에
+담을 수 없어서, `tax_rule.rate_formula` 에 산식을 넣고 제한된 AST 로 평가한다
+(`eval` 은 쓰지 않는다 — CSV 는 사람이 편집하는 파일이다).
+
+### 시행 중인 법령과 발표된 정책을 섞지 않는다
+
+모든 규칙에 `status` 가 붙는다.
+
+| status | 계산 |
+|---|---|
+| `ENACTED` | **계산에 쓰는 유일한 상태** |
+| `ANNOUNCED` · `PROPOSED` | 금액에 넣지 않고 "향후 정책 변경 가능"으로만 표시 |
+| `EXPIRED` | 백테스트에는 여전히 필요하다 |
+
+`verification`(VERIFIED / ESTIMATED / UNKNOWN / NEEDS_VERIFICATION)은 다른 축이다.
+**하나라도 UNKNOWN 이면 "실투자금 확정"이 아니라 "예상 실투자금"으로만 표시된다.**
+
+### 대출은 LTV 하나로 계산하지 않는다
+
+```
+POLICY_MAX_MORTGAGE = min(LTV 한도, DSR 한도, 절대 상한, 요청액)
+EXPECTED_MORTGAGE   = 은행 견적이 있으면 그 값, 없으면 정책 최대치 + 안내문구
+```
+
+정책값은 `loan_rule` 에 **rule_type(LTV / DSR / STRESS_DSR / MORTGAGE_CAP / DTI) 별로
+한 행씩** 들어간다. 한 행에 LTV 와 DSR 을 같이 적으면 시행일이 다른 두 정책을
+표현할 수 없다. 스트레스 가산금리는 **한도 계산에만** 쓰고 이자비용에는 쓰지 않는다
+(섞으면 이자가 부풀려진다). 한도 하나라도 확인 불가면 최종값에 "이보다 작을 수
+있음"이 붙는다 — 모르는 한도를 무한대로 두지 않는다.
+
+### 실투자금이 판정 기준이다
+
+```
+TOTAL_PURCHASE_COST   = 매수가 + 취득세 3종 + 중개보수(+VAT) + 법무·등기비 + 기타
+SELF_CAPITAL_REQUIRED = TOTAL_PURCHASE_COST − AVAILABLE_MORTGAGE − ASSUMABLE_DEPOSIT
+```
+
+"현금 3억"은 **매매가 3억 이하**가 아니라 **`SELF_CAPITAL_REQUIRED` ≤ 3억**이다.
+대출이 나오고 전세를 승계하면 6억짜리도 실투자금은 2억일 수 있고, 대출이 막히면
+4억짜리도 4.3억이 든다. 매매가로 거르면 둘 다 틀린다.
+
+실투자금을 **확정하지 못한 단지는 '매수 가능' 목록에 넣지 않는다.** 모르는 비용을
+0원으로, 모르는 대출을 최대치로 세면 살 수 없는 집이 살 수 있는 집으로 올라온다.
+
+### 내 돈 대비 수익률
+
+```
+EXPECTED_PROFIT = 예상 매도가 − 매도비용(양도세·지방소득세·중개보수) − 총취득비용 − 금융비용
+EXPECTED_ROE    = EXPECTED_PROFIT ÷ SELF_CAPITAL_REQUIRED
+```
+
+예상 매도가는 엔진이 만들지 않는다 — 넣지 않으면 수익률을 계산하지 않는다.
+`DOWNSIDE_RISK` 도 하락 시나리오 가격을 주지 않으면 '확인 불가'다.
+"보통 20% 빠진다" 같은 숫자를 만들지 않는다.
+
+### 백테스트가 규칙표에 직접 의존한다
+
+2021년 물건을 분석하면 2021년 당시 세법·LTV·DSR·규제지역이 적용돼야 한다.
+그래서 모든 규칙 조회는 `as_of` 를 **키워드 필수 인자**로 받고 기본값이 없다.
+정책이 바뀌면 기존 행을 덮어쓰지 말고 `effective_to` 를 채운 뒤 새 행을 추가한다.
+
+> **지금 비어 있는 것**: `rules/loan.csv` 의 LTV·DSR, 법무사 보수표, 다주택 취득세
+> 중과, 양도소득세. 무엇을 어디서 확인해야 하는지는
+> [`docs_dev/02-확인필요-정책값.md`](docs_dev/02-확인필요-정책값.md) 에 있다.
 
 ## PHASE 4 — 상대가치 (가격사다리 · 비교단지 · 가격비율)
 

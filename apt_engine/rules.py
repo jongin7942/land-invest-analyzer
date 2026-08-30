@@ -31,6 +31,36 @@ class NoRuleError(RuleError):
     """그 시점에 적용할 규칙이 아예 없다."""
 
 
+class NotEnactedError(RuleError):
+    """규칙은 있는데 아직 시행 전이다(발표·입법예고). 계산에 쓰지 않는다."""
+
+
+# ── 정책 생애주기 ─────────────────────────────────────────────────────
+ENACTED = "ENACTED"        # 시행 중. 계산에 쓰는 유일한 상태
+ANNOUNCED = "ANNOUNCED"    # 발표됐으나 시행 전
+PROPOSED = "PROPOSED"      # 입법예고·정책발표 단계
+EXPIRED = "EXPIRED"        # 시행이 끝남. 백테스트에는 여전히 필요하다
+STATUSES = (ENACTED, ANNOUNCED, PROPOSED, EXPIRED)
+
+# ── 데이터 신뢰도 (요구사항 17) ────────────────────────────────────────
+VERIFIED = "VERIFIED"                    # 사람이 원문을 확인함
+ESTIMATED = "ESTIMATED"                  # 추정치. 사전 확정이 불가능한 실비 등
+UNKNOWN = "UNKNOWN"                      # 값을 모른다
+NEEDS_VERIFICATION = "NEEDS_VERIFICATION"  # 값은 있으나 원문 확인 전
+VERIFICATIONS = (VERIFIED, ESTIMATED, UNKNOWN, NEEDS_VERIFICATION)
+
+# 신뢰도 합성 — 가장 약한 것이 이긴다(Calc.grade 와 같은 원칙).
+_VERIFICATION_ORDER = {VERIFIED: 0, ESTIMATED: 1, NEEDS_VERIFICATION: 2, UNKNOWN: 3}
+
+
+def weakest_verification(*levels: str) -> str:
+    """여러 항목을 합쳤을 때의 신뢰도. 하나라도 UNKNOWN 이면 결과는 UNKNOWN."""
+    known = [l for l in levels if l in _VERIFICATION_ORDER]
+    if not known:
+        return UNKNOWN
+    return max(known, key=_VERIFICATION_ORDER.__getitem__)
+
+
 def as_ymd(value: str | date) -> str:
     if isinstance(value, date):
         return value.isoformat()
@@ -113,6 +143,23 @@ class Rule:
         return bool(self.get("last_verified"))
 
     @property
+    def status(self) -> str:
+        """정책 생애주기. 계산에 쓰는 건 ENACTED 뿐이다."""
+        return str(self.get("status") or ENACTED)
+
+    @property
+    def enacted(self) -> bool:
+        return self.status == ENACTED
+
+    @property
+    def verification(self) -> str:
+        """데이터 신뢰도. VERIFIED / ESTIMATED / UNKNOWN / NEEDS_VERIFICATION."""
+        got = self.get("verification")
+        if got:
+            return str(got)
+        return VERIFIED if self.verified else NEEDS_VERIFICATION
+
+    @property
     def evidence(self) -> Evidence:
         return Evidence(
             source=self.get("source_name") or "수기 입력 규칙",
@@ -122,6 +169,20 @@ class Rule:
             note=(f"{self.get('effective_from')} ~ {self.get('effective_to') or '현재'}"
                   + ("" if self.verified else "  ⚠ 미검증")),
         )
+
+    def require_enacted(self, what: str) -> "Rule":
+        """시행 전 정책으로 실투자금을 계산하지 않는다.
+
+        발표만 된 정책(ANNOUNCED/PROPOSED)을 지금 계산에 넣으면, 아직 오지 않은
+        세제를 전제로 매수 판단을 하게 된다. 화면에는 '향후 정책 변경 가능'으로만
+        보여주고 금액에는 넣지 않는다.
+        """
+        if not self.enacted:
+            raise NotEnactedError(
+                f"{what} 규칙 '{self.get('rule_key')}' 은 status={self.status} 입니다. "
+                f"시행 중인 법령(ENACTED)만 계산에 씁니다 — "
+                f"발표·예정 정책은 '향후 정책 변경 가능'으로만 표시합니다.")
+        return self
 
     def require_verified(self, what: str) -> "Rule":
         if not self.verified:
@@ -135,10 +196,18 @@ class Rule:
 
 
 def pick(rows: list[sqlite3.Row], context: dict, *, amount: int | None = None,
-         min_col: str = "bracket_min", max_col: str = "bracket_max") -> list[Rule]:
-    """조건과 금액구간이 맞는 규칙만 남기고, 구체적인 것부터 정렬한다."""
+         min_col: str = "bracket_min", max_col: str = "bracket_max",
+         statuses: tuple[str, ...] = (ENACTED,)) -> list[Rule]:
+    """조건과 금액구간이 맞는 규칙만 남기고, 구체적인 것부터 정렬한다.
+
+    기본적으로 **시행 중인 규칙만** 돌려준다. 발표·예정 정책을 보려면
+    statuses 를 명시한다 — 그 경우 호출부가 그것을 금액에 넣지 않을 책임을 진다.
+    """
     out: list[Rule] = []
     for row in rows:
+        status = _maybe(row, "status") or ENACTED
+        if statuses and status not in statuses:
+            continue
         ok, score = matches(_maybe(row, "conditions_json"), context)
         if not ok:
             continue

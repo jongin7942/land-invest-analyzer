@@ -147,3 +147,28 @@ class TestDatabasesAreSeparate:
                     if name.split(".")[0] in forbidden:
                         offenders.append(f"{path.name}: {name}")
         assert offenders == [], f"아파트 엔진이 토지 모듈을 참조합니다: {offenders}"
+
+    def test_모듈_최상위에_같은_이름의_함수가_두_번_정의되지_않는다(self):
+        """뒤에 정의된 함수가 앞의 것을 조용히 덮어쓰는 사고를 막는다.
+
+        실제로 `_resolve_complex` 를 두 번 정의해 cash·loan·relative·catalyst 가
+        통째로 깨진 적이 있다. import 는 성공하고 --help 도 통과해서, 그 명령을
+        실행해 보기 전까지 아무도 모른다.
+        """
+        import ast
+        from collections import Counter
+        from pathlib import Path
+
+        offenders = []
+        root = Path(__file__).resolve().parents[1]
+        for path in list(root.joinpath("apt_engine").rglob("*.py")) + [
+                root / "pipeline.py", root / "app.py"]:
+            if not path.exists():
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            names = Counter(n.name for n in tree.body
+                            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)))
+            for name, count in names.items():
+                if count > 1:
+                    offenders.append(f"{path.relative_to(root)}: {name} × {count}")
+        assert offenders == [], f"같은 이름의 함수가 여러 번 정의됐습니다: {offenders}"

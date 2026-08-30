@@ -1,3 +1,59 @@
-rule_key,conditions_json,price_min,price_max,ltv,dsr,dti,stress_rate_bp,max_loan_amount,residence_required,effective_from,effective_to,source_name,source_url,last_verified,note
-# 예) ltv/무주택/비규제,"{""house_count"":0,""regulated"":false}",0,,0.70,0.40,,150,,0,2024-09-01,,금융위원회 보도자료,https://...,2026-08-30,
-# ltv/dsr 은 0.70 또는 70% 둘 다 됨. stress_rate_bp 는 스트레스 DSR 가산금리(bp)
+rule_key,rule_type,value,conditions_json,region,regulated_area,home_status,first_home_buyer,price_min,price_max,ltv,dsr,dti,stress_rate_bp,max_loan_amount,residence_required,effective_from,effective_to,source_name,source_url,last_verified,status,verification,note
+# ─────────────────────────────────────────────────────────────────────────────
+# 대출 규칙표.  **한 행에 정책 하나**를 적는다(rule_type).
+#
+#   rule_type   LTV           담보인정비율. value = 0.70 또는 70 (둘 다 됨)
+#               DSR           총부채원리금상환비율. value = 0.40 또는 40
+#               STRESS_DSR    스트레스 가산금리. value = **bp** (예: 150 = 1.5%p)
+#               MORTGAGE_CAP  대출 총액 상한. value = 원 (예: 600000000)
+#               DTI           총부채상환비율(쓰는 경우)
+#
+# 최종 대출 한도 = min(LTV 한도, DSR 한도, 절대 상한, 요청액) 이다.
+# 넷 중 하나라도 규칙이 없으면 그 한도는 '확인 불가' 이고, 최종값에
+# "이 값보다 작을 수 있음" 이 붙는다. 모르는 한도를 무한대로 두지 않는다.
+#
+# 조건 컬럼은 **비우면 '무관'** 이다. 값을 적으면 반드시 맞아야 그 규칙이 잡힌다.
+#   region           시도 (서울/경기/인천). 비우면 전국
+#   regulated_area   1=규제지역 / 0=비규제지역 / 비움=무관
+#   home_status      무주택 / 1주택 / 다주택 / 비움=무관
+#   first_home_buyer 1=생애최초만 / 0=생애최초 아닌 경우만 / 비움=무관
+#   price_min~max    주택가격 구간(원)
+#
+# ★★ 백테스트가 이 표에 직접 의존한다(§18).
+#    2021년 물건을 분석하면 2021년 당시 LTV·DSR 이 적용돼야 한다.
+#    정책이 바뀌면 기존 행의 effective_to 를 채우고 **새 행을 추가**하세요.
+#    기존 행의 값을 덮어쓰면 과거 분석이 조용히 틀려집니다.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# ★ 지금 이 파일에는 **활성 규칙이 하나도 없습니다.**
+#   그래서 대출 가능액이 '확인 불가' 로 나오고, 실투자금도 확정되지 않습니다.
+#
+#   아래 행들의 <value> 를 금융위원회 보도자료·감독규정에서 확인해 채우고
+#   맨 앞의 '#' 을 지우면 즉시 동작합니다.
+#   ※ Claude 가 값을 채우지 않은 이유: 이 작업 환경에서 금융위(fsc.go.kr)·
+#     법제처 원문 접근이 차단돼 있고, 웹검색으로 나온 블로그 수치는 공식 출처가
+#     아니어서 임의 입력하지 않았습니다. (지시문: "검증되지 않은 정책 숫자를
+#     임의로 만들어 넣지 마라")
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# ── LTV ─────────────────────────────────────────────────────────────────────
+#ltv/무주택/비규제,LTV,<value>,,,0,무주택,,0,,,,,,,0,<시행일>,,금융위원회 보도자료,https://www.fsc.go.kr,<확인일>,ENACTED,VERIFIED,
+#ltv/무주택/규제,LTV,<value>,,,1,무주택,,0,,,,,,,1,<시행일>,,금융위원회 보도자료,https://www.fsc.go.kr,<확인일>,ENACTED,VERIFIED,
+#ltv/생애최초,LTV,<value>,,,,,1,0,,,,,,,0,<시행일>,,금융위원회 보도자료,https://www.fsc.go.kr,<확인일>,ENACTED,VERIFIED,
+#ltv/1주택/비규제,LTV,<value>,,,0,1주택,,0,,,,,,,0,<시행일>,,금융위원회 보도자료,https://www.fsc.go.kr,<확인일>,ENACTED,VERIFIED,
+#ltv/1주택/규제,LTV,<value>,,,1,1주택,,0,,,,,,,1,<시행일>,,금융위원회 보도자료,https://www.fsc.go.kr,<확인일>,ENACTED,VERIFIED,
+#ltv/다주택/규제,LTV,<value>,,,1,다주택,,0,,,,,,,0,<시행일>,,금융위원회 보도자료,https://www.fsc.go.kr,<확인일>,ENACTED,VERIFIED,
+#
+# ── DSR ─────────────────────────────────────────────────────────────────────
+#dsr/기본,DSR,<value>,,,,,,0,,,,,,,0,<시행일>,,금융위원회 감독규정,https://www.fsc.go.kr,<확인일>,ENACTED,VERIFIED,
+#
+# ── 스트레스 DSR (가산금리, 단위 bp) ────────────────────────────────────────
+# 한도 계산에만 쓰이고 실제 이자비용에는 쓰이지 않습니다(둘을 섞으면 비용이 부풀려집니다).
+#stress/수도권/변동금리,STRESS_DSR,<bp>,,수도권,,,,0,,,,,,,0,<시행일>,,금융위원회 보도자료,https://www.fsc.go.kr,<확인일>,ENACTED,VERIFIED,
+#
+# ── 대출 총액 상한 ──────────────────────────────────────────────────────────
+#cap/수도권주담대,MORTGAGE_CAP,<원>,,,,,,0,,,,,,,0,<시행일>,,금융위원회 보도자료,https://www.fsc.go.kr,<확인일>,ENACTED,VERIFIED,
+#
+# ── 발표됐지만 아직 시행 전인 정책은 status 를 ANNOUNCED 로 ────────────────
+# 이렇게 넣으면 실투자금 계산에는 **들어가지 않고** '향후 정책 변경 가능' 으로만 보입니다.
+#ltv/개편안,LTV,<value>,,,,,,0,,,,,,,0,<시행예정일>,,금융위원회 발표,https://www.fsc.go.kr,<확인일>,ANNOUNCED,NEEDS_VERIFICATION,시행 전 — 계산에 넣지 않음
