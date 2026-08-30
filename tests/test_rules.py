@@ -513,3 +513,47 @@ class TestRateFormula:
         from apt_engine.tax.rules import eval_rate_formula
         with pytest.raises(rules.RuleError, match="0으로"):
             eval_rate_formula("1 / 0", 1)
+
+
+class TestRegionScopedCost:
+    """중개보수는 시·도 조례라 cost_rule.region 에 시도가 적힌다.
+
+    equity.compute() 호출부가 region 을 빠뜨리면 지역이 적힌 규칙이 통째로
+    걸러져 '규칙 미입력' 으로 보인다 — last_verified 를 채워도 영원히 안 잡힌다.
+    lawd_cd 에서 시도를 유도하는지 고정한다.
+    """
+
+    def test_시도는_lawd_cd_에서_유도된다(self):
+        from apt_engine import regions
+        assert regions.sido_of("28237") == "인천"   # 부평구
+        assert regions.sido_of("11680") == "서울"   # 강남구
+        assert regions.sido_of("41135") == "경기"   # 분당구
+
+    def test_지역이_적힌_중개보수_규칙이_잡힌다(self, db):
+        with get_conn(db) as conn:
+            conn.execute(
+            "INSERT INTO cost_rule (cost_kind, rule_key, region, price_min, price_max,"
+            " rate, effective_from, source_name, last_verified) "
+            "VALUES ('중개보수','brok/test','인천',200000000,900000000,0.004,"
+            "'2021-10-19','테스트','2026-08-31')")
+
+            from apt_engine.cash import equity
+            eq = equity.compute(conn, price=620_000_000, as_of="2026-08-31",
+                            house_count=1, lawd_cd="28237", emd_name="부평동")
+            brok = next(i for i in eq.items if i.name == "중개보수")
+            assert brok.known, f"지역 규칙이 걸러졌다: {brok.note}"
+            assert brok.amount == 2_480_000      # 6.2억 × 0.4%
+
+    def test_다른_시도의_규칙은_안_잡힌다(self, db):
+        with get_conn(db) as conn:
+            conn.execute(
+            "INSERT INTO cost_rule (cost_kind, rule_key, region, price_min, price_max,"
+            " rate, effective_from, source_name, last_verified) "
+            "VALUES ('중개보수','brok/seoul','서울',200000000,900000000,0.004,"
+            "'2021-10-19','테스트','2026-08-31')")
+
+            from apt_engine.cash import equity
+            eq = equity.compute(conn, price=620_000_000, as_of="2026-08-31",
+                            house_count=1, lawd_cd="28237", emd_name="부평동")
+            brok = next(i for i in eq.items if i.name == "중개보수")
+            assert not brok.known, "서울 조례가 인천 매물에 적용됐다"
