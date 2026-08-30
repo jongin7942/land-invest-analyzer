@@ -10,7 +10,13 @@ from datetime import date
 
 from apt_engine import regions
 from apt_engine.collectors import apt_rent, apt_trade, kapt, matcher, molit
+from apt_engine.listing import change as change_mod
+from apt_engine.listing import distribution as dist_mod
+from apt_engine.listing import gap as gap_mod
+from apt_engine.listing import pressure as pressure_mod
+from apt_engine.listing.provider import ManualListingProvider
 from apt_engine.price import snapshot as snap_mod
+from apt_engine.repo import listing as listing_repo
 from apt_engine.db.connection import get_conn
 from apt_engine.repo import apt as repo
 
@@ -254,3 +260,136 @@ def _recent_from(as_of_ym: str, months: int) -> list[str]:
     total = y * 12 + (m - 1)
     return [f"{(total - k) // 12:04d}{(total - k) % 12 + 1:02d}"
             for k in range(months - 1, -1, -1)]
+
+
+# ── 호가 (PHASE 2.5) ──────────────────────────────────────────────────
+
+def import_listings(path: str, *, fmt: str = "csv", seen_on: str | None = None,
+                    provider: str | None = None, db_path: str | None = None,
+                    deactivate: bool = True, progress=print) -> dict:
+    """수기 매물 파일을 읽어 저장하고, 그날의 스냅샷을 찍고, 단지에 붙인다."""
+    loader = (ManualListingProvider.from_csv if fmt == "csv"
+              else ManualListingProvider.from_json)
+    prov = loader(path, seen_on=seen_on, provider=provider)
+    rows = prov.get_all()
+    if not rows:
+        return {"read": 0, "new": 0, "updated": 0, "snapshot": 0, "matched": 0}
+
+    seen = prov.seen_on
+    with get_conn(db_path) as conn:
+        src = repo.source_id(conn, "manual_listing")
+
+        # 단지 매칭 — 실거래와 같은 규칙을 쓴다.
+        cache: dict[str, list] = {}
+        matched = 0
+        for r in rows:
+            lawd = r.get("lawd_cd")
+            if not lawd:
+                # 시군구를 안 적었으면 이름만으로 전체에서 찾는다(동명 단지는 붙지 않는다).
+                found = repo.find_complexes(conn, r["apt_name"])
+                exact = [c for c in found
+                         if c["name_norm"] == matcher.normalize(r["apt_name"])]
+                if len(exact) == 1:
+                    r["complex_id"] = exact[0]["id"]
+                    r["match_confidence"] = "EXACT"
+                    r["match_reason"] = "이름 완전일치(시군구 미지정)"
+                    r["lawd_cd"] = exact[0]["lawd_cd"]
+                    matched += 1
+                else:
+                    r["match_confidence"] = "NONE"
+                    r["match_reason"] = (
+                        f"lawd_cd 없이 이름으로 {len(exact)}개 후보 — 특정 불가. "
+                        f"CSV 에 lawd_cd 를 넣으면 정확해집니다")
+                continue
+            if lawd not in cache:
+                cache[lawd] = repo.candidates_for(conn, lawd)
+            result = matcher.match(r["apt_name"], cache[lawd])
+            r["complex_id"] = result.complex_id
+            r["match_confidence"] = result.confidence
+            r["match_reason"] = result.reason
+            matched += 1 if result.complex_id else 0
+
+        stats = listing_repo.upsert_listings(conn, rows, src_id=src)
+        snapped = listing_repo.save_daily_snapshot(conn, rows, seen)
+        gone = (listing_repo.deactivate_missing(conn, prov.provider, seen)
+                if deactivate else 0)
+        repo.log_collection(conn, "manual_listing", target=path, period=seen,
+                            status="OK", row_count=len(rows))
+
+    progress(f"  매물 {len(rows)}건 · 신규 {stats['new']} · 갱신 {stats['updated']} · "
+             f"단지매칭 {matched} · 시장이탈 처리 {gone}")
+    return {"read": len(rows), **stats, "snapshot": snapped,
+            "matched": matched, "deactivated": gone}
+
+
+def analyze_listings(*, complex_id: int, area_band: str, trade_type: str = "매매",
+                     window_days: int = 30, db_path: str | None = None) -> dict:
+    """호가 분포 + 실거래 괴리 + 변화 + 시장압력. 없는 부분은 None 으로 돌려준다."""
+    from datetime import datetime, timedelta
+
+    with get_conn(db_path) as conn:
+        listings = listing_repo.active_listings(
+            conn, complex_id=complex_id, area_band=area_band, trade_type=trade_type)
+        dist = dist_mod.analyze(listings, trade_type=trade_type) if listings else None
+
+        ps_row = repo.latest_price_snapshot(conn, complex_id, area_band)
+        trades = repo.trades_for(conn, complex_id, area_band)
+        recent = None
+        normal = [t for t in trades if not t["cancel_yn"] and t["deal_type"] != "직거래"]
+        if normal:
+            recent = int(max(normal, key=lambda t: t["deal_ymd"])["deal_amount"])
+
+        dates = listing_repo.snapshot_dates(
+            conn, complex_id=complex_id, area_band=area_band, trade_type=trade_type)
+        chg = None
+        if len(dates) >= 2:
+            latest = dates[-1]
+            target = (datetime.fromisoformat(latest) - timedelta(days=window_days)).date()
+            earlier = next((d for d in reversed(dates[:-1])
+                            if datetime.fromisoformat(d).date() <= target), dates[0])
+            chg = change_mod.compare(
+                listing_repo.snapshot_rows(conn, earlier, complex_id=complex_id,
+                                           area_band=area_band, trade_type=trade_type),
+                listing_repo.snapshot_rows(conn, latest, complex_id=complex_id,
+                                           area_band=area_band, trade_type=trade_type),
+                from_date=earlier, to_date=latest)
+
+        trade_trend = _snapshot_trend(conn, "price_snapshot", "representative_price",
+                                      complex_id, area_band)
+        jeonse_trend = _snapshot_trend(conn, "jeonse_snapshot", "representative_deposit",
+                                       complex_id, area_band)
+
+    press = pressure_mod.build(change=chg, trade_trend=trade_trend,
+                               jeonse_trend=jeonse_trend)
+    gap_calc = None
+    if dist is not None:
+        ps = _row_to_snapshot(ps_row)
+        gap_calc = gap_mod.analyze(dist, ps, recent_trade_price=recent)
+
+    return {"distribution": dist, "gap": gap_calc, "change": chg,
+            "pressure": press, "recent_trade": recent,
+            "price_snapshot_row": ps_row, "listing_count": len(listings)}
+
+
+def _snapshot_trend(conn, table: str, col: str, complex_id: int,
+                    area_band: str) -> float | None:
+    """최근 두 스냅샷의 변화율. 하나뿐이면 방향을 알 수 없으므로 None."""
+    rows = conn.execute(
+        f"SELECT {col} FROM {table} WHERE complex_id=? AND area_band=? "
+        f"ORDER BY as_of_ym DESC LIMIT 2", (complex_id, area_band)).fetchall()
+    if len(rows) < 2 or not rows[1][0]:
+        return None
+    return (rows[0][0] - rows[1][0]) / rows[1][0]
+
+
+def _row_to_snapshot(row):
+    """DB 행 → 괴리 계산이 쓸 수 있는 최소 형태."""
+    if row is None:
+        return None
+    from apt_engine.trace import Calc
+
+    class _S:
+        usable = True
+        value = row["representative_price"]
+        calc = Calc.from_json(row["calc_trace"])
+    return _S()

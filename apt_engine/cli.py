@@ -11,8 +11,14 @@
     python -m apt_engine.cli match                              # 단지 매칭
     python -m apt_engine.cli snapshot                           # 대표가격·전세가·전세가율
 
+    # 호가 — 외부 API 없이 수기 입력만으로 돌아간다
+    python -m apt_engine.cli listing template 매물.csv           # 입력 서식 생성
+    python -m apt_engine.cli listing import 매물.csv             # 매물 저장 + 오늘 스냅샷
+    python -m apt_engine.cli listing note --complex-id 1 ...     # 중개사 협상가 기록
+
     # 조회
     python -m apt_engine.cli price "동아1단지"                    # 근거까지 펼쳐서 보기
+    python -m apt_engine.cli market "동아1단지" --band 84         # 호가·괴리·변화·시장압력
 
     # 점검
     python -m apt_engine.cli status
@@ -298,6 +304,136 @@ def _print_band_price(conn, complex_id, band, *, verbose=False):
             print(f"    {line}")
 
 
+# ── 호가 ──────────────────────────────────────────────────────────────
+
+def cmd_listing(args):
+    from apt_engine.listing.provider import ListingError, write_template
+    from apt_engine.repo import listing as listing_repo
+
+    if args.action == "template":
+        path = write_template(args.path)
+        print(f"입력 서식을 만들었습니다: {path}\n"
+              f"이 파일의 컬럼에 맞춰 매물을 적은 뒤 `listing import` 하세요.\n"
+              f"가격은 6.2(억) 또는 620000000(원) 둘 다 됩니다.")
+        return
+
+    if args.action == "import":
+        try:
+            s = ingest.import_listings(args.path, fmt=args.format, seen_on=args.date,
+                                       db_path=args.db)
+        except ListingError as e:
+            sys.exit(f"입력 파일에 문제가 있습니다:\n{e}")
+        print(f"\n읽음 {s['read']}건 · 신규 {s['new']} · 갱신 {s['updated']} · "
+              f"스냅샷 {s['snapshot']} · 단지매칭 {s['matched']}")
+        if s["matched"] < s["read"]:
+            print("※ 단지에 못 붙은 매물이 있습니다. CSV 에 lawd_cd 열을 넣으면 정확해집니다.")
+        return
+
+    if args.action == "note":
+        with get_conn(args.db) as conn:
+            nid = listing_repo.add_field_note(
+                conn, complex_id=args.complex_id, area_band=args.band,
+                noted_on=args.date or _today(), kind=args.kind,
+                note=args.note, source=args.source,
+                price=_parse_price_arg(args.price))
+        print(f"현장 확인값 #{nid} 저장 — 이 값은 호가가 아니라 '{args.kind}' 로 "
+              f"별도 보관됩니다(요구사항 46).")
+
+
+def _today():
+    from datetime import date
+    return date.today().isoformat()
+
+
+def _parse_price_arg(raw):
+    if raw is None:
+        return None
+    from apt_engine.listing.provider import parse_price
+    return parse_price(raw)
+
+
+def cmd_market(args):
+    """호가 분포 · 실거래 괴리 · 매물 변화 · 시장압력 (요구사항 4·5·8·9·10)."""
+    from apt_engine import area, units
+    from apt_engine.repo import listing as listing_repo
+
+    with get_conn(args.db) as conn:
+        matches = repo.find_complexes(conn, args.query)
+        if not matches:
+            print(f"'{args.query}' 로 찾은 단지가 없습니다.")
+            return
+        row = (conn.execute("SELECT * FROM complex WHERE id=?", (args.complex_id,)).fetchone()
+               if args.complex_id else matches[0])
+        if len(matches) > 1 and not args.complex_id:
+            print(f"'{args.query}' 로 {len(matches)}개 검색됨 — 첫 번째를 씁니다. "
+                  f"--complex-id 로 지정하세요.")
+        _print_complex_header(row)
+
+    band = args.band or area.DEFAULT_BAND
+    res = ingest.analyze_listings(complex_id=row["id"], area_band=band,
+                                  trade_type=args.trade_type,
+                                  window_days=args.window, db_path=args.db)
+
+    print(f"\n  ── 전용 {area.label_of(band)} · {args.trade_type} ──")
+    dist = res["distribution"]
+    if dist is None:
+        print("    현재 호가: 확인 불가 (매물 미입력 — `listing import` 필요)")
+    else:
+        print(f"    매물 {dist.count}건 (중복 제거 추정 {dist.dedupe.range_label})"
+              + (f" · 특수매물 {dist.special_count}건" if dist.special_count else ""))
+        print(f"    최저호가        {units.fmt_eok(dist.low):>10s}"
+              + ("  ⚠ 특수매물" if dist.low_is_special else ""))
+        if dist.low_normal is not None:
+            print(f"    정상매물 최저호가 {units.fmt_eok(dist.low_normal):>9s}")
+        print(f"    중위호가        {units.fmt_eok(dist.median):>10s}"
+              f"   (25% {units.fmt_eok(dist.p25)} · 75% {units.fmt_eok(dist.p75)} · "
+              f"최고 {units.fmt_eok(dist.high)})")
+        for group, d in dist.by_floor_group.items():
+            print(f"      {group} {d['n']}건 · 중앙 {units.fmt_eok(d['median'])}")
+        if dist.special_flags:
+            print(f"    특수조건: " + " · ".join(f"{k} {v}건"
+                                                for k, v in dist.special_flags.items()))
+
+    ps = res["price_snapshot_row"]
+    if ps is None:
+        print("\n    대표 실거래가: 확인 불가 (`cli snapshot` 필요)")
+    else:
+        print(f"\n    대표 실거래가   {units.fmt_eok(ps['representative_price']):>10s}"
+              f"   [{ps['confidence']}] {ps['sample_n']}건")
+        if res["recent_trade"]:
+            print(f"    최근 실거래 1건 {units.fmt_eok(res['recent_trade']):>10s}")
+
+    gap = res["gap"]
+    if gap is not None and gap.value is not None:
+        print(f"\n    호가·실거래 괴리")
+        for k, v in gap.intermediates.items():
+            print(f"      {k}: {v}")
+
+    chg = res["change"]
+    print()
+    if chg is None:
+        print(f"    매물 변화: 확인 불가 (스냅샷이 2일 이상 쌓여야 계산됩니다)")
+    else:
+        for line in chg.summary_lines():
+            print(f"    {line}")
+
+    press = res["pressure"]
+    if not press.available_components:
+        # 근거가 하나도 없는데 50점 중립이라고 쓰면 판단한 것처럼 보인다.
+        print("\n    시장압력: 확인 불가 (매물 스냅샷을 며칠 쌓아야 계산됩니다)")
+    else:
+        print(f"\n    시장압력 {press.score}/100 → {press.direction}"
+              f"   (근거 확보율 {press.coverage*100:.0f}%)")
+    for c in press.components:
+        mark = "·" if c.available else "?"
+        print(f"      {mark} {c.key:<8s} {c.note}")
+
+    if args.verbose:
+        print("\n    ── 계산 근거 ──")
+        for line in press.calc.explain().splitlines():
+            print(f"    {line}")
+
+
 # ── 파서 ──────────────────────────────────────────────────────────────
 
 def build_parser() -> argparse.ArgumentParser:
@@ -342,6 +478,27 @@ def build_parser() -> argparse.ArgumentParser:
     pc.add_argument("--band", help="전용면적 밴드 (예: 84). 미지정시 전부")
     pc.add_argument("--verbose", action="store_true", help="계산 근거 전문 출력")
 
+    li = sub.add_parser("listing", help="호가(매물) 입력·기록")
+    li.add_argument("action", choices=["template", "import", "note"])
+    li.add_argument("path", nargs="?", help="CSV/JSON 파일 경로")
+    li.add_argument("--format", choices=["csv", "json"], default="csv")
+    li.add_argument("--date", help="관측일 YYYY-MM-DD (기본: 오늘)")
+    li.add_argument("--complex-id", type=int, help="note: 단지 ID")
+    li.add_argument("--band", help="note: 전용면적 밴드")
+    li.add_argument("--kind", default="협상가",
+                    choices=["협상가", "임장관찰", "중개사확인", "기타"])
+    li.add_argument("--price", help="note: 금액 (6.05 = 6.05억)")
+    li.add_argument("--note", default="", help="note: 내용")
+    li.add_argument("--source", default="", help="note: 누구에게 들었나(필수)")
+
+    mk = sub.add_parser("market", help="호가 분포·괴리·변화·시장압력")
+    mk.add_argument("query", help="단지명 일부")
+    mk.add_argument("--complex-id", type=int)
+    mk.add_argument("--band", help="전용면적 밴드 (기본 84)")
+    mk.add_argument("--trade-type", default="매매", choices=["매매", "전세", "월세"])
+    mk.add_argument("--window", type=int, default=30, help="변화 비교 기간(일)")
+    mk.add_argument("--verbose", action="store_true")
+
     sub.add_parser("validate", help="요구사항 26 검증 규칙 실행")
 
     re_ = sub.add_parser("report", help="진단 리포트")
@@ -354,6 +511,7 @@ HANDLERS = {
     "init": cmd_init, "status": cmd_status, "probe": cmd_probe,
     "collect": cmd_collect, "match": cmd_match,
     "snapshot": cmd_snapshot, "price": cmd_price,
+    "listing": cmd_listing, "market": cmd_market,
     "validate": cmd_validate, "report": cmd_report,
 }
 

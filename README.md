@@ -115,7 +115,8 @@ python publish.py    # docs/ 정적사이트 재생성 + git commit + push
 DB 파일(`apt_invest.db`)도 별개다. 아파트 쪽 작업이 토지 파이프라인을 건드릴 수 없다.
 
 - 전체 설계·개발계획: [`docs_dev/00-현황분석-및-고도화계획.md`](docs_dev/00-현황분석-및-고도화계획.md)
-- 진행 상황: **PHASE 0(기반) · PHASE 1(데이터 구조 + 수집 + 단지 매칭) 완료** · PHASE 2(대표가격) 착수 예정
+- 요구사항 60개 현황표: [`docs_dev/01-요구사항-60개-현황표.md`](docs_dev/01-요구사항-60개-현황표.md)
+- 진행 상황: **PHASE 0(기반) · 1(수집·매칭) · 2(대표가격) · 2.5(호가) 완료** · PHASE 3(규제·세금·대출) 착수 예정
 
 ## PHASE 0 — 기반
 
@@ -191,6 +192,40 @@ python -m apt_engine.cli validate            # 검증 규칙 12종
 `report unmatched` 에 자주 나오는 이름이 있으면 `apt_engine/collectors/matcher.py` 의
 `BRAND_ALIASES` 에 표기 규칙을 추가하고 `python -m apt_engine.cli match --rebuild` 로 다시 붙인다.
 **원자료는 건드리지 않으므로 매칭은 몇 번이든 다시 할 수 있다.**
+
+## PHASE 2 — 대표가격 · 전세 · 전세가율
+
+```bash
+python -m apt_engine.cli snapshot --window 6      # 최근 6개월 창으로 대표가격 산출
+python -m apt_engine.cli snapshot --months 60     # 과거 60개월 시계열까지 (요구사항 4의 재료)
+python -m apt_engine.cli price "동아1단지" --verbose  # 근거까지 펼쳐 보기
+```
+
+단일 최고가를 현재가격으로 쓰지 않는다. 취소거래·직거래·월세 낀 계약은 무조건 빼고,
+1층·통계적 이상치·갱신요구권 갱신계약은 표본이 3건 아래로 떨어질 때만 되살리며
+**되살렸다는 사실을 계산근거에 남긴다.** 신뢰도는 10건+ HIGH / 3~9 MEDIUM / 1~2 LOW.
+
+## PHASE 2.5 — 호가 (외부 API 불필요)
+
+실거래와 호가는 다른 것이라 테이블부터 분리돼 있다. 지금은 수기 입력만 지원한다.
+
+```bash
+python -m apt_engine.cli listing template 매물.csv    # 입력 서식 생성
+# 서식에 임장/네이버에서 본 매물을 적는다. 가격은 6.2(억) 또는 620000000(원) 둘 다 됨
+python -m apt_engine.cli listing import 매물.csv      # 저장 + 오늘 스냅샷 + 단지 매칭
+python -m apt_engine.cli market "동아1단지" --band 84  # 분포·괴리·변화·시장압력
+```
+
+**매일 한 번씩 넣으면** 7/30/90일 매물 증감·가격인하·최저호가 변화가 계산되고,
+그게 시장압력 점수(매도자우위/매수자우위)의 근거가 된다. 하루치만 있으면
+점수를 만들지 않고 "확인 불가"로 표시한다.
+
+중개사에게 들은 협상 가능가는 호가가 **아니다**. 별도 테이블에 출처와 함께 기록한다.
+
+```bash
+python -m apt_engine.cli listing note --complex-id 1 --band 84 \
+  --kind 중개사확인 --price 6.05 --note "6.05억이면 맞출 수 있다고 함" --source "○○공인 김실장"
+```
 
 ### PHASE 1 이 막는 것
 
