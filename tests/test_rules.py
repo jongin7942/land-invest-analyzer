@@ -557,3 +557,53 @@ class TestRegionScopedCost:
                             house_count=1, lawd_cd="28237", emd_name="부평동")
             brok = next(i for i in eq.items if i.name == "중개보수")
             assert not brok.known, "서울 조례가 인천 매물에 적용됐다"
+
+
+class TestPermitCoverageBySido:
+    """토허 커버리지는 시·도 단위다.
+
+    토허는 시·도별로 따로 고시된다. 인천 자료만 넣은 상태에서 서울 매물을
+    '확인함, 지정 없음' 으로 단정하면 전세보증금을 근거 없이 차감하게 된다.
+    요구사항 62-11 이 막으려는 바로 그 동작이다.
+    """
+
+    INCHEON_FOREIGN = (
+        "INSERT INTO land_permit_zone (lawd_cd, designator, target_scope,"
+        " effective_from, effective_to, jeonse_succession_allowed,"
+        " source_name, last_verified) "
+        "VALUES ('28237','인천광역시장','외국인','2025-08-26','2026-08-25',0,"
+        "'테스트','2026-08-31')")
+
+    def test_자료가_전혀_없으면_확인_불가(self, db):
+        with get_conn(db) as conn:
+            st = zone_mod.permit_zone_at(conn, "28237", as_of="2026-08-01",
+                                     scope=zone_mod.DOMESTIC)
+            assert st.checked is False
+            assert st.can_use_jeonse is None
+
+    def test_같은_시도_자료가_있으면_확인된_것으로_본다(self, db):
+        with get_conn(db) as conn:
+            conn.execute(self.INCHEON_FOREIGN)
+            # 부평구 내국인 매수 — 외국인 지정은 적용되지 않는다
+            st = zone_mod.permit_zone_at(conn, "28237", as_of="2026-08-01",
+                                     scope=zone_mod.DOMESTIC)
+            assert st.checked is True
+            assert st.designated is False
+            assert st.can_use_jeonse is True
+
+    def test_다른_시도는_여전히_확인_불가(self, db):
+        with get_conn(db) as conn:
+            conn.execute(self.INCHEON_FOREIGN)
+            # 인천 자료만 넣었다. 서울 강남구를 안다고 하면 안 된다.
+            st = zone_mod.permit_zone_at(conn, "11680", as_of="2026-08-01",
+                                     scope=zone_mod.DOMESTIC)
+            assert st.checked is False
+            assert st.can_use_jeonse is None
+
+    def test_외국인_지정은_외국인_매수에만_걸린다(self, db):
+        with get_conn(db) as conn:
+            conn.execute(self.INCHEON_FOREIGN)
+            st = zone_mod.permit_zone_at(conn, "28237", as_of="2026-08-01",
+                                     scope=zone_mod.FOREIGN)
+            assert st.designated is True
+            assert st.can_use_jeonse is False
