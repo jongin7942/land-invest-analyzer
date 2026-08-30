@@ -472,3 +472,44 @@ class TestSchemaGuards:
                 conn.execute(
                     "INSERT INTO tax_rule (tax_kind, rule_key, effective_from) "
                     "VALUES ('개근세','x','2020-01-01')")
+
+
+class TestRateFormula:
+    """지방세법 제11조 6억~9억 구간처럼 세율이 구간 안에서 연속으로 변하는 조문.
+
+    표로 못 담아서 산식을 넣는다. CSV 는 사람이 손으로 채우는 파일이므로
+    eval() 을 쓰지 않고 ast 화이트리스트로 제한 평가한다.
+    """
+
+    ACQ = "(base * 2 / 300000000 - 3) / 100"
+
+    @pytest.mark.parametrize("price,expected_pct", [
+        (600_000_000, 1.0),      # 구간 시작 — 6억 이하 세율 1% 와 이어진다
+        (750_000_000, 2.0),      # 한가운데
+        (900_000_000, 3.0),      # 구간 끝 — 9억 초과 세율 3% 와 이어진다
+    ])
+    def test_지방세법_구간_산식(self, price, expected_pct):
+        from apt_engine.tax.rules import eval_rate_formula
+        assert eval_rate_formula(self.ACQ, price) * 100 == pytest.approx(expected_pct)
+
+    @pytest.mark.parametrize("expr", [
+        '__import__("os").system("echo x")',
+        'open("secret.txt").read()',
+        'foo + 1',
+        '(1).__class__',
+    ])
+    def test_임의_코드는_거부한다(self, expr):
+        from apt_engine.tax.rules import eval_rate_formula
+        with pytest.raises(rules.RuleError):
+            eval_rate_formula(expr, 600_000_000)
+
+    def test_세율_범위를_벗어나면_거부한다(self):
+        # 단위를 틀려서 100 배로 적는 실수(1% 를 1 로) 를 잡는다.
+        from apt_engine.tax.rules import eval_rate_formula
+        with pytest.raises(rules.RuleError, match="세율 범위"):
+            eval_rate_formula("base / 1000", 600_000_000)
+
+    def test_0으로_나누면_거부한다(self):
+        from apt_engine.tax.rules import eval_rate_formula
+        with pytest.raises(rules.RuleError, match="0으로"):
+            eval_rate_formula("1 / 0", 1)

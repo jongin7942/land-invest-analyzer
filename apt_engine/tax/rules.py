@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+import ast
+
 import sqlite3
 from datetime import date
 
@@ -43,6 +45,58 @@ def pick_one(conn: sqlite3.Connection, tax_kind: str, *, as_of: str | date,
     return rule if allow_unverified else rule.require_verified(tax_kind)
 
 
+# rate_formula 에서 허용하는 것 — 숫자, 사칙연산, 괄호, 변수 `base` 뿐이다.
+# 함수 호출·속성 접근·이름 참조는 전부 거부한다.
+_ALLOWED_BINOPS = (ast.Add, ast.Sub, ast.Mult, ast.Div)
+
+
+def eval_rate_formula(expr: str, base: int) -> float:
+    """'(base * 2 / 300000000 - 3) / 100' 같은 산식을 제한 평가해 세율을 낸다.
+
+    지방세법 제11조 6억~9억 구간처럼 **구간 안에서 세율이 연속으로 변하는** 조문을
+    표에 담을 수 없어서 필요하다. CSV 는 사람이 편집하는 파일이므로 eval() 은 쓰지 않는다.
+    """
+    try:
+        tree = ast.parse(expr, mode="eval")
+    except SyntaxError as e:
+        raise rules.RuleError(f"rate_formula 를 읽을 수 없습니다: {expr!r} ({e})") from e
+
+    def walk(node):
+        if isinstance(node, ast.Expression):
+            return walk(node.body)
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, (int, float)) and not isinstance(node.value, bool):
+                return float(node.value)
+            raise rules.RuleError(f"rate_formula 에 숫자가 아닌 값: {node.value!r}")
+        if isinstance(node, ast.Name):
+            if node.id == "base":
+                return float(base)
+            raise rules.RuleError(
+                f"rate_formula 에서 쓸 수 있는 변수는 'base' 뿐입니다: {node.id!r}")
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+            v = walk(node.operand)
+            return v if isinstance(node.op, ast.UAdd) else -v
+        if isinstance(node, ast.BinOp) and isinstance(node.op, _ALLOWED_BINOPS):
+            left, right = walk(node.left), walk(node.right)
+            if isinstance(node.op, ast.Add):
+                return left + right
+            if isinstance(node.op, ast.Sub):
+                return left - right
+            if isinstance(node.op, ast.Mult):
+                return left * right
+            if right == 0:
+                raise rules.RuleError(f"rate_formula 에서 0으로 나눕니다: {expr!r}")
+            return left / right
+        raise rules.RuleError(
+            f"rate_formula 에 허용되지 않은 식이 있습니다: {ast.dump(node)[:80]}")
+
+    rate = walk(tree)
+    if not (0 <= rate <= 1):
+        raise rules.RuleError(
+            f"rate_formula 결과가 세율 범위(0~1)를 벗어났습니다: {rate} — 식: {expr!r}")
+    return rate
+
+
 def apply_rate(rule: rules.Rule, base: int) -> tuple[int, str]:
     """규칙 하나를 과세표준에 적용. (세액, 계산식 문자열)."""
     from apt_engine import units
@@ -52,13 +106,19 @@ def apply_rate(rule: rules.Rule, base: int) -> tuple[int, str]:
         return int(fixed), f"정액 {units.fmt_won(int(fixed))}"
 
     rate = rule.get("rate")
+    note = ""
     if rate is None:
-        raise rules.RuleError(
-            f"규칙 '{rule.get('rule_key')}' 에 rate 도 fixed_amount 도 없습니다")
+        expr = rule.get("rate_formula")
+        if not expr:
+            raise rules.RuleError(
+                f"규칙 '{rule.get('rule_key')}' 에 rate 도 rate_formula 도 "
+                f"fixed_amount 도 없습니다")
+        rate = eval_rate_formula(str(expr), base)
+        note = f" [산식 {expr}]"
 
     deduction = int(rule.get("progressive_deduction") or 0)
     amount = int(units.won_round(base * float(rate))) - deduction
-    formula = f"{units.fmt_eok(base)} × {units.fmt_pct(float(rate), digits=2)}"
+    formula = f"{units.fmt_eok(base)} × {units.fmt_pct(float(rate), digits=2)}{note}"
     if deduction:
         formula += f" − 누진공제 {units.fmt_won(deduction)}"
     return max(amount, 0), formula
