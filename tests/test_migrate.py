@@ -118,7 +118,7 @@ class TestRealMigrations:
         mig.migrate(tmp_db)
         with get_conn(tmp_db) as conn:
             conn.execute("INSERT INTO data_source (key, name, kind) VALUES (?,?,?)",
-                         ("molit_apt_trade", "국토부 아파트 매매 실거래가", "API"))
+                         ("test_source", "테스트 출처", "API"))
             with pytest.raises(sqlite3.IntegrityError):
                 conn.execute("INSERT INTO data_source (key, name, kind) VALUES (?,?,?)",
                              ("bad", "정체불명", "그냥어디선가"))

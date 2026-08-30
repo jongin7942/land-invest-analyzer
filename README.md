@@ -115,7 +115,7 @@ python publish.py    # docs/ 정적사이트 재생성 + git commit + push
 DB 파일(`apt_invest.db`)도 별개다. 아파트 쪽 작업이 토지 파이프라인을 건드릴 수 없다.
 
 - 전체 설계·개발계획: [`docs_dev/00-현황분석-및-고도화계획.md`](docs_dev/00-현황분석-및-고도화계획.md)
-- 진행 상황: **PHASE 0(기반) 완료** · PHASE 1(데이터 구조 + 수집 + 단지 매칭) 착수 예정
+- 진행 상황: **PHASE 0(기반) · PHASE 1(데이터 구조 + 수집 + 단지 매칭) 완료** · PHASE 2(대표가격) 착수 예정
 
 ## PHASE 0 — 기반
 
@@ -132,11 +132,76 @@ DB 파일(`apt_invest.db`)도 별개다. 아파트 쪽 작업이 토지 파이�
 pip install -r requirements-dev.txt   # 런타임 3종 + pytest
 
 python -m apt_engine.cli init         # apt_invest.db 생성 + 마이그레이션 적용
-python -m apt_engine.cli status       # 스키마 버전 · 테이블 현황
+python -m apt_engine.cli status       # 스키마 버전 · 테이블 · 매칭 현황
 
 pytest                                # 전체 테스트 (토지 프로그램 회귀 포함)
 pytest tests/test_land_regression.py  # 토지 프로그램만 회귀 확인
 ```
+
+## PHASE 1 — 데이터 수집
+
+### 사전 준비 — data.go.kr 활용신청 3종
+
+기존 `DATA_GO_KR_SERVICE_KEY` 를 그대로 쓴다. 데이터셋별 활용신청만 추가하면 된다.
+
+1. **국토교통부_아파트 매매 실거래가 상세 자료** — 거래유형(중개/직거래)·해제여부·등기일자 포함
+2. **국토교통부_아파트 전월세 실거래가 자료** — 계약구분(신규/갱신)·갱신요구권 포함
+3. **한국부동산원_공동주택 단지 기본정보(K-apt)** — 세대수·동수·사용승인일. **없으면 "1,000세대 이상" 필터가 불가능하다**
+
+### 필드명 먼저 확인 (권장)
+
+개발 환경에서 data.go.kr 에 접근할 수 없어 응답 필드명을 라이브 검증하지 못했다.
+2023년 개편 전후의 영문·한글 이름을 모두 후보로 넣어 뒀지만, 첫 수집 전에 한 번 확인하는 게 안전하다.
+
+```bash
+python -m apt_engine.cli probe trade --lawd 11680 --ym 202607
+python -m apt_engine.cli probe rent  --lawd 11680 --ym 202607
+python -m apt_engine.cli probe kapt-list --lawd 11680
+```
+
+응답의 필드명이 다르면 해당 수집기(`apt_engine/collectors/apt_trade.py` 등)의
+`FIELDS` 후보에 한 줄 추가하면 된다. K-apt 는 엔드포인트 버전(V2/V3)이 자주 바뀌어
+후보 URL 을 순서대로 시도하도록 돼 있다.
+
+### 수집 — 순서가 중요하다
+
+단지가 먼저 있어야 실거래를 붙일 수 있다.
+
+```bash
+python -m apt_engine.cli collect complexes            # K-apt 단지 (수도권 전체, 시간 걸림)
+python -m apt_engine.cli collect trades --months 60   # 매매 5년치
+python -m apt_engine.cli collect rents  --months 60   # 전월세 5년치
+python -m apt_engine.cli match                        # 단지 매칭
+python -m apt_engine.cli validate                     # 요구사항 26 검증
+```
+
+수도권 약 80개 시군구 × 60개월 × 2종 ≒ **1만 회 호출**이라 하룻밤 걸린다.
+중단해도 이미 저장된 건 건너뛰므로 다시 돌리면 이어서 받는다.
+`--sido 서울` 로 좁히거나 `--months 12` 로 짧게 시작해도 된다.
+
+### 점검
+
+```bash
+python -m apt_engine.cli status              # 매칭 신뢰도별 분포
+python -m apt_engine.cli report unmatched    # 안 붙은 단지명 (빈도순)
+python -m apt_engine.cli report gaps         # 시군구별 수집 공백 월
+python -m apt_engine.cli validate            # 검증 규칙 12종
+```
+
+`report unmatched` 에 자주 나오는 이름이 있으면 `apt_engine/collectors/matcher.py` 의
+`BRAND_ALIASES` 에 표기 규칙을 추가하고 `python -m apt_engine.cli match --rebuild` 로 다시 붙인다.
+**원자료는 건드리지 않으므로 매칭은 몇 번이든 다시 할 수 있다.**
+
+### PHASE 1 이 막는 것
+
+| 요구사항 26 | 어떻게 막는가 |
+|---|---|
+| 26-1 999세대를 1000세대 필터에 넣지 말 것 | 세대수 필터가 `apt_households >= N` 만 본다 |
+| 26-2 아파트와 오피스텔 세대수를 합치지 말 것 | **합계 컬럼을 아예 만들지 않았다** |
+| 26-3 근거 없이 단지를 합치지 말 것 | `complex_group.merge_reason` NOT NULL + 매칭이 애매하면 안 붙임 |
+| 26-4 84㎡에 59/74/101을 섞지 말 것 | 모든 거래에 `area_band` 저장(84 = 80~85㎡), 검증 규칙이 대조 |
+| 26-5 취소거래 | `cancel_yn` / `cancel_ymd` 수집 |
+| 26-6 직거래를 동일 취급하지 말 것 | `deal_type` 수집 + 비어 있으면 검증이 경고 |
 
 각 PHASE 를 끝낼 때마다 `pytest tests/test_land_regression.py` 로 **기존 토지 기능이
 그대로인지** 확인한다. 이 테스트는 네트워크를 타지 않아 API 키 없이도 돌아간다.
