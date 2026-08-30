@@ -34,6 +34,11 @@ _db_path_raw = os.getenv("DB_PATH", "").strip() or "land_invest.db"
 # (app.py 를 다른 작업폴더에서 launch.json으로 띄우면 cwd가 달라져 엉뚱한 빈 DB가 생기는 버그 방지)
 DB_PATH = _db_path_raw if os.path.isabs(_db_path_raw) else str(BASE_DIR / _db_path_raw)
 
+# 아파트 투자분석 엔진 전용 DB(apt_engine 패키지). 토지 DB와 **별도 파일**로 둔다 —
+# 아파트 쪽 재수집·마이그레이션이 잘 돌아가는 land_invest.db 를 건드릴 수 없게 하기 위해서다.
+_apt_db_path_raw = os.getenv("APT_DB_PATH", "").strip() or "apt_invest.db"
+APT_DB_PATH = _apt_db_path_raw if os.path.isabs(_apt_db_path_raw) else str(BASE_DIR / _apt_db_path_raw)
+
 # 카톡 알림에 넣을 웹앱 링크의 기준 주소. .env 에 BASE_URL 을 직접 지정하면 그걸 쓰고,
 # 없으면 이 PC의 LAN IP로 자동 구성한다(같은 와이파이의 폰에서 접속 가능, PC 켜져있어야 함).
 BASE_URL = os.getenv("BASE_URL", "").strip() or f"http://{_lan_ip()}:5000"

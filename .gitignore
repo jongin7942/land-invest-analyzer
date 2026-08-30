@@ -4,3 +4,4 @@
 __pycache__/
 *.pyc
 kakao_token.json
+.pytest_cache/

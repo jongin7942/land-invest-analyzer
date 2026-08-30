@@ -136,7 +136,7 @@ def main(argv=None):
     p.add_argument("--area", type=float, help="대지면적 ㎡")
     p.add_argument("--price", type=float, help="매물가(만원)")
     p.add_argument("--min-samples", type=int, default=5, help="기준선 최소 표본수")
-    p.add_argument("--threshold", type=float, default=15.0, help="급매 판정 저평가율(%)")
+    p.add_argument("--threshold", type=float, default=15.0, help="급매 판정 저평가율(%%)")  # argparse가 help를 %-포맷하므로 %는 %%로 escape
     args = p.parse_args(argv)
 
     if args.address:
