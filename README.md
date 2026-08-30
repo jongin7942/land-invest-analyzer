@@ -116,7 +116,7 @@ DB 파일(`apt_invest.db`)도 별개다. 아파트 쪽 작업이 토지 파이�
 
 - 전체 설계·개발계획: [`docs_dev/00-현황분석-및-고도화계획.md`](docs_dev/00-현황분석-및-고도화계획.md)
 - 요구사항 60개 현황표: [`docs_dev/01-요구사항-60개-현황표.md`](docs_dev/01-요구사항-60개-현황표.md)
-- 진행 상황: **PHASE 0(기반) · 1(수집·매칭) · 2(대표가격) · 2.5(호가) 완료** · PHASE 3(규제·세금·대출) 착수 예정
+- 진행 상황: **PHASE 0(기반) · 1(수집·매칭) · 2(대표가격) · 2.5(호가) · 3(규제·세금·대출) · 4(상대가치) 완료** · PHASE 5(교통호재·공급) 착수 예정
 
 ## PHASE 0 — 기반
 
@@ -226,6 +226,49 @@ python -m apt_engine.cli market "동아1단지" --band 84  # 분포·괴리·변
 python -m apt_engine.cli listing note --complex-id 1 --band 84 \
   --kind 중개사확인 --price 6.05 --note "6.05억이면 맞출 수 있다고 함" --source "○○공인 김실장"
 ```
+
+## PHASE 3 — 규제 · 토허 · 세법 · 대출 · 실투자금
+
+이 영역에는 공식 API 가 없다. 값을 코드에 적지 않고 규칙 테이블에 넣으며,
+**사람이 원문을 확인했다는 표시(`last_verified`)가 없으면 엔진이 계산을 거부**한다.
+
+```bash
+python -m apt_engine.cli rule status                    # 채워진 정도
+python -m apt_engine.cli rule template tax  세법.csv     # 서식 (값은 비어 있다)
+python -m apt_engine.cli rule import   tax  세법.csv
+python -m apt_engine.cli rule verify   tax  --id 3      # 원문 확인 표시
+
+python -m apt_engine.cli regulation "동아1단지"           # 규제지역·토허 판정
+python -m apt_engine.cli loan "동아1단지" --price 6.2 --income 1.0 --house-count 1
+python -m apt_engine.cli cash "동아1단지" --price 6.2 --house-count 1 --verbose
+```
+
+실투자금이 나오는 최소 조합은 **취득세 + 중개보수 + 대출(LTV/DSR)** 셋이다.
+
+- 토허를 모르면 전세보증금을 차감하지도, 차감했다고 말하지도 않는다
+- LTV 한도와 DSR 한도를 각각 내고 **더 작은 쪽**을 쓴다
+- 모르는 항목을 0으로 세지 않는다 — 확인 불가 항목이 있으면 "N억 이상"으로만 말한다
+
+## PHASE 4 — 상대가치 (가격사다리 · 비교단지 · 가격비율)
+
+```bash
+python -m apt_engine.cli ladder template 사다리.csv   # 축 서식 (요구사항의 예시 축 포함)
+# lawd_cd 를 채운 뒤
+python -m apt_engine.cli ladder import 사다리.csv
+python -m apt_engine.cli ladder list
+
+python -m apt_engine.cli relative build --band 84
+python -m apt_engine.cli relative show "동아1단지" --band 84 --verbose
+```
+
+가격사다리는 데이터가 아니라 **도메인 지식**이라 사람이 적고, 축마다 근거(`rationale`)와
+작성자(`curated_by`)를 남긴다. 사다리가 비어 있으면 비교단지가 거의 안 잡히는데,
+그게 의도한 동작이다 — "비슷해 보여서" 골라주지 않는다.
+
+- 비교단지는 **선정 근거를 항목별 점수로** 남긴다(`selection_reason_json` NOT NULL)
+- Current Ratio(지금)와 Historical Normal Ratio(과거 정상)를 다른 테이블에 둔다
+- 시장 상승기/하락기는 공식 지수가 없어 **자체 판정**이고, 그 사실을 근거에 남긴다
+- 비율이 벌어졌다는 사실만 말하고 "저평가"라고 선언하지 않는다 — 벌어진 이유는 PHASE 5의 일
 
 ### PHASE 1 이 막는 것
 

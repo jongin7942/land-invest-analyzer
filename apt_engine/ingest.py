@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import json
 from datetime import date
 
 from apt_engine import regions
@@ -16,6 +17,9 @@ from apt_engine.listing import gap as gap_mod
 from apt_engine.listing import pressure as pressure_mod
 from apt_engine.listing.provider import ManualListingProvider
 from apt_engine.price import snapshot as snap_mod
+from apt_engine.relative import benchmark as bench_mod
+from apt_engine.relative import ratio as ratio_mod
+from apt_engine.repo import relative as rel_repo
 from apt_engine.repo import listing as listing_repo
 from apt_engine.db.connection import get_conn
 from apt_engine.repo import apt as repo
@@ -393,3 +397,108 @@ def _row_to_snapshot(row):
         value = row["representative_price"]
         calc = Calc.from_json(row["calc_trace"])
     return _S()
+
+
+# ── 상대가치 (PHASE 4) ────────────────────────────────────────────────
+
+def build_benchmarks(*, area_band: str, min_households: int | None = None,
+                     sido: str | None = None, top_n: int = bench_mod.DEFAULT_TOP_N,
+                     db_path: str | None = None, progress=print) -> dict:
+    """모든 단지에 비교단지를 붙인다. 근거가 부족한 단지는 0개로 남는다."""
+    stats = {"targets": 0, "with_benchmarks": 0, "relations": 0, "no_ground": 0}
+    with get_conn(db_path) as conn:
+        pool = rel_repo.candidates(conn, area_band, min_households=min_households,
+                                   sido=sido)
+        stats["targets"] = len(pool)
+        if not pool:
+            progress("  대표가격이 있는 단지가 없습니다 — `cli snapshot` 을 먼저 돌리세요.")
+            return stats
+
+        for i, target in enumerate(pool, 1):
+            picks = bench_mod.select(conn, target, pool, top_n=top_n)
+            if not picks:
+                stats["no_ground"] += 1
+                continue
+            rel_repo.replace_benchmarks(
+                conn, target.complex_id, area_band,
+                [(p, bench_mod.to_calc(target, p)) for p in picks])
+            stats["with_benchmarks"] += 1
+            stats["relations"] += len(picks)
+            if i % 200 == 0:
+                progress(f"  {i}/{len(pool)}")
+    return stats
+
+
+def build_ratios(*, area_band: str, db_path: str | None = None,
+                 progress=print) -> dict:
+    """비교단지별 월별 가격비율 시계열 + 구간별 정상비율."""
+    stats = {"pairs": 0, "ratios": 0, "norms": 0, "skipped": 0}
+    with get_conn(db_path) as conn:
+        pairs = conn.execute(
+            "SELECT DISTINCT complex_id, benchmark_complex_id FROM benchmark_relation "
+            "WHERE area_band = ?", (area_band,)).fetchall()
+        stats["pairs"] = len(pairs)
+
+        snapshot_cache: dict[int, dict] = {}
+
+        def snaps(cid: int) -> dict:
+            if cid not in snapshot_cache:
+                snapshot_cache[cid] = rel_repo.snapshots_by_ym(conn, cid, area_band)
+            return snapshot_cache[cid]
+
+        for i, pair in enumerate(pairs, 1):
+            cid, bid = pair["complex_id"], pair["benchmark_complex_id"]
+            mine, theirs = snaps(cid), snaps(bid)
+            shared = sorted(set(mine) & set(theirs))
+            if not shared:
+                stats["skipped"] += 1
+                continue
+
+            for ym in shared:
+                calc = ratio_mod.current_ratio(mine[ym], theirs[ym], area_band=area_band)
+                if calc is None:
+                    continue
+                year_ago = _shift_ym(ym, -12)
+                phase = ratio_mod.market_phase(
+                    theirs[ym]["representative_price"],
+                    theirs[year_ago]["representative_price"] if year_ago in theirs else None)
+                rel_repo.save_ratio(
+                    conn, complex_id=cid, benchmark_id=bid, area_band=area_band,
+                    as_of_ym=ym, ratio=calc.value,
+                    price_snapshot_id=mine[ym]["id"],
+                    benchmark_snapshot_id=theirs[ym]["id"],
+                    market_phase=phase,
+                    confidence=calc.intermediates["신뢰도"], calc=calc)
+                stats["ratios"] += 1
+
+            history = rel_repo.ratio_history(conn, cid, bid, area_band)
+            for norm in ratio_mod.normals(history, as_of_ym=shared[-1]):
+                rel_repo.save_norm(conn, complex_id=cid, benchmark_id=bid,
+                                   area_band=area_band, norm=norm)
+                stats["norms"] += 1
+            if i % 200 == 0:
+                progress(f"  {i}/{len(pairs)}")
+    return stats
+
+
+def _shift_ym(ym: str, months: int) -> str:
+    total = int(ym[:4]) * 12 + (int(ym[4:]) - 1) + months
+    return f"{total // 12:04d}{total % 12 + 1:02d}"
+
+
+def relative_view(*, complex_id: int, area_band: str,
+                  db_path: str | None = None) -> dict:
+    """한 단지의 상대가치 — 비교단지별 현재비율 · 정상비율 · 격차."""
+    out = {"benchmarks": []}
+    with get_conn(db_path) as conn:
+        rows = rel_repo.benchmarks_of(conn, complex_id, area_band)
+        for b in rows:
+            bid = b["benchmark_complex_id"]
+            latest = rel_repo.latest_ratio(conn, complex_id, bid, area_band)
+            norms = {n["window_key"]: n
+                     for n in rel_repo.norms_of(conn, complex_id, bid, area_band)}
+            out["benchmarks"].append({
+                "row": b, "latest": latest, "norms": norms,
+                "reasons": json.loads(b["selection_reason_json"]),
+            })
+    return out

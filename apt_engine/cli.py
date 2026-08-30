@@ -24,6 +24,12 @@
     # 조회
     python -m apt_engine.cli price "동아1단지"                    # 근거까지 펼쳐서 보기
     python -m apt_engine.cli cash "동아1단지" --price 6.2 --house-count 1   # 실투자금
+
+    # 상대가치 — 가격사다리를 먼저 채워야 비교단지가 잡힌다
+    python -m apt_engine.cli ladder template 사다리.csv
+    python -m apt_engine.cli ladder import 사다리.csv
+    python -m apt_engine.cli relative build --band 84
+    python -m apt_engine.cli relative show "동아1단지" --band 84
     python -m apt_engine.cli market "동아1단지" --band 84         # 호가·괴리·변화·시장압력
 
     # 점검
@@ -620,6 +626,116 @@ def _resolve_complex(conn, args):
     return matches[0]
 
 
+# ── 상대가치 (PHASE 4) ────────────────────────────────────────────────
+
+def cmd_ladder(args):
+    from apt_engine.relative import ladder as ladder_mod
+
+    if args.action == "template":
+        path = ladder_mod.write_template(args.path)
+        print(f"가격사다리 서식을 만들었습니다: {path}\n"
+              f"요구사항에 적어주신 축들을 넣어 뒀습니다. **lawd_cd 가 비어 있는 노드는 "
+              f"비교단지 매칭에 쓰이지 않으니** 시군구코드를 채워 넣으세요.\n"
+              f"축 순서·구성은 자유롭게 고치시면 됩니다 — 이건 데이터가 아니라 도메인 지식입니다.")
+        return
+
+    if args.action == "import":
+        with get_conn(args.db) as conn:
+            try:
+                s = ladder_mod.import_csv(conn, args.path)
+            except ladder_mod.LadderError as e:
+                sys.exit(f"사다리 파일에 문제가 있습니다:\n  {e}")
+        print(f"축 {s['axes']}개 · 노드 {s['nodes']}개 등록")
+        return
+
+    if args.action == "list":
+        with get_conn(args.db) as conn:
+            axes = ladder_mod.list_axes(conn)
+            if not axes:
+                print("등록된 축이 없습니다. `ladder template` 로 시작하세요.")
+                return
+            for a in axes:
+                labels = ladder_mod.axis_labels(conn, a["id"])
+                print(f"\n■ {a['name']}  ({a['node_count']}개 · {a['curated_by']})")
+                print(f"  {' → '.join(labels)}")
+                print(f"  근거: {a['rationale']}")
+
+
+def cmd_relative(args):
+    from apt_engine import area, units
+
+    if args.action == "build":
+        band = args.band or area.DEFAULT_BAND
+        print(f"비교단지 선정 (전용 {area.label_of(band)})...")
+        b = ingest.build_benchmarks(area_band=band, min_households=args.min_households,
+                                    sido=args.sido, db_path=args.db)
+        print(f"  대상 {b['targets']}개 · 비교단지 붙은 단지 {b['with_benchmarks']}개 · "
+              f"관계 {b['relations']}개 · 근거부족 {b['no_ground']}개")
+        if b["no_ground"] and b["no_ground"] >= b["targets"] * 0.5:
+            print("  ※ 근거부족이 많습니다 — 가격사다리(`ladder import`)의 lawd_cd 가 "
+                  "채워졌는지 확인하세요.")
+        if not b["relations"]:
+            return
+        print("\n가격비율 시계열 계산...")
+        r = ingest.build_ratios(area_band=band, db_path=args.db)
+        print(f"  쌍 {r['pairs']}개 · 월별 비율 {r['ratios']}건 · "
+              f"구간별 정상비율 {r['norms']}건 · 공통기간없음 {r['skipped']}개")
+        return
+
+    if args.action == "show":
+        band = args.band or area.DEFAULT_BAND
+        with get_conn(args.db) as conn:
+            row = _resolve_complex(conn, args)
+            if row is None:
+                return
+            _print_complex_header(row)
+        view = ingest.relative_view(complex_id=row["id"], area_band=band, db_path=args.db)
+
+        print(f"\n  ── 전용 {area.label_of(band)} 상대가치 ──")
+        if not view["benchmarks"]:
+            print("    비교단지: 확인 불가 (`relative build` 미실행 또는 근거 부족)")
+            print("    가격사다리에 이 지역이 등록돼 있는지 확인하세요 — 사다리 없이는")
+            print("    '비슷해 보여서' 골라주지 않습니다.")
+            return
+
+        for b in view["benchmarks"]:
+            r, latest, norms = b["row"], b["latest"], b["norms"]
+            print(f"\n    [{r['rank']}] {r['benchmark_name']} "
+                  f"({regions.name_of(r['benchmark_lawd'])})"
+                  f"  유사도 {r['similarity']:.2f}"
+                  + (f" · {r['axis_name']} 축" if r["axis_name"] else ""))
+            print(f"        선정근거: {b['reasons'].get('근거', '')}")
+            top = sorted(b["reasons"].get("항목점수", {}).items(),
+                         key=lambda kv: -kv[1])[:3]
+            print(f"        항목: " + " · ".join(f"{k} {v:.2f}" for k, v in top))
+
+            if latest is None:
+                print("        가격비율: 확인 불가 (공통 기준월의 대표가격 없음)")
+                continue
+            print(f"        현재비율  {units.fmt_pct(latest['ratio']):>7s}"
+                  f"   ({latest['as_of_ym']} · {latest['confidence']})")
+            for key in ("all", "5y", "상승기", "하락기"):
+                n = norms.get(key)
+                if n:
+                    print(f"        정상비율  {units.fmt_pct(n['median_ratio']):>7s}"
+                          f"   ({key} · {n['sample_n']}개월 · "
+                          f"{n['from_ym']}~{n['to_ym']})")
+            base = norms.get("5y") or norms.get("all")
+            if base:
+                delta = latest["ratio"] - base["median_ratio"]
+                verdict = ("가격격차가 벌어진 상태" if delta < -0.02
+                           else "과거보다 좁혀진 상태" if delta > 0.02 else "과거 수준")
+                print(f"        차이      {units.fmt_pct(delta, sign=True):>7s}"
+                      f"   → {verdict}")
+
+        if args.verbose and view["benchmarks"]:
+            from apt_engine.trace import Calc
+            print("\n    ── 선정 계산 근거 (1순위) ──")
+            for line in Calc.from_json(
+                    view["benchmarks"][0]["row"]["calc_trace"]).explain().splitlines():
+                print(f"    {line}")
+
+
 # ── 파서 ──────────────────────────────────────────────────────────────
 
 def build_parser() -> argparse.ArgumentParser:
@@ -727,6 +843,19 @@ def build_parser() -> argparse.ArgumentParser:
     ca.add_argument("--as-of", help="기준일 YYYY-MM-DD")
     ca.add_argument("--verbose", action="store_true")
 
+    la = sub.add_parser("ladder", help="가격사다리 축 정의 (도메인 지식 수기 입력)")
+    la.add_argument("action", choices=["template", "import", "list"])
+    la.add_argument("path", nargs="?", help="CSV 파일 경로")
+
+    rl = sub.add_parser("relative", help="비교단지 선정 · 가격비율")
+    rl.add_argument("action", choices=["build", "show"])
+    rl.add_argument("query", nargs="?", help="show: 단지명 일부")
+    rl.add_argument("--complex-id", type=int)
+    rl.add_argument("--band", help="전용면적 밴드 (기본 84)")
+    rl.add_argument("--min-households", type=int, help="build: 세대수 하한")
+    rl.add_argument("--sido", choices=["서울", "경기", "인천"])
+    rl.add_argument("--verbose", action="store_true")
+
     sub.add_parser("validate", help="요구사항 26 검증 규칙 실행")
 
     re_ = sub.add_parser("report", help="진단 리포트")
@@ -741,6 +870,7 @@ HANDLERS = {
     "snapshot": cmd_snapshot, "price": cmd_price,
     "listing": cmd_listing, "market": cmd_market,
     "rule": cmd_rule, "regulation": cmd_regulation, "loan": cmd_loan, "cash": cmd_cash,
+    "ladder": cmd_ladder, "relative": cmd_relative,
     "validate": cmd_validate, "report": cmd_report,
 }
 
