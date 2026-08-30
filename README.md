@@ -116,7 +116,7 @@ DB 파일(`apt_invest.db`)도 별개다. 아파트 쪽 작업이 토지 파이�
 
 - 전체 설계·개발계획: [`docs_dev/00-현황분석-및-고도화계획.md`](docs_dev/00-현황분석-및-고도화계획.md)
 - 요구사항 60개 현황표: [`docs_dev/01-요구사항-60개-현황표.md`](docs_dev/01-요구사항-60개-현황표.md)
-- 진행 상황: **PHASE 0(기반) · 1(수집·매칭) · 2(대표가격) · 2.5(호가) · 3(규제·세금·대출) · 4(상대가치) 완료** · PHASE 5(교통호재·공급) 착수 예정
+- 진행 상황: **PHASE 0~5 완료** (기반·수집·대표가격·호가·규제세금대출·상대가치·촉매) · PHASE 6(재건축 사업성) 착수 예정
 
 ## PHASE 0 — 기반
 
@@ -269,6 +269,32 @@ python -m apt_engine.cli relative show "동아1단지" --band 84 --verbose
 - Current Ratio(지금)와 Historical Normal Ratio(과거 정상)를 다른 테이블에 둔다
 - 시장 상승기/하락기는 공식 지수가 없어 **자체 판정**이고, 그 사실을 근거에 남긴다
 - 비율이 벌어졌다는 사실만 말하고 "저평가"라고 선언하지 않는다 — 벌어진 이유는 PHASE 5의 일
+
+## PHASE 5 — 교통호재 · 공급 · 개통 선행사례
+
+```bash
+python -m apt_engine.cli transit template 교통.csv    # 노선·역 단계 서식
+python -m apt_engine.cli transit import 교통.csv
+python -m apt_engine.cli supply  template 공급.csv    # 입주물량 서식
+python -m apt_engine.cli supply  import 공급.csv
+
+python -m apt_engine.cli geocode --limit 200          # 단지 좌표 (V-World, 기존 키)
+python -m apt_engine.cli catalyst build --as-of 2026-08-31 --years 5
+python -m apt_engine.cli catalyst show "동아1단지" --verbose
+```
+
+**계획과 개통을 절대 섞지 않는다.** `status`(계획/예타/기본계획/착공/공사중/개통예정/개통)와
+`status_date`(그 단계가 된 날 — 사실), `expected_open_ym`(개통 예정 — 추정),
+`opened_ym`(실제 개통 — 사실)이 각각 다른 컬럼이다. `status='개통'` 인데 `opened_ym` 이
+없으면 DB가 거부한다.
+
+- **호재를 투자기간과 연결**한다 — "2035년 개통 예정, 투자기간 5년 → 개통은 기간 밖,
+  기대감만 기간 안"
+- **"GTX 생기면 몇 % 오른다"를 만들지 않는다.** 이미 개통한 역의
+  *역세권/비역세권 가격비율* 변화만 기록한다. 시장 전체의 등락은 분자·분모에서 상쇄된다
+- 직선거리와 도보거리를 구분한다. 직선 500m 를 "도보 7분 역세권"이라 부르지 않는다
+- 공급은 반경별로 세되 **어느 기준으로 셌는지 밝힌다**. 좌표 없는 공급을 뺐으면 그것도 알린다
+- 근거 없는 촉매는 `evidence_json` NOT NULL 이라 저장 자체가 안 된다
 
 ### PHASE 1 이 막는 것
 

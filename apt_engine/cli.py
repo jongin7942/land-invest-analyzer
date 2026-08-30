@@ -30,6 +30,14 @@
     python -m apt_engine.cli ladder import 사다리.csv
     python -m apt_engine.cli relative build --band 84
     python -m apt_engine.cli relative show "동아1단지" --band 84
+
+    # 촉매 — 교통호재·공급. 계획과 개통을 섞지 않는다
+    python -m apt_engine.cli transit template 교통.csv
+    python -m apt_engine.cli transit import 교통.csv
+    python -m apt_engine.cli supply  template 공급.csv
+    python -m apt_engine.cli geocode --limit 200          # 단지 좌표 채우기(V-World)
+    python -m apt_engine.cli catalyst build --as-of 2026-08-31 --years 5
+    python -m apt_engine.cli catalyst show "동아1단지"
     python -m apt_engine.cli market "동아1단지" --band 84         # 호가·괴리·변화·시장압력
 
     # 점검
@@ -736,6 +744,159 @@ def cmd_relative(args):
                 print(f"    {line}")
 
 
+# ── 촉매 (PHASE 5) ────────────────────────────────────────────────────
+
+def cmd_transit(args):
+    from apt_engine.repo import catalyst as cat_repo
+
+    if args.action == "template":
+        path = cat_repo.write_transit_template(args.path)
+        print(f"교통사업 서식을 만들었습니다: {path}\n"
+              f"★ status 는 계획/예비타당성/기본계획/착공/공사중/개통예정/개통 중 하나입니다.\n"
+              f"  '개통'으로 적으려면 opened_ym 이 반드시 있어야 합니다.\n"
+              f"  status_date(단계가 된 날, 사실)와 expected_open_ym(개통 예정, 추정)을\n"
+              f"  같은 칸에 넣지 마세요 — 계획이 확정 호재로 둔갑하는 가장 흔한 경로입니다.")
+        return
+
+    if args.action == "import":
+        with get_conn(args.db) as conn:
+            try:
+                s = cat_repo.import_transit(conn, args.path)
+            except cat_repo.CatalystImportError as e:
+                sys.exit(f"교통 파일에 문제가 있습니다:\n  {e}")
+        print(f"노선 {s['projects']}개 · 역 {s['stations']}개 등록"
+              + (f" · 미검증 {s['unverified']}개" if s["unverified"] else ""))
+        return
+
+    if args.action == "list":
+        with get_conn(args.db) as conn:
+            rows = conn.execute(
+                "SELECT p.name AS project, p.kind, s.name, s.status, s.status_date, "
+                "s.expected_open_ym, s.opened_ym, s.lat, s.last_verified "
+                "FROM transit_station s JOIN transit_project p ON p.id = s.project_id "
+                "ORDER BY p.name, s.name").fetchall()
+        if not rows:
+            print("등록된 역이 없습니다. `transit template` 로 시작하세요.")
+            return
+        print(f"{'노선':10s} {'역':12s} {'단계':8s} {'개통':10s} 좌표 검증")
+        for r in rows:
+            opened = r["opened_ym"] or (f"예정 {r['expected_open_ym']}"
+                                        if r["expected_open_ym"] else "미상")
+            print(f"{r['project']:10s} {r['name']:12s} {r['status']:8s} {opened:10s} "
+                  f"{'O' if r['lat'] else 'X'}    {'O' if r['last_verified'] else 'X'}")
+
+
+def cmd_supply(args):
+    from apt_engine.repo import catalyst as cat_repo
+
+    if args.action == "template":
+        path = cat_repo.write_supply_template(args.path)
+        print(f"입주물량 서식을 만들었습니다: {path}\n"
+              f"lat/lon 을 채우면 반경별(1/3/5km) 분석이 됩니다. 비우면 시군구 단위입니다.")
+        return
+
+    if args.action == "import":
+        with get_conn(args.db) as conn:
+            try:
+                s = cat_repo.import_supply(conn, args.path)
+            except cat_repo.CatalystImportError as e:
+                sys.exit(f"공급 파일에 문제가 있습니다:\n  {e}")
+        print(f"입주물량 {s['inserted']}건 등록"
+              + (f" · 미검증 {s['unverified']}건" if s["unverified"] else ""))
+
+
+def cmd_geocode(args):
+    print("단지 좌표 조회 (V-World)...")
+    s = ingest.geocode_complexes(limit=args.limit, db_path=args.db)
+    print(f"\n대상 {s['targets']}개 · 채움 {s['filled']}개 · 실패 {s['failed']}개")
+    if s["failed"]:
+        print("실패한 건은 collection_log 에 사유가 남습니다 — 좌표를 추측하지 않습니다.")
+
+
+def cmd_catalyst(args):
+    from apt_engine import area, units
+
+    if args.action == "build":
+        as_of = args.as_of or _today()
+        print(f"촉매 생성 (기준일 {as_of} · 투자기간 {args.years}년)...")
+        s = ingest.build_catalysts(as_of=as_of, years=args.years,
+                                   area_band=args.band or area.DEFAULT_BAND,
+                                   db_path=args.db)
+        print(f"  역세권 거리 {s['distances']:,}쌍 · 단지 {s['complexes']}개 · "
+              f"촉매 {s['catalysts']}개 · 개통 선행사례 {s['analogues']}건")
+        if not s["distances"]:
+            print("  ※ 단지 좌표나 역 좌표가 없습니다 — `cli geocode` 와 "
+                  "`transit import`(lat/lon 포함)를 먼저 하세요.")
+        return
+
+    if args.action == "show":
+        as_of = args.as_of or _today()
+        with get_conn(args.db) as conn:
+            row = _resolve_complex(conn, args)
+            if row is None:
+                return
+            _print_complex_header(row)
+        view = ingest.catalyst_view(complex_id=row["id"], as_of=as_of, years=args.years,
+                                    area_band=args.band or area.DEFAULT_BAND,
+                                    db_path=args.db)
+
+        print(f"\n  기준일 {as_of} · 투자기간 {args.years}년")
+        if not view["has_coords"]:
+            print("    단지 좌표: 확인 불가 → 역세권 거리를 계산할 수 없습니다 "
+                  "(`cli geocode`)")
+
+        print(f"\n  ── 교통 ──")
+        if not view["stations"]:
+            print("    가까운 역: 확인 불가 (역 데이터 미입력 또는 좌표 없음)")
+        for st in view["stations"]:
+            within, note = st.horizon_label(as_of=as_of, years=args.years)
+            mark = "●" if st.opened else ("◐" if within else "△")
+            print(f"    {mark} {st.project_name} {st.name}  "
+                  f"직선 {st.meters:,.0f}m (도보추정 {st.walk_minutes}분)")
+            print(f"        단계 {st.status}"
+                  + (f" ({st.status_date})" if st.status_date else "")
+                  + f" · 실현신뢰도 {st.confidence}"
+                  + ("" if st.verified else " · ⚠ 미검증"))
+            print(f"        {note}")
+
+        print(f"\n  ── 공급 ──")
+        sc = view["supply"]
+        if sc is None or sc.value is None:
+            print("    향후 공급: 확인 불가 (입주물량 데이터 미입력)")
+        else:
+            print(f"    집계기준  {sc.intermediates['집계 기준']}")
+            print(f"    1~2년     {sc.intermediates['1~2년']}")
+            print(f"    3~5년     {sc.intermediates['3~5년']}")
+            if "기존 재고 대비" in sc.intermediates:
+                print(f"    재고대비  {sc.intermediates['기존 재고 대비']}")
+
+        print(f"\n  ── 요약 ──")
+        summary = view["summary"]
+        if summary.value is None:
+            print(f"    {summary.intermediates.get('주의', '확인 불가')}")
+        else:
+            for key in ("기간 안", "기간 밖", "시점 미상"):
+                value = summary.intermediates[key]
+                text = " · ".join(value) if isinstance(value, list) else value
+                print(f"    {key:8s} {text}")
+
+        if view["analogues"]:
+            print(f"\n  ── 개통 선행사례 (참고 범위) ──")
+            for a in view["analogues"][:5]:
+                print(f"    {a['project_name']} {a['station_name']} "
+                      f"({a['opened_ym']} 개통) "
+                      f"역세권/비역세권 {units.fmt_pct(a['ratio_before'])} → "
+                      f"{units.fmt_pct(a['ratio_after'])} "
+                      f"({units.fmt_pct(a['delta'], sign=True)})")
+            print("    ※ 절대 상승률이 아니라 상대 비율 변화입니다. "
+                  "미개통 노선에는 참고 범위로만 쓰세요.")
+
+        if args.verbose and view["items"]:
+            print("\n    ── 계산 근거 (1순위 촉매) ──")
+            for line in view["items"][0].calc.explain().splitlines():
+                print(f"    {line}")
+
+
 # ── 파서 ──────────────────────────────────────────────────────────────
 
 def build_parser() -> argparse.ArgumentParser:
@@ -856,6 +1017,26 @@ def build_parser() -> argparse.ArgumentParser:
     rl.add_argument("--sido", choices=["서울", "경기", "인천"])
     rl.add_argument("--verbose", action="store_true")
 
+    tr = sub.add_parser("transit", help="교통사업 단계 입력 (계획/착공/개통 구분)")
+    tr.add_argument("action", choices=["template", "import", "list"])
+    tr.add_argument("path", nargs="?")
+
+    sp = sub.add_parser("supply", help="입주물량 입력")
+    sp.add_argument("action", choices=["template", "import"])
+    sp.add_argument("path", nargs="?")
+
+    gc = sub.add_parser("geocode", help="단지 좌표 채우기 (V-World)")
+    gc.add_argument("--limit", type=int, help="한 번에 처리할 단지 수")
+
+    ct = sub.add_parser("catalyst", help="촉매 생성·조회")
+    ct.add_argument("action", choices=["build", "show"])
+    ct.add_argument("query", nargs="?", help="show: 단지명 일부")
+    ct.add_argument("--complex-id", type=int)
+    ct.add_argument("--as-of", help="기준일 YYYY-MM-DD (기본 오늘)")
+    ct.add_argument("--years", type=int, default=5, help="투자기간(년, 기본 5)")
+    ct.add_argument("--band", help="전용면적 밴드 (기본 84)")
+    ct.add_argument("--verbose", action="store_true")
+
     sub.add_parser("validate", help="요구사항 26 검증 규칙 실행")
 
     re_ = sub.add_parser("report", help="진단 리포트")
@@ -871,6 +1052,8 @@ HANDLERS = {
     "listing": cmd_listing, "market": cmd_market,
     "rule": cmd_rule, "regulation": cmd_regulation, "loan": cmd_loan, "cash": cmd_cash,
     "ladder": cmd_ladder, "relative": cmd_relative,
+    "transit": cmd_transit, "supply": cmd_supply, "geocode": cmd_geocode,
+    "catalyst": cmd_catalyst,
     "validate": cmd_validate, "report": cmd_report,
 }
 

@@ -16,7 +16,13 @@ from apt_engine.listing import distribution as dist_mod
 from apt_engine.listing import gap as gap_mod
 from apt_engine.listing import pressure as pressure_mod
 from apt_engine.listing.provider import ManualListingProvider
+from apt_engine.catalyst import analogue as analogue_mod
+from apt_engine.catalyst import assemble as assemble_mod
+from apt_engine.catalyst import supply as supply_mod
+from apt_engine.catalyst import transit as transit_mod
+from apt_engine.collectors import geocode as geocode_mod
 from apt_engine.price import snapshot as snap_mod
+from apt_engine.repo import catalyst as cat_repo
 from apt_engine.relative import benchmark as bench_mod
 from apt_engine.relative import ratio as ratio_mod
 from apt_engine.repo import relative as rel_repo
@@ -503,3 +509,109 @@ def relative_view(*, complex_id: int, area_band: str,
                 "reasons": json.loads(b["selection_reason_json"]),
             })
     return out
+
+
+# ── 촉매 (PHASE 5) ────────────────────────────────────────────────────
+
+def geocode_complexes(*, limit: int | None = None, db_path: str | None = None,
+                      progress=print) -> dict:
+    """좌표가 없는 단지를 V-World 로 채운다. 실패는 남기고 추측하지 않는다."""
+    stats = {"targets": 0, "filled": 0, "failed": 0}
+    with get_conn(db_path) as conn:
+        targets = cat_repo.complexes_missing_coords(conn, limit)
+        stats["targets"] = len(targets)
+        src = repo.source_id(conn, geocode_mod.SOURCE_KEY)
+
+        for i, row in enumerate(targets, 1):
+            try:
+                coords = geocode_mod.geocode_complex(row["road_addr"], row["jibun_addr"])
+            except geocode_mod.GeocodeError as e:
+                repo.log_collection(conn, geocode_mod.SOURCE_KEY, target=str(row["id"]),
+                                    period=None, status="FAILED", error=str(e)[:300])
+                stats["failed"] += 1
+                continue
+            if not coords:
+                repo.log_collection(conn, geocode_mod.SOURCE_KEY, target=str(row["id"]),
+                                    period=None, status="EMPTY",
+                                    error="주소로 좌표를 찾지 못함")
+                stats["failed"] += 1
+                continue
+            cat_repo.set_coords(conn, row["id"], coords[0], coords[1])
+            stats["filled"] += 1
+            if i % 100 == 0:
+                progress(f"  {i}/{len(targets)}")
+    return stats
+
+
+def build_catalysts(*, as_of: str, years: int = 5, area_band: str = "84",
+                    complex_id: int | None = None, db_path: str | None = None,
+                    progress=print) -> dict:
+    """역세권 거리 → 촉매 생성. 개통한 역이 있으면 선행사례도 만든다."""
+    stats = {"distances": 0, "complexes": 0, "catalysts": 0, "analogues": 0}
+    as_of_ym = as_of[:4] + as_of[5:7]
+
+    with get_conn(db_path) as conn:
+        stats["distances"] = transit_mod.compute_distances(conn, complex_id=complex_id)
+
+        # 선행사례 — 실제 개통한 역만
+        for station in cat_repo.opened_stations(conn):
+            a = analogue_mod.build(conn, station, area_band=area_band)
+            if a:
+                cat_repo.save_analogue(conn, a)
+                stats["analogues"] += 1
+
+        sql = "SELECT id FROM complex"
+        params: list = []
+        if complex_id is not None:
+            sql += " WHERE id = ?"
+            params.append(complex_id)
+        for row in conn.execute(sql, params).fetchall():
+            cid = row["id"]
+            items = assemble_mod.from_transit(conn, cid, as_of=as_of, years=years)
+            supply_item = assemble_mod.from_supply(conn, cid, as_of_ym=as_of_ym)
+            if supply_item:
+                items.append(supply_item)
+            if not items:
+                continue
+            for item in items:
+                cat_repo.save_catalyst(
+                    conn, complex_id=cid, kind=item.kind, label=item.label,
+                    station_id=item.station_id, expected_year=item.expected_year,
+                    within_horizon=item.within_horizon, direction=item.direction,
+                    evidence=item.evidence, confidence=item.confidence, calc=item.calc)
+            stats["complexes"] += 1
+            stats["catalysts"] += len(items)
+    return stats
+
+
+def catalyst_view(*, complex_id: int, as_of: str, years: int = 5,
+                  area_band: str = "84", db_path: str | None = None) -> dict:
+    """한 단지의 촉매 + 선행사례."""
+    as_of_ym = as_of[:4] + as_of[5:7]
+    with get_conn(db_path) as conn:
+        stations = transit_mod.nearby(conn, complex_id)
+        items = assemble_mod.from_transit(conn, complex_id, as_of=as_of, years=years)
+        supply_item = assemble_mod.from_supply(conn, complex_id, as_of_ym=as_of_ym)
+        if supply_item:
+            items.append(supply_item)
+        summary = assemble_mod.summarize(items, years=years)
+
+        row = conn.execute("SELECT lawd_cd, lat, lon, apt_households FROM complex "
+                           "WHERE id = ?", (complex_id,)).fetchone()
+        supply_calc = supply_mod.analyze(
+            conn, lawd_cd=row["lawd_cd"], as_of_ym=as_of_ym,
+            lat=row["lat"], lon=row["lon"], radius_m=3000,
+            stock_households=row["apt_households"]) if row else None
+
+        projects = {s.project_name for s in stations if not s.opened}
+        cases = []
+        for pname in sorted(projects):
+            cases.extend(cat_repo.analogues(conn, area_band=area_band))
+        analogue_summary = None
+        if cases:
+            from apt_engine.catalyst.analogue import Analogue
+            deltas = [dict(c) for c in cases]
+            analogue_summary = deltas
+    return {"stations": stations, "items": items, "summary": summary,
+            "supply": supply_calc, "analogues": analogue_summary,
+            "has_coords": bool(row and row["lat"] and row["lon"])}
