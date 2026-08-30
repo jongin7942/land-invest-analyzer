@@ -16,8 +16,14 @@
     python -m apt_engine.cli listing import 매물.csv             # 매물 저장 + 오늘 스냅샷
     python -m apt_engine.cli listing note --complex-id 1 ...     # 중개사 협상가 기록
 
+    # 규칙 — 공식 API 가 없는 세법·규제·토허·대출을 사람이 넣는다
+    python -m apt_engine.cli rule template tax 세법.csv          # 서식 생성
+    python -m apt_engine.cli rule import tax 세법.csv            # 입력
+    python -m apt_engine.cli rule status                        # 채워진 정도
+
     # 조회
     python -m apt_engine.cli price "동아1단지"                    # 근거까지 펼쳐서 보기
+    python -m apt_engine.cli cash "동아1단지" --price 6.2 --house-count 1   # 실투자금
     python -m apt_engine.cli market "동아1단지" --band 84         # 호가·괴리·변화·시장압력
 
     # 점검
@@ -434,6 +440,186 @@ def cmd_market(args):
             print(f"    {line}")
 
 
+# ── 규칙 (PHASE 3) ────────────────────────────────────────────────────
+
+def cmd_rule(args):
+    from apt_engine.repo import rules as rule_repo
+
+    if args.action == "template":
+        path = rule_repo.write_template(args.kind, args.path)
+        print(f"서식을 만들었습니다: {path}\n"
+              f"'#' 로 시작하는 줄은 설명이라 무시됩니다. 값을 채운 뒤 import 하세요.\n"
+              f"★ last_verified(확인일)를 비우면 엔진이 그 규칙으로 계산하지 않습니다 — "
+              f"원문을 직접 확인한 날짜를 넣으세요.")
+        return
+
+    if args.action == "import":
+        with get_conn(args.db) as conn:
+            try:
+                s = rule_repo.import_csv(conn, args.kind, args.path)
+            except rule_repo.RuleImportError as e:
+                sys.exit(f"입력 파일에 문제가 있습니다:\n{e}")
+        print(f"{args.kind}: {s['inserted']}건 입력"
+              + (f" · 미검증 {s['unverified']}건 (계산에 쓰이지 않음)"
+                 if s["unverified"] else ""))
+        return
+
+    if args.action == "list":
+        with get_conn(args.db) as conn:
+            rows = rule_repo.list_rules(conn, args.kind)
+        if not rows:
+            print(f"{args.kind} 규칙이 없습니다. `rule template {args.kind}` 로 시작하세요.")
+            return
+        for r in rows:
+            mark = "✓" if r["last_verified"] else "✗"
+            key = (r["rule_key"] if "rule_key" in r.keys()
+                   else r["zone_type"] if "zone_type" in r.keys() else r["target_scope"])
+            print(f"  {mark} [{r['id']:>4}] {key:<28s} "
+                  f"{r['effective_from']}~{r['effective_to'] or '현재'}"
+                  + (f"  확인 {r['last_verified']}" if r["last_verified"] else "  ⚠ 미검증"))
+        return
+
+    if args.action == "verify":
+        with get_conn(args.db) as conn:
+            n = rule_repo.mark_verified(conn, args.kind, rule_id=args.id,
+                                        verified_on=args.date or _today())
+        print(f"{n}건 확인 표시" if n else "해당 규칙을 찾지 못했습니다.")
+        return
+
+    if args.action == "status":
+        with get_conn(args.db) as conn:
+            cov = rule_repo.coverage(conn)
+        print("규칙 입력 현황 (검증/전체)\n")
+        labels = {"regulation": "규제지역", "permit": "토지거래허가구역",
+                  "tax": "세법", "loan": "대출규제", "cost": "취득 부대비용"}
+        for kind, c in cov.items():
+            state = ("미입력" if c["total"] == 0
+                     else "사용 가능" if c["verified"] == c["total"]
+                     else f"일부 미검증")
+            print(f"  {labels[kind]:<16s} {c['verified']:>3}/{c['total']:<3}  {state}")
+        if all(c["total"] == 0 for c in cov.values()):
+            print("\n전부 비어 있습니다. 세금·대출·실투자금 계산이 '확인 불가'로 나옵니다.\n"
+                  "`rule template <종류> <파일>` 로 서식을 받아 채워 넣으세요.")
+
+
+def cmd_regulation(args):
+    """규제지역·토허 판정 (요구사항 22). 매수 판단 전에 가장 먼저 봐야 한다."""
+    from apt_engine.regulation import zone as zone_mod
+
+    with get_conn(args.db) as conn:
+        row = _resolve_complex(conn, args)
+        if row is None:
+            return
+        _print_complex_header(row)
+        day = args.as_of or _today()
+        z = zone_mod.zone_at(conn, row["lawd_cd"], as_of=day, emd_name=row["emd_name"])
+        p = zone_mod.permit_zone_at(conn, row["lawd_cd"], as_of=day, scope=args.scope,
+                                    emd_name=row["emd_name"])
+        calc = zone_mod.summarize(z, p)
+
+    print(f"\n  기준일 {day} · 대상 {args.scope}")
+    print(f"    규제지역          {z.label}")
+    print(f"    토지거래허가구역   {p.label}")
+    print(f"    전세 활용         {calc.intermediates['전세 활용']}")
+    if "주의" in calc.intermediates:
+        print(f"\n    ⚠ {calc.intermediates['주의']}")
+
+
+def cmd_loan(args):
+    from apt_engine.listing.provider import parse_price
+    from apt_engine.regulation import loan as loan_mod
+    from apt_engine.regulation import zone as zone_mod
+
+    price = parse_price(args.price)
+    with get_conn(args.db) as conn:
+        row = _resolve_complex(conn, args) if args.query else None
+        lawd = row["lawd_cd"] if row is not None else args.lawd
+        if not lawd:
+            sys.exit("단지명 또는 --lawd 가 필요합니다.")
+        day = args.as_of or _today()
+        z = zone_mod.zone_at(conn, lawd, as_of=day)
+        cap = loan_mod.capacity(
+            conn, price=price, as_of=day, house_count=args.house_count,
+            zone_types=z.types,
+            annual_income=parse_price(args.income) if args.income else None,
+            existing_annual_payment=parse_price(args.existing) if args.existing else 0,
+            rate=args.rate / 100, years=args.years,
+            requested=parse_price(args.requested) if args.requested else None)
+
+    from apt_engine import units
+    print(f"\n  집값 {units.fmt_eok(price)} · {z.label} · 주택수 {args.house_count}")
+    if not cap.checked:
+        print(f"    대출 가능액: 확인 불가")
+        print(f"    {cap.calc.intermediates.get('주의', '')}")
+        return
+    print(f"    이론상 LTV 한도   "
+          f"{units.fmt_eok(cap.ltv_limit) if cap.ltv_limit else '확인 불가':>10s}")
+    print(f"    DSR 한도          "
+          f"{units.fmt_eok(cap.dsr_limit) if cap.dsr_limit else '확인 불가':>10s}")
+    print(f"    실제 가능액       {units.fmt_eok(cap.available):>10s}   "
+          f"← {cap.binding} 이 결정")
+    if args.verbose:
+        print("\n    ── 계산 근거 ──")
+        for line in cap.calc.explain().splitlines():
+            print(f"    {line}")
+
+
+def cmd_cash(args):
+    """실제 필요한 현금 (요구사항 27)."""
+    from apt_engine import units
+    from apt_engine.cash import equity as equity_mod
+    from apt_engine.listing.provider import parse_price
+
+    price = parse_price(args.price)
+    with get_conn(args.db) as conn:
+        row = _resolve_complex(conn, args)
+        if row is None:
+            return
+        _print_complex_header(row)
+
+        jeonse = parse_price(args.jeonse) if args.jeonse else None
+        if jeonse is None:
+            js = repo.latest_jeonse_snapshot(conn, row["id"], args.band or "84")
+            jeonse = js["representative_deposit"] if js else None
+
+        eq = equity_mod.compute(
+            conn, price=price, as_of=args.as_of or _today(),
+            house_count=args.house_count, lawd_cd=row["lawd_cd"],
+            emd_name=row["emd_name"], exclusive_area_m2=args.area,
+            jeonse_deposit=jeonse,
+            loan_amount=parse_price(args.loan) if args.loan else None,
+            repair_cost=parse_price(args.repair) if args.repair else 0,
+            buffer_cost=parse_price(args.buffer) if args.buffer else 0)
+
+    print(f"\n  ── 실제 필요한 현금 ──")
+    for item in eq.items:
+        sign = "+" if item.sign > 0 else "−"
+        value = units.fmt_eok(item.amount) if item.known else "확인 불가"
+        print(f"    {sign} {item.name:<18s} {value:>12s}"
+              + (f"   {item.note}" if item.note else ""))
+    print(f"    {'=':>2} {'실투자금':<18s} {eq.label:>12s}")
+    if not eq.complete:
+        print(f"\n    ⚠ {eq.calc.intermediates['주의']}")
+    if args.verbose:
+        print("\n    ── 계산 근거 ──")
+        for line in eq.calc.explain().splitlines():
+            print(f"    {line}")
+
+
+def _resolve_complex(conn, args):
+    matches = repo.find_complexes(conn, args.query)
+    if not matches:
+        print(f"'{args.query}' 로 찾은 단지가 없습니다.")
+        return None
+    if getattr(args, "complex_id", None):
+        return conn.execute("SELECT * FROM complex WHERE id=?",
+                            (args.complex_id,)).fetchone()
+    if len(matches) > 1:
+        print(f"'{args.query}' 로 {len(matches)}개 검색됨 — 첫 번째를 씁니다. "
+              f"--complex-id 로 지정하세요.")
+    return matches[0]
+
+
 # ── 파서 ──────────────────────────────────────────────────────────────
 
 def build_parser() -> argparse.ArgumentParser:
@@ -499,6 +685,48 @@ def build_parser() -> argparse.ArgumentParser:
     mk.add_argument("--window", type=int, default=30, help="변화 비교 기간(일)")
     mk.add_argument("--verbose", action="store_true")
 
+    ru = sub.add_parser("rule", help="세법·규제·토허·대출 규칙 수기 입력")
+    ru.add_argument("action", choices=["template", "import", "list", "verify", "status"])
+    ru.add_argument("kind", nargs="?",
+                    choices=["regulation", "permit", "tax", "loan", "cost"])
+    ru.add_argument("path", nargs="?", help="CSV 파일 경로")
+    ru.add_argument("--id", type=int, help="verify: 규칙 ID")
+    ru.add_argument("--date", help="verify: 확인일 YYYY-MM-DD (기본 오늘)")
+
+    rg = sub.add_parser("regulation", help="규제지역·토허 판정")
+    rg.add_argument("query", help="단지명 일부")
+    rg.add_argument("--complex-id", type=int)
+    rg.add_argument("--as-of", help="기준일 YYYY-MM-DD (기본 오늘)")
+    rg.add_argument("--scope", default="내국인", choices=["내국인", "외국인", "전체"])
+
+    ln = sub.add_parser("loan", help="대출 가능액 (LTV·DSR 중 제한적인 값)")
+    ln.add_argument("query", nargs="?", help="단지명 일부")
+    ln.add_argument("--lawd", help="단지 대신 시군구코드로")
+    ln.add_argument("--complex-id", type=int)
+    ln.add_argument("--price", required=True, help="집값 (6.2 = 6.2억)")
+    ln.add_argument("--house-count", type=int, default=0, help="취득 후 주택 수")
+    ln.add_argument("--income", help="연소득 (1.0 = 1억)")
+    ln.add_argument("--existing", help="기존 대출 연간 원리금")
+    ln.add_argument("--requested", help="실제 받으려는 금액")
+    ln.add_argument("--rate", type=float, default=4.0, help="금리 %% (기본 4.0)")
+    ln.add_argument("--years", type=int, default=30)
+    ln.add_argument("--as-of", help="기준일 YYYY-MM-DD")
+    ln.add_argument("--verbose", action="store_true")
+
+    ca = sub.add_parser("cash", help="실제 필요한 현금")
+    ca.add_argument("query", help="단지명 일부")
+    ca.add_argument("--complex-id", type=int)
+    ca.add_argument("--price", required=True, help="매수가 (6.2 = 6.2억)")
+    ca.add_argument("--house-count", type=int, default=1, help="취득 후 주택 수")
+    ca.add_argument("--band", help="전용면적 밴드 (전세 대표가 조회용, 기본 84)")
+    ca.add_argument("--area", type=float, help="전용면적 ㎡ (농특세 판정)")
+    ca.add_argument("--jeonse", help="승계 전세보증금. 미지정시 대표 전세가 사용")
+    ca.add_argument("--loan", help="주택담보대출액")
+    ca.add_argument("--repair", help="수리비")
+    ca.add_argument("--buffer", help="안전자금")
+    ca.add_argument("--as-of", help="기준일 YYYY-MM-DD")
+    ca.add_argument("--verbose", action="store_true")
+
     sub.add_parser("validate", help="요구사항 26 검증 규칙 실행")
 
     re_ = sub.add_parser("report", help="진단 리포트")
@@ -512,6 +740,7 @@ HANDLERS = {
     "collect": cmd_collect, "match": cmd_match,
     "snapshot": cmd_snapshot, "price": cmd_price,
     "listing": cmd_listing, "market": cmd_market,
+    "rule": cmd_rule, "regulation": cmd_regulation, "loan": cmd_loan, "cash": cmd_cash,
     "validate": cmd_validate, "report": cmd_report,
 }
 
