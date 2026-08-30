@@ -118,8 +118,13 @@ def permit_zone_at(conn: sqlite3.Connection, lawd_cd: str, *, as_of: str | date,
         raise ValueError(f"scope 는 {DOMESTIC}/{FOREIGN}/{ALL} 중 하나여야 합니다: {scope!r}")
     day = rules.as_ymd(as_of)
 
-    total = conn.execute("SELECT COUNT(*) FROM land_permit_zone").fetchone()[0]
-    if total == 0:
+    # 커버리지는 **시도 단위**로 본다. 토허는 시·도별로 따로 고시되므로, 인천 자료만
+    # 넣은 상태에서 서울 매물을 '확인함, 지정 없음' 으로 단정하면 전세보증금을 근거
+    # 없이 차감하게 된다. 그 시도의 자료가 하나라도 있으면 그 시도는 확인된 것으로 본다.
+    covered = conn.execute(
+        "SELECT COUNT(*) FROM land_permit_zone WHERE substr(lawd_cd, 1, 2) = ?",
+        (lawd_cd[:2],)).fetchone()[0]
+    if covered == 0:
         return PermitStatus(lawd_cd, day, scope, designated=False, checked=False)
 
     rows = conn.execute(
