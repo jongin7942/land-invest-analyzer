@@ -274,14 +274,15 @@ class TestValidation:
 
 
 class TestMigrationChain:
-    def test_001_002_가_순서대로_적용된다(self, tmp_db):
+    def test_마이그레이션이_순서대로_전부_적용된다(self, tmp_db):
         applied = mig.migrate(tmp_db)
-        assert applied == [1, 2]
+        assert applied == list(range(1, len(applied) + 1))
         with get_conn(tmp_db) as conn:
             tables = set(table_names(conn))
         assert {"data_source", "collection_log", "engine_version",
                 "region", "complex", "unit_type", "trade", "jeonse_contract",
-                "complex_group", "complex_group_member", "complex_block"} <= tables
+                "complex_group", "complex_group_member", "complex_block",
+                "price_snapshot", "jeonse_snapshot"} <= tables
 
     def test_출처가_등록돼_있다(self, db):
         with get_conn(db) as conn:

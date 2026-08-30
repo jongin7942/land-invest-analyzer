@@ -297,10 +297,162 @@ def monthly_coverage(conn: sqlite3.Connection, table: str, ymd_col: str) -> list
     """).fetchall()
 
 
+# ── 가격 스냅샷 (PHASE 2) ─────────────────────────────────────────────
+
+def save_price_snapshot(conn: sqlite3.Connection, *, complex_id: int, area_band: str,
+                        snap) -> int | None:
+    """대표가격 스냅샷 저장. 표본이 없으면 저장하지 않고 None 을 돌려준다 —
+    "가격 없음"과 "가격 0원"은 완전히 다르다."""
+    if not snap.usable:
+        return None
+    q = snap.quartiles
+    conn.execute(
+        """INSERT INTO price_snapshot
+           (complex_id, area_band, as_of_ym, window_months, representative_price, method,
+            sample_n, excluded_n, exclusion_reasons_json, relaxed_json, confidence,
+            price_p25, price_p50, price_p75, price_min, price_max,
+            engine_version, data_grade, calc_trace)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           ON CONFLICT(complex_id, area_band, as_of_ym, window_months, method)
+           DO UPDATE SET
+             representative_price=excluded.representative_price,
+             sample_n=excluded.sample_n, excluded_n=excluded.excluded_n,
+             exclusion_reasons_json=excluded.exclusion_reasons_json,
+             relaxed_json=excluded.relaxed_json, confidence=excluded.confidence,
+             price_p25=excluded.price_p25, price_p50=excluded.price_p50,
+             price_p75=excluded.price_p75, price_min=excluded.price_min,
+             price_max=excluded.price_max,
+             engine_version=excluded.engine_version, data_grade=excluded.data_grade,
+             calc_trace=excluded.calc_trace,
+             calculated_at=datetime('now','localtime')""",
+        (complex_id, area_band, snap.as_of_ym, snap.window_months, snap.value, snap.method,
+         snap.sample_n, snap.excluded_n,
+         json.dumps(snap.exclusions, ensure_ascii=False),
+         json.dumps(snap.relaxed, ensure_ascii=False) if snap.relaxed else None,
+         snap.confidence,
+         q.get("p25"), q.get("p50"), q.get("p75"), q.get("min"), q.get("max"),
+         snap.calc.engine_version, snap.calc.grade, snap.calc.to_json()),
+    )
+    row = conn.execute(
+        "SELECT id FROM price_snapshot WHERE complex_id=? AND area_band=? AND as_of_ym=? "
+        "AND window_months=? AND method=?",
+        (complex_id, area_band, snap.as_of_ym, snap.window_months, snap.method)).fetchone()
+    return row[0] if row else None
+
+
+def save_jeonse_snapshot(conn: sqlite3.Connection, *, complex_id: int, area_band: str,
+                         snap, price_snapshot_id: int | None = None,
+                         ratio_calc=None) -> int | None:
+    if not snap.usable:
+        return None
+    q = snap.quartiles
+    conn.execute(
+        """INSERT INTO jeonse_snapshot
+           (complex_id, area_band, as_of_ym, window_months, representative_deposit, method,
+            sample_n, excluded_n, exclusion_reasons_json, relaxed_json, confidence,
+            deposit_p25, deposit_p50, deposit_p75, deposit_min, deposit_max,
+            price_snapshot_id, jeonse_ratio, ratio_calc_trace,
+            engine_version, data_grade, calc_trace)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           ON CONFLICT(complex_id, area_band, as_of_ym, window_months, method)
+           DO UPDATE SET
+             representative_deposit=excluded.representative_deposit,
+             sample_n=excluded.sample_n, excluded_n=excluded.excluded_n,
+             exclusion_reasons_json=excluded.exclusion_reasons_json,
+             relaxed_json=excluded.relaxed_json, confidence=excluded.confidence,
+             deposit_p25=excluded.deposit_p25, deposit_p50=excluded.deposit_p50,
+             deposit_p75=excluded.deposit_p75, deposit_min=excluded.deposit_min,
+             deposit_max=excluded.deposit_max,
+             price_snapshot_id=excluded.price_snapshot_id,
+             jeonse_ratio=excluded.jeonse_ratio,
+             ratio_calc_trace=excluded.ratio_calc_trace,
+             engine_version=excluded.engine_version, data_grade=excluded.data_grade,
+             calc_trace=excluded.calc_trace,
+             calculated_at=datetime('now','localtime')""",
+        (complex_id, area_band, snap.as_of_ym, snap.window_months, snap.value, snap.method,
+         snap.sample_n, snap.excluded_n,
+         json.dumps(snap.exclusions, ensure_ascii=False),
+         json.dumps(snap.relaxed, ensure_ascii=False) if snap.relaxed else None,
+         snap.confidence,
+         q.get("p25"), q.get("p50"), q.get("p75"), q.get("min"), q.get("max"),
+         price_snapshot_id,
+         ratio_calc.value if ratio_calc else None,
+         ratio_calc.to_json() if ratio_calc else None,
+         snap.calc.engine_version, snap.calc.grade, snap.calc.to_json()),
+    )
+    row = conn.execute(
+        "SELECT id FROM jeonse_snapshot WHERE complex_id=? AND area_band=? AND as_of_ym=? "
+        "AND window_months=? AND method=?",
+        (complex_id, area_band, snap.as_of_ym, snap.window_months, snap.method)).fetchone()
+    return row[0] if row else None
+
+
+def trades_for(conn: sqlite3.Connection, complex_id: int, area_band: str) -> list[dict]:
+    """대표가격 계산 입력. **엔진은 DB를 모르므로** 여기서 dict 로 꺼내 넘긴다."""
+    rows = conn.execute(
+        "SELECT deal_amount, deal_ymd, floor, deal_type, cancel_yn "
+        "FROM trade WHERE complex_id=? AND area_band=? ORDER BY deal_ymd",
+        (complex_id, area_band)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def jeonse_for(conn: sqlite3.Connection, complex_id: int, area_band: str) -> list[dict]:
+    rows = conn.execute(
+        "SELECT deposit, monthly_rent, contract_ymd, floor, contract_type, "
+        "use_renewal_right, 0 AS cancel_yn "
+        "FROM jeonse_contract WHERE complex_id=? AND area_band=? ORDER BY contract_ymd",
+        (complex_id, area_band)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def matched_complex_bands(conn: sqlite3.Connection, *, min_households: int | None = None,
+                          sido: str | None = None) -> list[sqlite3.Row]:
+    """스냅샷을 만들 (단지, 면적밴드) 조합. 실거래가 붙어 있는 것만."""
+    sql = ("SELECT DISTINCT t.complex_id, t.area_band, c.name, c.lawd_cd "
+           "FROM trade t JOIN complex c ON c.id = t.complex_id "
+           "JOIN region r ON r.lawd_cd = c.lawd_cd WHERE t.complex_id IS NOT NULL")
+    params: list = []
+    if min_households is not None:
+        sql += " AND c.apt_households >= ?"
+        params.append(min_households)
+    if sido:
+        sql += " AND r.sido = ?"
+        params.append(sido)
+    sql += " ORDER BY c.name, t.area_band"
+    return conn.execute(sql, params).fetchall()
+
+
+def latest_price_snapshot(conn: sqlite3.Connection, complex_id: int,
+                          area_band: str) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM price_snapshot WHERE complex_id=? AND area_band=? "
+        "ORDER BY as_of_ym DESC LIMIT 1", (complex_id, area_band)).fetchone()
+
+
+def latest_jeonse_snapshot(conn: sqlite3.Connection, complex_id: int,
+                           area_band: str) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM jeonse_snapshot WHERE complex_id=? AND area_band=? "
+        "ORDER BY as_of_ym DESC LIMIT 1", (complex_id, area_band)).fetchone()
+
+
+def find_complexes(conn: sqlite3.Connection, query: str) -> list[sqlite3.Row]:
+    """이름 일부로 단지를 찾는다. CLI 에서 '동아1단지' 같은 입력을 받기 위한 것."""
+    from apt_engine.collectors.matcher import normalize
+    norm = normalize(query)
+    return conn.execute(
+        "SELECT c.*, r.sido FROM complex c LEFT JOIN region r ON r.lawd_cd = c.lawd_cd "
+        "WHERE c.name LIKE ? OR c.name_norm LIKE ? ORDER BY c.apt_households DESC LIMIT 50",
+        (f"%{query}%", f"%{norm}%")).fetchall()
+
+
 __all__ = [
     "sync_regions", "source_id", "log_collection",
     "upsert_complexes", "candidates_for", "upsert_unit_types",
     "derive_unit_types_from_trades", "insert_trades", "insert_jeonse",
     "distinct_unmatched_names", "apply_match", "clear_matches", "match_stats",
     "complexes_over", "monthly_coverage", "get_conn",
+    "save_price_snapshot", "save_jeonse_snapshot", "trades_for", "jeonse_for",
+    "matched_complex_bands", "latest_price_snapshot", "latest_jeonse_snapshot",
+    "find_complexes",
 ]

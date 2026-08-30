@@ -212,6 +212,76 @@ def foreign_keys(conn):
     return [f"외래키 위반: {r[0]} rowid={r[1]} → {r[2]}" for r in rows[:20]]
 
 
+# ── 26-5 · 대표가격 (PHASE 2) ──────────────────────────────────────────
+
+@rule("26-5", "단일 신고가를 대표가격으로 쓰지 않는다")
+def not_single_high(conn):
+    """표본이 3건 이상인데 대표가격이 최고가와 같으면, 사실상 신고가를 시세로 쓴 것이다."""
+    if not _has_table(conn, "price_snapshot"):
+        return []
+    rows = conn.execute(
+        "SELECT id, complex_id, area_band, as_of_ym, sample_n, "
+        "representative_price, price_max FROM price_snapshot "
+        "WHERE sample_n >= 3 AND representative_price = price_max").fetchall()
+    return [f"price_snapshot#{r['id']} (단지 {r['complex_id']}·{r['area_band']}·{r['as_of_ym']}): "
+            f"표본 {r['sample_n']}건인데 대표가격이 최고가와 같습니다" for r in rows[:20]]
+
+
+@rule("2", "대표가격에 신뢰도가 붙어 있다")
+def snapshot_confidence(conn):
+    if not _has_table(conn, "price_snapshot"):
+        return []
+    n = conn.execute(
+        "SELECT COUNT(*) FROM price_snapshot WHERE confidence IS NULL").fetchone()[0]
+    return [f"신뢰도가 없는 대표가격 {n}건"] if n else []
+
+
+@rule("2", "표본이 적은 대표가격은 LOW 로 표시된다", severity="WARN")
+def low_confidence_snapshots(conn):
+    if not _has_table(conn, "price_snapshot"):
+        return []
+    n = conn.execute(
+        "SELECT COUNT(*) FROM price_snapshot WHERE confidence='LOW'").fetchone()[0]
+    total = conn.execute("SELECT COUNT(*) FROM price_snapshot").fetchone()[0]
+    if not total or not n:
+        return []
+    return [f"정상거래 1~2건으로 산출된 대표가격 {n}/{total}건 ({n/total*100:.0f}%) — "
+            f"단독 근거로 쓰지 말 것"]
+
+
+@rule("25", "모든 대표가격에 계산근거(calc_trace)가 저장돼 있다")
+def snapshot_has_trace(conn):
+    if not _has_table(conn, "price_snapshot"):
+        return []
+    out = []
+    for table in ("price_snapshot", "jeonse_snapshot"):
+        n = conn.execute(
+            f"SELECT COUNT(*) FROM {table} "
+            f"WHERE calc_trace IS NULL OR trim(calc_trace) = '' "
+            f"OR engine_version IS NULL").fetchone()[0]
+        if n:
+            out.append(f"{table} 에 계산근거 없는 행 {n}건 — 근거 없는 숫자는 표시할 수 없다")
+    return out
+
+
+@rule("28", "전세가율이 상식 범위 안에 있다", severity="WARN")
+def jeonse_ratio_sane(conn):
+    if not _has_table(conn, "jeonse_snapshot"):
+        return []
+    rows = conn.execute(
+        "SELECT id, complex_id, area_band, jeonse_ratio FROM jeonse_snapshot "
+        "WHERE jeonse_ratio IS NOT NULL AND (jeonse_ratio < 0.1 OR jeonse_ratio > 1.2)"
+    ).fetchall()
+    return [f"jeonse_snapshot#{r['id']} (단지 {r['complex_id']}·{r['area_band']}): "
+            f"전세가율 {r['jeonse_ratio']*100:.0f}% — 매매/전세 표본 확인 필요"
+            for r in rows[:20]]
+
+
+def _has_table(conn, name: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone() is not None
+
+
 # ── 실행 ───────────────────────────────────────────────────────────────
 
 def run_all(conn: sqlite3.Connection) -> list[tuple[Rule, list[str]]]:

@@ -10,6 +10,7 @@ from datetime import date
 
 from apt_engine import regions
 from apt_engine.collectors import apt_rent, apt_trade, kapt, matcher, molit
+from apt_engine.price import snapshot as snap_mod
 from apt_engine.db.connection import get_conn
 from apt_engine.repo import apt as repo
 
@@ -190,3 +191,66 @@ def run_matching(*, rebuild: bool = False, db_path: str | None = None,
         out["면적타입 생성"] = created
         progress(f"  실거래에서 면적타입 {created}개 도출")
     return out
+
+
+# ── 가격 스냅샷 (PHASE 2) ─────────────────────────────────────────────
+
+def build_snapshots(*, as_of_ym: str | None = None, months: int = 1,
+                    window_months: int = snap_mod.DEFAULT_WINDOW_MONTHS,
+                    min_households: int | None = None, sido: str | None = None,
+                    db_path: str | None = None, progress=print) -> dict:
+    """매칭된 (단지 × 면적밴드)마다 대표 매매가·전세가·전세가율을 계산해 저장한다.
+
+    months 를 늘리면 그만큼 과거 시점의 스냅샷도 만든다 — 같은 실거래를 다른 창으로
+    다시 집계할 뿐이라 추가 수집이 필요 없고, 이게 그대로 요구사항 4(과거 가격비율)의
+    재료가 된다.
+    """
+    as_of = as_of_ym or _current_ym()
+    targets_ym = _recent_from(as_of, months)
+    stats = {"pairs": 0, "price": 0, "jeonse": 0, "ratio": 0, "skipped": 0}
+
+    with get_conn(db_path) as conn:
+        pairs = repo.matched_complex_bands(conn, min_households=min_households, sido=sido)
+        stats["pairs"] = len(pairs)
+        progress(f"대상 (단지×면적) {len(pairs)}쌍 × {len(targets_ym)}개월")
+
+        for i, pair in enumerate(pairs, 1):
+            cid, band = pair["complex_id"], pair["area_band"]
+            trades = repo.trades_for(conn, cid, band)
+            jeonse = repo.jeonse_for(conn, cid, band)
+
+            for ym in targets_ym:
+                ps = snap_mod.build_price(trades, as_of_ym=ym, window_months=window_months)
+                js = snap_mod.build_jeonse(jeonse, as_of_ym=ym, window_months=window_months)
+
+                if not ps.usable and not js.usable:
+                    stats["skipped"] += 1
+                    continue
+
+                psid = repo.save_price_snapshot(conn, complex_id=cid, area_band=band, snap=ps)
+                if psid:
+                    stats["price"] += 1
+                ratio = snap_mod.jeonse_ratio(ps, js) if (ps.usable and js.usable) else None
+                if js.usable:
+                    repo.save_jeonse_snapshot(conn, complex_id=cid, area_band=band, snap=js,
+                                              price_snapshot_id=psid, ratio_calc=ratio)
+                    stats["jeonse"] += 1
+                if ratio:
+                    stats["ratio"] += 1
+
+            if i % 200 == 0:
+                progress(f"  {i}/{len(pairs)}")
+    return stats
+
+
+def _current_ym() -> str:
+    today = date.today()
+    return f"{today.year:04d}{today.month:02d}"
+
+
+def _recent_from(as_of_ym: str, months: int) -> list[str]:
+    """as_of 를 끝으로 하는 최근 N개월 목록(과거→현재)."""
+    y, m = int(as_of_ym[:4]), int(as_of_ym[4:])
+    total = y * 12 + (m - 1)
+    return [f"{(total - k) // 12:04d}{(total - k) % 12 + 1:02d}"
+            for k in range(months - 1, -1, -1)]

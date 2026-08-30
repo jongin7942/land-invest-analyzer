@@ -9,6 +9,10 @@
     python -m apt_engine.cli collect trades --months 60         # 매매 5년치
     python -m apt_engine.cli collect rents  --months 60         # 전월세 5년치
     python -m apt_engine.cli match                              # 단지 매칭
+    python -m apt_engine.cli snapshot                           # 대표가격·전세가·전세가율
+
+    # 조회
+    python -m apt_engine.cli price "동아1단지"                    # 근거까지 펼쳐서 보기
 
     # 점검
     python -m apt_engine.cli status
@@ -30,6 +34,7 @@ from apt_engine.collectors import apt_rent, apt_trade, kapt
 from apt_engine.db import migrate as mig
 from apt_engine.db.connection import get_conn
 from apt_engine.repo import apt as repo
+from apt_engine.price import snapshot as snap_mod
 from apt_engine.validation import rules as validation
 
 
@@ -195,6 +200,104 @@ def cmd_match(args):
     print("\n다음: python -m apt_engine.cli validate")
 
 
+def cmd_snapshot(args):
+    print(f"대표가격 스냅샷 생성 (집계창 {args.window}개월, 기준월 {args.months}개)...")
+    s = ingest.build_snapshots(
+        as_of_ym=args.as_of, months=args.months, window_months=args.window,
+        min_households=args.min_households, sido=args.sido, db_path=args.db)
+    print(f"\n(단지×면적) {s['pairs']}쌍 · 매매 스냅샷 {s['price']:,} · "
+          f"전세 {s['jeonse']:,} · 전세가율 {s['ratio']:,} · 표본없음 {s['skipped']:,}")
+    if s["price"]:
+        print('다음: python -m apt_engine.cli price "<단지명>"')
+
+
+def cmd_price(args):
+    """요구사항 51 — 모든 핵심 숫자는 출처·원본·계산법을 펼쳐 볼 수 있어야 한다."""
+    from apt_engine.trace import Calc
+
+    with get_conn(args.db) as conn:
+        matches = repo.find_complexes(conn, args.query)
+        if not matches:
+            print(f"'{args.query}' 로 찾은 단지가 없습니다. "
+                  f"`collect complexes` 를 먼저 실행했는지 확인하세요.")
+            return
+        if len(matches) > 1 and not args.complex_id:
+            print(f"'{args.query}' 로 {len(matches)}개 단지가 검색됐습니다. "
+                  f"--complex-id 로 지정하세요.\n")
+            for m in matches[:20]:
+                print(f"  [{m['id']:>6}] {m['name']:<28s} {regions.name_of(m['lawd_cd']):16s} "
+                      f"{(m['emd_name'] or '-'):10s} "
+                      f"{m['apt_households'] or '?'}세대 {m['approval_year'] or '?'}년")
+            return
+
+        row = (conn.execute("SELECT * FROM complex WHERE id=?", (args.complex_id,)).fetchone()
+               if args.complex_id else matches[0])
+        if row is None:
+            print(f"단지 #{args.complex_id} 를 찾을 수 없습니다.")
+            return
+
+        _print_complex_header(row)
+        bands = [args.band] if args.band else [
+            r[0] for r in conn.execute(
+                "SELECT DISTINCT area_band FROM trade WHERE complex_id=? ORDER BY 1",
+                (row["id"],)).fetchall()]
+        if not bands:
+            print("\n  이 단지에 매칭된 실거래가 없습니다 → 대표가격 확인 불가")
+            return
+
+        for band in bands:
+            _print_band_price(conn, row["id"], band, verbose=args.verbose)
+
+
+def _print_complex_header(row):
+    from apt_engine import units
+    print(f"\n■ {row['name']}  ({regions.name_of(row['lawd_cd'])} {row['emd_name'] or ''})")
+    facts = []
+    facts.append(f"세대수 {row['apt_households']:,}" if row["apt_households"]
+                 else "세대수 확인 불가(K-apt 미수집)")
+    facts.append(f"사용승인 {row['approval_year']}년" if row["approval_year"]
+                 else "사용승인 확인 불가")
+    facts.append(f"대지면적 {units.fmt_m2(row['land_area_m2'])}" if row["land_area_m2"]
+                 else "대지면적 확인 불가(건축물대장 필요)")
+    facts.append(f"용적률 {row['current_far']}%" if row["current_far"]
+                 else "현재 용적률 확인 불가")
+    print("  " + " · ".join(facts))
+
+
+def _print_band_price(conn, complex_id, band, *, verbose=False):
+    from apt_engine import area, units
+    from apt_engine.trace import Calc
+
+    ps = repo.latest_price_snapshot(conn, complex_id, band)
+    js = repo.latest_jeonse_snapshot(conn, complex_id, band)
+    print(f"\n  ── 전용 {area.label_of(band)} ──")
+
+    if ps is None:
+        print("    매매 대표가격: 확인 불가 (스냅샷 미생성 — `cli snapshot` 실행)")
+    else:
+        print(f"    매매 대표가격  {units.fmt_eok(ps['representative_price']):>10s}"
+              f"   [{ps['confidence']}] 정상거래 {ps['sample_n']}건 · 제외 {ps['excluded_n']}건"
+              f"  ({ps['as_of_ym']} 기준 {ps['window_months']}개월)")
+        print(f"    분포           {units.fmt_eok(ps['price_min'])} ~ "
+              f"{units.fmt_eok(ps['price_p25'])} ~ {units.fmt_eok(ps['price_p75'])} ~ "
+              f"{units.fmt_eok(ps['price_max'])}")
+
+    if js is None:
+        print("    전세 대표가격: 확인 불가")
+    else:
+        print(f"    전세 대표가격  {units.fmt_eok(js['representative_deposit']):>10s}"
+              f"   [{js['confidence']}] 정상계약 {js['sample_n']}건")
+        if js["jeonse_ratio"] is not None:
+            print(f"    전세가율       {units.fmt_pct(js['jeonse_ratio']):>10s}")
+        else:
+            print("    전세가율: 확인 불가 (매매 또는 전세 표본 없음)")
+
+    if verbose and ps is not None:
+        print("\n    ── 계산 근거 ──")
+        for line in Calc.from_json(ps["calc_trace"]).explain().splitlines():
+            print(f"    {line}")
+
+
 # ── 파서 ──────────────────────────────────────────────────────────────
 
 def build_parser() -> argparse.ArgumentParser:
@@ -224,6 +327,21 @@ def build_parser() -> argparse.ArgumentParser:
     ma = sub.add_parser("match", help="실거래를 단지에 붙인다")
     ma.add_argument("--rebuild", action="store_true", help="기존 매칭을 지우고 전부 다시")
 
+    sn = sub.add_parser("snapshot", help="대표가격·전세가·전세가율 계산")
+    sn.add_argument("--as-of", help="기준월 YYYYMM (기본: 이번 달)")
+    sn.add_argument("--months", type=int, default=1,
+                    help="기준월을 몇 개 만들지 (과거 시계열용, 기본 1)")
+    sn.add_argument("--window", type=int, default=snap_mod.DEFAULT_WINDOW_MONTHS,
+                    help="집계창 개월 수 (요구사항 2: 3~6개월, 기본 6)")
+    sn.add_argument("--min-households", type=int, help="세대수 하한으로 대상 좁히기")
+    sn.add_argument("--sido", choices=["서울", "경기", "인천"])
+
+    pc = sub.add_parser("price", help="단지의 대표가격을 근거와 함께 보기")
+    pc.add_argument("query", help="단지명 일부 (예: 동아1단지)")
+    pc.add_argument("--complex-id", type=int, help="동명 단지가 여럿일 때 지정")
+    pc.add_argument("--band", help="전용면적 밴드 (예: 84). 미지정시 전부")
+    pc.add_argument("--verbose", action="store_true", help="계산 근거 전문 출력")
+
     sub.add_parser("validate", help="요구사항 26 검증 규칙 실행")
 
     re_ = sub.add_parser("report", help="진단 리포트")
@@ -235,6 +353,7 @@ def build_parser() -> argparse.ArgumentParser:
 HANDLERS = {
     "init": cmd_init, "status": cmd_status, "probe": cmd_probe,
     "collect": cmd_collect, "match": cmd_match,
+    "snapshot": cmd_snapshot, "price": cmd_price,
     "validate": cmd_validate, "report": cmd_report,
 }
 
