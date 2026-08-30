@@ -5,3 +5,6 @@ __pycache__/
 *.pyc
 kakao_token.json
 .pytest_cache/
+codef_token.json
+*.db-wal
+*.db-shm

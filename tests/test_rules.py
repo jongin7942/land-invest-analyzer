@@ -472,3 +472,88 @@ class TestSchemaGuards:
                 conn.execute(
                     "INSERT INTO tax_rule (tax_kind, rule_key, effective_from) "
                     "VALUES ('개근세','x','2020-01-01')")
+
+
+class TestRateFormula:
+    """지방세법 제11조 6억~9억 구간처럼 세율이 구간 안에서 연속으로 변하는 조문.
+
+    표로 못 담아서 산식을 넣는다. CSV 는 사람이 손으로 채우는 파일이므로
+    eval() 을 쓰지 않고 ast 화이트리스트로 제한 평가한다.
+    """
+
+    ACQ = "(base * 2 / 300000000 - 3) / 100"
+
+    @pytest.mark.parametrize("price,expected_pct", [
+        (600_000_000, 1.0),      # 구간 시작 — 6억 이하 세율 1% 와 이어진다
+        (750_000_000, 2.0),      # 한가운데
+        (900_000_000, 3.0),      # 구간 끝 — 9억 초과 세율 3% 와 이어진다
+    ])
+    def test_지방세법_구간_산식(self, price, expected_pct):
+        from apt_engine.tax.rules import eval_rate_formula
+        assert eval_rate_formula(self.ACQ, price) * 100 == pytest.approx(expected_pct)
+
+    @pytest.mark.parametrize("expr", [
+        '__import__("os").system("echo x")',
+        'open("secret.txt").read()',
+        'foo + 1',
+        '(1).__class__',
+    ])
+    def test_임의_코드는_거부한다(self, expr):
+        from apt_engine.tax.rules import eval_rate_formula
+        with pytest.raises(rules.RuleError):
+            eval_rate_formula(expr, 600_000_000)
+
+    def test_세율_범위를_벗어나면_거부한다(self):
+        # 단위를 틀려서 100 배로 적는 실수(1% 를 1 로) 를 잡는다.
+        from apt_engine.tax.rules import eval_rate_formula
+        with pytest.raises(rules.RuleError, match="세율 범위"):
+            eval_rate_formula("base / 1000", 600_000_000)
+
+    def test_0으로_나누면_거부한다(self):
+        from apt_engine.tax.rules import eval_rate_formula
+        with pytest.raises(rules.RuleError, match="0으로"):
+            eval_rate_formula("1 / 0", 1)
+
+
+class TestRegionScopedCost:
+    """중개보수는 시·도 조례라 cost_rule.region 에 시도가 적힌다.
+
+    equity.compute() 호출부가 region 을 빠뜨리면 지역이 적힌 규칙이 통째로
+    걸러져 '규칙 미입력' 으로 보인다 — last_verified 를 채워도 영원히 안 잡힌다.
+    lawd_cd 에서 시도를 유도하는지 고정한다.
+    """
+
+    def test_시도는_lawd_cd_에서_유도된다(self):
+        from apt_engine import regions
+        assert regions.sido_of("28237") == "인천"   # 부평구
+        assert regions.sido_of("11680") == "서울"   # 강남구
+        assert regions.sido_of("41135") == "경기"   # 분당구
+
+    def test_지역이_적힌_중개보수_규칙이_잡힌다(self, db):
+        with get_conn(db) as conn:
+            conn.execute(
+            "INSERT INTO cost_rule (cost_kind, rule_key, region, price_min, price_max,"
+            " rate, effective_from, source_name, last_verified) "
+            "VALUES ('중개보수','brok/test','인천',200000000,900000000,0.004,"
+            "'2021-10-19','테스트','2026-08-31')")
+
+            from apt_engine.cash import equity
+            eq = equity.compute(conn, price=620_000_000, as_of="2026-08-31",
+                            house_count=1, lawd_cd="28237", emd_name="부평동")
+            brok = next(i for i in eq.items if i.name == "중개보수")
+            assert brok.known, f"지역 규칙이 걸러졌다: {brok.note}"
+            assert brok.amount == 2_480_000      # 6.2억 × 0.4%
+
+    def test_다른_시도의_규칙은_안_잡힌다(self, db):
+        with get_conn(db) as conn:
+            conn.execute(
+            "INSERT INTO cost_rule (cost_kind, rule_key, region, price_min, price_max,"
+            " rate, effective_from, source_name, last_verified) "
+            "VALUES ('중개보수','brok/seoul','서울',200000000,900000000,0.004,"
+            "'2021-10-19','테스트','2026-08-31')")
+
+            from apt_engine.cash import equity
+            eq = equity.compute(conn, price=620_000_000, as_of="2026-08-31",
+                            house_count=1, lawd_cd="28237", emd_name="부평동")
+            brok = next(i for i in eq.items if i.name == "중개보수")
+            assert not brok.known, "서울 조례가 인천 매물에 적용됐다"

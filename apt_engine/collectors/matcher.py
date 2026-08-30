@@ -45,6 +45,17 @@ BRAND_ALIASES = (
     ("castle", "캐슬"),
     ("hillstate", "힐스테이트"),
     ("hill state", "힐스테이트"),
+    # 브랜드가 아니라 **음차 조각**. K-apt 는 한글로, 실거래는 로마자로 적는다.
+    # 긴 것부터 치환하므로 'skview' → 'sky' → 'sk' 순으로 안전하게 걸린다.
+    ("sky", "스카이"),
+    ("view", "뷰"),
+    ("sk", "에스케이"),
+    ("leaders", "리더스"),
+    ("park", "파크"),
+    ("city", "시티"),
+    ("town", "타운"),
+    ("blue", "블루"),
+    ("lake", "레이크"),
 )
 
 # 이름 끝에 붙어 의미를 바꾸지 않는 꼬리표. 붙어 있어도 없어도 같은 단지다.
@@ -79,6 +90,87 @@ def normalize(name: str | None) -> str:
             s = s[: -len(low)]
 
     return s
+
+
+# ── 표기 변형 ────────────────────────────────────────────────────────────
+# 실거래가와 K-apt 는 같은 단지를 이렇게 다르게 적는다(2026-08-31 인천 실측):
+#
+#   실거래 '부개주공3'   ↔  K-apt '부개주공3단지아파트'    끝의 '단지' 유무
+#   실거래 '주공5'(부개동) ↔  K-apt '부개 주공5단지'        법정동 접두어 유무
+#   실거래 '동아(1차)'    ↔  K-apt '부평 동아1단지'         '차' ↔ '단지'
+#   실거래 '뉴서울'(부개동)↔  K-apt '부개 뉴서울'           법정동 접두어
+#
+# 그래서 양쪽 이름에서 **같은 규칙으로** 변형 집합을 만들어 교집합을 본다.
+# 유사도(SequenceMatcher)로 뭉개지 않는 이유: '뉴서울'과 '뉴서울2차'는 유사도가
+# 높지만 서로 다른 단지다. 변형은 규칙이 명시적이라 무엇이 왜 붙었는지 말할 수 있다.
+_EMD_TAIL = re.compile(r"\d*(?:동|읍|면|리|가)$")
+_SERIES = re.compile(r"(\d+)\s*(?:차|단지)")
+_TRAIL_NUM = re.compile(r"\d$")
+
+
+_SGG_TAIL = re.compile(r"(?:특별시|광역시|특별자치시|특별자치도|시|군|구|도)$")
+_LEAD_SERIES = re.compile(r"^(\d+)(?:차|단지)(.+)$")
+
+
+def sgg_stems(sgg_name: str | None) -> list[str]:
+    """'인천 부평구' → ['인천', '부평'].
+
+    K-apt 는 단지명 앞에 법정동이 아니라 시군구나 지역 통칭을 붙이기도 한다
+    ('현대1차'(산곡동) ↔ '부평현대1단지'). 그래서 시군구 어간도 접두어 후보로 둔다.
+    """
+    if not sgg_name:
+        return []
+    out = []
+    for part in str(sgg_name).split():
+        stem = _SGG_TAIL.sub("", normalize(part))
+        if len(stem) >= 2:
+            out.append(stem)
+    return out
+
+
+def emd_stem(emd_name: str | None) -> str:
+    """'부개동' → '부개'. 접두어로 쓰이는 법정동 어간."""
+    if not emd_name:
+        return ""
+    return _EMD_TAIL.sub("", normalize(emd_name))
+
+
+def variants(name_norm: str, emd_name: str | None = None,
+             sgg_name: str | None = None) -> frozenset[str]:
+    """한 이름의 동치 표기 집합.
+
+    법정동 어간은 **그 행 자신의 법정동**으로만 떼어낸다. 그래서 '갈산주공1단지'와
+    '부개주공1단지'가 둘 다 '주공1단지'로 줄더라도, 뒤에서 법정동으로 다시 가른다.
+    """
+    if not name_norm:
+        return frozenset()
+    out = {name_norm, _SERIES.sub(r"\1단지", name_norm)}
+
+    # 이름 가운데 낀 '아파트' 는 의미가 없다: '동아아파트2단지' → '동아2단지'
+    for v in list(out):
+        stripped = v.replace("아파트", "")
+        if stripped and stripped != v:
+            out.add(stripped)
+            out.add(_SERIES.sub(r"\1단지", stripped))
+
+    for stem in [emd_stem(emd_name), *sgg_stems(sgg_name)]:
+        if len(stem) < 2:
+            continue
+        for v in list(out):
+            if v.startswith(stem) and len(v) > len(stem):
+                out.add(v[len(stem):])
+
+    # 앞에 붙은 차수를 뒤로 돌린다: '2차우성' → '우성2차'
+    for v in list(out):
+        m = _LEAD_SERIES.match(v)
+        if m:
+            out.add(m.group(2) + m.group(1) + "단지")
+
+    # 숫자로 끝나면 '단지'가 생략된 표기로 본다: '주공3' → '주공3단지'
+    for v in list(out):
+        if _TRAIL_NUM.search(v):
+            out.add(v + "단지")
+    return frozenset(out)
 
 
 def similarity(a: str, b: str) -> float:
@@ -123,7 +215,8 @@ def _year_ok(build_year: int | None, approval_year: int | None) -> bool:
 
 
 def match(apt_name: str, candidates: list[Candidate], *,
-          emd_name: str | None = None, build_year: int | None = None) -> MatchResult:
+          emd_name: str | None = None, build_year: int | None = None,
+          sgg_name: str | None = None) -> MatchResult:
     """실거래 한 건의 단지명을 후보 목록에 붙인다.
 
     candidates 는 **같은 시군구의 단지들**이어야 한다(호출부가 좁혀서 넘긴다).
@@ -166,7 +259,42 @@ def match(apt_name: str, candidates: list[Candidate], *,
             f"동명 단지 {len(exact)}개를 구별할 근거가 없음 ({names}). "
             f"근거 없이 합치지 않는다")
 
-    # ── 3. 완전일치 없음 — 유사도로 후보를 찾는다 ──────────────────────
+    # ── 3. 표기 변형으로 일치 ──────────────────────────────────────────
+    # '부개주공3' ↔ '부개주공3단지' 같은 표기 차이. 규칙이 명시적이라 근거를 쓸 수 있다.
+    tvars = variants(target, emd_name, sgg_name)
+    vmatch = [c for c in candidates
+              if variants(c.name_norm, c.emd_name, sgg_name) & tvars]
+    if vmatch:
+        narrowed, used = vmatch, []
+        if len(narrowed) > 1 and emd_name:
+            by_emd = [c for c in narrowed if c.emd_name == emd_name]
+            if by_emd:
+                narrowed, _ = by_emd, used.append(f"법정동 '{emd_name}'")
+        if len(narrowed) > 1 and build_year is not None:
+            by_year = [c for c in narrowed if _year_ok(build_year, c.approval_year)]
+            if by_year:
+                narrowed, _ = by_year, used.append(f"건축년도 {build_year}±{YEAR_TOLERANCE}")
+
+        if len(narrowed) == 1:
+            best = narrowed[0]
+            # 표기 변형만으로는 STRONG 을 주지 않는다. 법정동이나 건축년도가
+            # 한 번 더 받쳐줘야 한다 — 안 그러면 '동아1단지'와 '동아1차'가 서로
+            # 다른 단지인 경우를 걸러낼 방법이 없다.
+            corroborated = (emd_name is not None and best.emd_name == emd_name)                 or _year_ok(build_year, best.approval_year)
+            detail = f"표기 변형 일치 '{target}' → '{best.name}'"
+            if used:
+                detail += f" ({' + '.join(used)}로 특정)"
+            if corroborated:
+                return MatchResult(best.complex_id, "STRONG",
+                                   detail + " + 법정동/건축년도 확인")
+            return MatchResult(best.complex_id, "WEAK", detail + " (교차확인 없음, 검증 권장)")
+
+        names = ", ".join(sorted({c.name for c in narrowed}))[:120]
+        return MatchResult(
+            None, "NONE",
+            f"표기 변형 후보 {len(narrowed)}개를 구별할 근거가 없음 ({names})")
+
+    # ── 4. 완전일치·변형일치 없음 — 유사도로 후보를 찾는다 ─────────────
     scored = sorted(
         ((similarity(target, c.name_norm), c) for c in candidates),
         key=lambda sc: sc[0], reverse=True,

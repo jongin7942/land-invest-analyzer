@@ -186,6 +186,7 @@ def run_matching(*, rebuild: bool = False, db_path: str | None = None,
                 result = matcher.match(
                     g["apt_name"], cache[lawd],
                     emd_name=g["emd_name"], build_year=g["build_year"],
+                    sgg_name=regions.name_of(lawd),
                 )
                 repo.apply_match(
                     conn, table, lawd_cd=lawd, apt_name=g["apt_name"],

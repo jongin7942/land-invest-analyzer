@@ -20,7 +20,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import date
 
-from apt_engine import rules, units
+from apt_engine import rules, units, regions
 from apt_engine.regulation import loan as loan_mod
 from apt_engine.regulation import zone as zone_mod
 from apt_engine.tax import acquisition
@@ -100,6 +100,11 @@ def compute(conn: sqlite3.Connection, *, price: int, as_of: str | date,
     """실투자금. 규제·세금 데이터가 없으면 그 항목만 '확인 불가'로 남고 나머지는 계산된다."""
     price = units.as_won(price)
     day = rules.as_ymd(as_of)
+
+    # 중개보수는 시·도 조례라 지역별로 다르다. 호출부가 region 을 빠뜨리면 지역이 적힌
+    # 규칙이 통째로 걸러져 '규칙 미입력' 으로 보이므로, lawd_cd 에서 직접 유도한다.
+    if region is None:
+        region = regions.sido_of(lawd_cd)
 
     zone = zone_mod.zone_at(conn, lawd_cd, as_of=day, emd_name=emd_name)
     permit = zone_mod.permit_zone_at(conn, lawd_cd, as_of=day, scope=scope,

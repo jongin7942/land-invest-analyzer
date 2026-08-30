@@ -194,14 +194,23 @@ class TestMatchingPipeline:
 class TestRegionCodes:
     def test_수도권_시군구_수(self):
         assert len(regions.SEOUL) == 25
-        assert len(regions.INCHEON) == 10
-        assert len(regions.SIGUNGU) == 25 + 10 + len(regions.GYEONGGI)
+        # 2026 인천 개편: 중구·동구 → 제물포구/영종구, 서구 → 서해구/검단구 → 10개에서 11개로.
+        assert len(regions.INCHEON) == 11
+        assert len(regions.SIGUNGU) == 25 + 11 + len(regions.GYEONGGI)
 
-    def test_과거_거래월에는_폐지된_통합코드를_쓴다(self):
-        # 2021년 화성시 거래는 신설 4개 구 코드로는 조회되지 않는다.
+    def test_인천은_개편_후_코드를_쓴다(self):
+        inc = set(regions.all_codes("인천"))
+        assert {"28125", "28155", "28275", "28290"} <= inc   # 제물포·영종·서해·검단
+        assert not ({"28110", "28140", "28260"} & inc)       # 중·동·서구는 폐지
+
+    def test_과거_거래월에도_현재_코드를_쓴다(self):
+        # 실거래가 API 는 과거 데이터도 현재 행정구역 코드로 소급 재편해 돌려준다.
+        # 2026-08-31 확인: 화성 202401 → 41590(통합)=0건, 41591=175건.
+        # 따라서 과거 달이라도 폐지 코드를 써서는 안 된다 — 그 구간이 통째로 비게 된다.
         old = regions.codes_for_ym("202101", "경기")
-        assert "41590" in old
-        assert "41591" not in old
+        assert "41590" not in old
+        assert {"41591", "41593", "41595", "41597"} <= set(old)
+        assert regions.LEGACY == {}
 
     def test_현재_거래월에는_신설_구코드를_쓴다(self):
         now = regions.codes_for_ym("202608", "경기")
