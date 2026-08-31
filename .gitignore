@@ -8,3 +8,4 @@ kakao_token.json
 codef_token.json
 *.db-wal
 *.db-shm
+logs/
