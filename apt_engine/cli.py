@@ -1734,6 +1734,7 @@ def cmd_backtest(args):
             gate=(pipeline_mod.GATE_PRICE_ONLY if args.price_only
                   else pipeline_mod.GATE_STRICT),
             purge_embargo=args.purge, max_windows=args.max_windows,
+            cash_hurdle_rate=args.cash_hurdle,
             train_fraction=args.train_frac,
             validation_fraction=args.val_frac)
         print(result.summary)
@@ -2284,6 +2285,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="정답 구간이 다음 분할을 침범하는 창을 뺀다 (embargo)")
     bt.add_argument("--max-windows", type=int, help="창 수 제한 (시험용)")
     bt.add_argument("--show-windows", action="store_true")
+    bt.add_argument("--cash-hurdle", type=float,
+                    help="세후 현금 수익률. §26 cash_accuracy 를 계산하려면 필요. "
+                         "없으면 그 KPI 는 '확인 불가' 로 남는다")
     bt.add_argument("--train-frac", type=float, default=0.60,
                     help="TRAIN 비율 (기본 0.60). 보유기간이 길면 검증 구간이 "
                          "모자라니 이걸 줄여서 VALIDATION 을 늘린다")

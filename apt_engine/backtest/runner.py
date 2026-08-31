@@ -116,6 +116,7 @@ def run(conn: sqlite3.Connection, *, run_key: str, data_start: str,
         purge_embargo: bool = False,
         max_windows: int | None = None,
         weights_source: str = weights_mod.HEURISTIC,
+        cash_hurdle_rate: float | None = None,
         train_fraction: float = windows_mod.TRAIN_FRACTION,
         validation_fraction: float = windows_mod.VALIDATION_FRACTION,
         run_leakage_audit: bool = True) -> RunResult:
@@ -140,7 +141,8 @@ def run(conn: sqlite3.Connection, *, run_key: str, data_start: str,
         wr = _run_window(conn, run_id, window, profile=profile,
                          area_band=area_band, buckets=buckets,
                          list_kinds=list_kinds, top_k=top_k, gate=gate,
-                         weights_source=weights_source)
+                         weights_source=weights_source,
+                         cash_hurdle_rate=cash_hurdle_rate)
         result.windows.append(wr)
 
     result.aggregate = kpi_mod.aggregate([w.kpis for w in result.scored_windows]) \
@@ -192,7 +194,8 @@ def _fit(conn, run_id: int, result: RunResult, *, market_source: str) -> None:
 def _run_window(conn, run_id: int, window: windows_mod.Window, *,
                 profile: Profile, area_band: str, buckets: tuple[int, ...],
                 list_kinds: tuple[str, ...], top_k: int, gate: str,
-                weights_source: str) -> WindowResult:
+                weights_source: str,
+                cash_hurdle_rate: float | None = None) -> WindowResult:
     window_id = _create_window(conn, run_id, window)
     wr = WindowResult(window, window_id)
 
@@ -255,8 +258,11 @@ def _run_window(conn, run_id: int, window: windows_mod.Window, *,
     wr.outcomes = outcome_mod.classify(raw, picked_ids)
     outcome_mod.save(conn, window_id, wr.outcomes)
 
+    # §26 cash_accuracy — 같은 기간 현금 수익률. **없으면 지어내지 않는다.**
+    cash_return = (None if cash_hurdle_rate is None else
+                   (1 + cash_hurdle_rate) ** window.horizon_years - 1)
     wr.kpis = kpi_mod.compute_window(wr.outcomes, picked_order=picked_order,
-                                     scores=scores)
+                                     scores=scores, cash_return=cash_return)
     kpi_mod.save(conn, _run_id_of(conn, window_id), wr.kpis,
                  window_id=window_id, split=window.split,
                  horizon_years=window.horizon_years)

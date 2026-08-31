@@ -733,3 +733,160 @@ class TestMoneyArrivalAndNextNode:
                              remaining_gap=0.4, early_band_migration=0.7,
                              transmission_probability=0.7)
         assert f.value == 0.0
+
+
+# ── §25·§26 백테스트 성공 정의 · 새 Metric ──────────────────────────
+
+class TestSuccessLevels:
+    def _k(self, **kv):
+        from apt_engine.backtest import kpi as kpi_mod
+        return [kpi_mod.Kpi(k, v, 10) for k, v in kv.items()]
+
+    def test_최종_목표는_Capital_Opportunity_다(self):
+        from apt_engine.backtest import kpi as kpi_mod
+        assert kpi_mod.OPTIMIZATION_TARGET == kpi_mod.CAPITAL_OPPORTUNITY
+
+    def test_절대수익만_나면_1단계까지만_성공이다(self):
+        from apt_engine.backtest import kpi as kpi_mod
+        level, why = kpi_mod.success_level(
+            self._k(median_forward_return=0.30, opportunity_alpha=-0.05))
+        assert level == kpi_mod.ABSOLUTE
+        assert "Benchmark 실패" in why
+
+    def test_더_좋은_대안이_있었으면_최종_실패다(self):
+        """§24 — 절대적으로는 성공이어도 상대적으로는 실패일 수 있다."""
+        from apt_engine.backtest import kpi as kpi_mod
+        level, why = kpi_mod.success_level(
+            self._k(median_forward_return=0.30, opportunity_alpha=0.10,
+                    missed_better_alternative_rate=0.20))
+        assert level == kpi_mod.BENCHMARK
+        assert "상대적으로는 실패" in why
+
+    def test_셋_다_통과해야_최종_성공(self):
+        from apt_engine.backtest import kpi as kpi_mod
+        level, _ = kpi_mod.success_level(
+            self._k(median_forward_return=0.30, opportunity_alpha=0.10,
+                    missed_better_alternative_rate=0.0))
+        assert level == kpi_mod.CAPITAL_OPPORTUNITY
+
+    def test_모르면_성공으로_치지_않는다(self):
+        from apt_engine.backtest import kpi as kpi_mod
+        level, why = kpi_mod.success_level(
+            self._k(median_forward_return=0.30, opportunity_alpha=0.10))
+        assert level == kpi_mod.BENCHMARK
+        assert "최종 목표" in why
+
+
+class TestNewMetrics:
+    def _out(self, cid, ret, picked):
+        from apt_engine.backtest import outcome as o
+        return o.Outcome(cid, "84", forward_return=ret, picked=picked)
+
+    def test_더_좋은_대안을_놓쳤으면_잡는다(self):
+        from apt_engine.backtest import kpi as kpi_mod, outcome as out_mod
+        raw = [self._out(1, 0.10, True), self._out(2, 0.60, False),
+               self._out(3, 0.05, False)]
+        ranked = out_mod.classify(raw, {1})
+        kpis = {k.key: k for k in kpi_mod.compute_window(
+            ranked, picked_order=[1], scores={})}
+        assert kpis["missed_better_alternative_rate"].value > 0
+
+    def test_현금수익률을_모르면_판정하지_않는다(self):
+        """0 으로 가정하면 현금이 항상 오답이 된다."""
+        from apt_engine.backtest import kpi as kpi_mod, outcome as out_mod
+        ranked = out_mod.classify([self._out(1, 0.10, True)], {1})
+        kpis = {k.key: k for k in kpi_mod.compute_window(
+            ranked, picked_order=[1], scores={})}
+        assert kpis["cash_accuracy"].value is None
+        assert "0 으로 가정하면" in kpis["cash_accuracy"].note
+
+    def test_비용을_모르면_세후수익률을_지어내지_않는다(self):
+        from apt_engine.backtest import kpi as kpi_mod, outcome as out_mod
+        ranked = out_mod.classify([self._out(1, 0.10, True)], {1})
+        kpis = {k.key: k for k in kpi_mod.compute_window(
+            ranked, picked_order=[1], scores={})}
+        for key in ("after_cost_return", "after_interest_return",
+                    "after_tax_return"):
+            assert kpis[key].value is None
+            assert "부풀려집니다" in kpis[key].note
+
+    def test_비용을_주면_단계별로_차감한다(self):
+        from apt_engine.backtest import kpi as kpi_mod, outcome as out_mod
+        ranked = out_mod.classify([self._out(1, 0.30, True)], {1})
+        costs = {1: kpi_mod.Costs(acquisition=0.05, interest=0.08, tax=0.06)}
+        kpis = {k.key: k for k in kpi_mod.compute_window(
+            ranked, picked_order=[1], scores={}, costs=costs)}
+        assert kpis["after_cost_return"].value == pytest.approx(0.25)
+        assert kpis["after_interest_return"].value == pytest.approx(0.17)
+        assert kpis["after_tax_return"].value == pytest.approx(0.11)
+
+    def test_일부_비용만_알면_그_단계까지만_낸다(self):
+        from apt_engine.backtest import kpi as kpi_mod, outcome as out_mod
+        ranked = out_mod.classify([self._out(1, 0.30, True)], {1})
+        costs = {1: kpi_mod.Costs(acquisition=0.05)}
+        kpis = {k.key: k for k in kpi_mod.compute_window(
+            ranked, picked_order=[1], scores={}, costs=costs)}
+        assert kpis["after_cost_return"].value == pytest.approx(0.25)
+        assert kpis["after_tax_return"].value is None
+
+
+# ── §27·§41·§49-2 Control Pair 가 스코어링으로 새지 않는다 ──────────
+
+class TestControlPairIsolation:
+    def test_연구후보_이름이_결정경로_코드에_없다(self):
+        """§41·§49-2 — 이 목록에 있다는 이유로 점수가 바뀌면 안 된다.
+
+        `repo/control.py` 에만 이름이 있어야 하고, feature·scoring·ranking·
+        blind 어디에도 등장하면 안 된다.
+        """
+        import pathlib
+        from apt_engine.repo import control
+
+        names = (set(control.RESEARCH_CANDIDATES)
+                 | set(control.CONTROL_TRAP_CANDIDATES)
+                 | set(control.TOO_LATE_CANDIDATES)
+                 | set(control.REVERSE_SANITY_2021))
+        base = pathlib.Path(control.__file__).resolve().parent.parent
+        offenders = []
+        for package in ("features", "scoring", "ranking", "blind", "invest"):
+            for path in sorted((base / package).rglob("*.py")):
+                text = path.read_text(encoding="utf-8")
+                for name in names:
+                    # 단지명은 공백·기호가 섞여 있어 핵심 토큰으로 본다
+                    token = name.split()[0][:6]
+                    if len(token) >= 4 and token in text:
+                        offenders.append(f"{package}/{path.name}: {name}")
+        assert offenders == [], (
+            f"결정 경로에 연구후보 이름이 있습니다: {offenders}. "
+            f"§41 은 Regression 전용이라고 못박았습니다")
+
+    def test_회귀_외_용도로_저장할_수_없다(self, db):
+        from apt_engine.repo import control
+        with get_conn(db) as conn:
+            control.seed(conn)
+            rows = conn.execute(
+                "SELECT purpose FROM control_pair").fetchall()
+        assert rows and all(r["purpose"] == "REGRESSION" for r in rows)
+
+    def test_점수가_없으면_실패가_아니라_모름이다(self):
+        """데이터가 없어 점수가 안 나온 것과 모델이 틀린 것은 다르다."""
+        from apt_engine.repo import control
+        pair = control.Pair("p", "2019-01-01", "A", "B", "59", "가설",
+                            winner_id=1, loser_id=2)
+        ok, why = control.discriminates({1: 70.0}, pair)
+        assert ok is None
+        assert "판정 불가" in why
+
+    def test_Winner_를_더_높게_보면_통과(self):
+        from apt_engine.repo import control
+        pair = control.Pair("p", "2019-01-01", "A", "B", "59", "가설",
+                            winner_id=1, loser_id=2)
+        assert control.discriminates({1: 70.0, 2: 40.0}, pair)[0] is True
+        ok, why = control.discriminates({1: 40.0, 2: 70.0}, pair)
+        assert ok is False
+        assert "설명할 Feature 가" in why
+
+    def test_2021_검사는_True_Blind_가_아니라고_명시한다(self):
+        """§28 — 이미 결과를 아는 후보로 하는 검사다."""
+        from apt_engine.repo import control
+        assert "True Blind Test 가 아닙니다" in control.USAGE_NOTE
