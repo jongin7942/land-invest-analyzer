@@ -1589,7 +1589,7 @@ class TestLeaderBuilder:
             got = leader_mod.load_leaders(conn, follower, "84", as_of=as_of)
         assert got, "방금 쓴 Leader 링크를 같은 시점에 못 읽습니다"
 
-    def test_Leader_가_없으면_세_Feature_가_확인_불가다(self, db):
+    def test_Leader_가_없으면_관련_Feature_가_전부_확인_불가다(self, db):
         """Leader 를 못 찾은 것과 안 따라온 것은 다른 상태다."""
         from apt_engine.ranking import delta_pipeline as delta
         with get_conn(db) as conn:
@@ -1600,7 +1600,7 @@ class TestLeaderBuilder:
         assert leader_label is None, "Leader 가 없는데 라벨이 붙었습니다"
         keys = {f.key for f in feats}
         assert keys == {"transmission_failure", "recoverable_discount_ratio",
-                        "next_node_score"}
+                        "leader_exhaustion", "next_node_score"}
         for f in feats:
             assert f.value is None
             assert "다릅니다" in f.detail["사유"] or "사다리" in f.detail["사유"]
@@ -1856,3 +1856,189 @@ class TestFrontier:
         near = fr.default_buckets(300_000_000)
         assert 1_000_000_000 not in near
         assert 300_000_000 in near
+
+
+# ── 등록부와 생산의 일치 ─────────────────────────────────────────────
+
+class TestRegistryCoverage:
+    def test_등록된_Feature_가_실제로_생산된다(self, db):
+        """등록만 하고 만들지 않으면 EarlyAlpha 의 곱셈 항이 조용히 빈다.
+
+        가격사다리가 필요한 `money_arrival_depth` 만 예외다 — 그건 종인님이
+        `ladder import` 로 넣어야 하는 데이터다.
+        """
+        from apt_engine.features import registry as reg
+        from apt_engine.invest.budget import Profile
+        from apt_engine.ranking import delta_pipeline as delta
+        from apt_engine.ranking import pipeline as bp
+        from apt_engine.relative import leaders
+
+        with get_conn(db) as conn:
+            synth_mod.build(conn, n_complexes=20, start_ym="201501",
+                            end_ym="202412", rule=synth_mod.MEAN_REVERT)
+            as_of = cutoff_mod.AsOf("2024-06-01")
+            leaders.build(conn, as_of=as_of, area_band="84")
+            profile = Profile(name="t", available_cash=900_000_000,
+                              cash_hurdle_rate=0.03)
+            profile.save(conn)
+            r = delta.run(conn, as_of=as_of, profile=profile,
+                          gate=bp.GATE_PRICE_ONLY, limit=3)
+
+        produced = set(r.candidates[0].features.items)
+        needs_ladder = {"money_arrival_depth"}
+        never = set(reg.REGISTRY) - produced - needs_ladder
+        assert never == set(), (
+            f"등록만 되고 생산되지 않는 Feature: {sorted(never)}. "
+            f"등록부에서 빼거나 생산 경로를 만드세요")
+
+
+class TestNewFeatures:
+    def _series(self, samples, price=100):
+        pts = [bands.BandPoint(f"{2024 - i // 12:04d}{12 - i % 12:02d}",
+                               int(price * 0.95), price, int(price * 1.06), n)
+               for i, n in enumerate(samples)]
+        return bands.BandSeries(1, "84", pts)
+
+    def test_거래회복은_매수신호가_아니라고_말한다(self):
+        """§49-5 — 거래량 증가만으로 가산점 금지."""
+        f = bands.transaction_recovery(self._series([10] * 6 + [4] * 12))
+        assert f.usable
+        assert "거래량 증가만으로" in f.detail["주의"]
+
+    def test_이전_구간_거래가_0_이면_비율을_만들지_않는다(self):
+        f = bands.transaction_recovery(self._series([10] * 6 + [0] * 12))
+        assert f.value is None
+
+    def test_중앙값이_P75_에_붙으면_소진이다(self):
+        tight = bands.BandSeries(1, "84", [
+            bands.BandPoint("202412", 95, 100, 100, 9)])
+        loose = bands.BandSeries(1, "84", [
+            bands.BandPoint("202412", 95, 100, 115, 9)])
+        assert (bands.distribution_exhaustion(tight).value >
+                bands.distribution_exhaustion(loose).value)
+
+    def test_정상가를_모르면_싼_기간을_세지_않는다(self):
+        """기준선 없이 '싸다'는 말이 성립하지 않는다."""
+        from apt_engine.features import stretch as st
+        months, why = st.months_cheap(
+            self._series([8] * 30), st.NormalPrice(None, 0, reason="없음"))
+        assert months is None
+
+    def test_전세가율_이력이_없으면_절대수준으로_대체하지_않는다(self):
+        """절대 수준은 지역마다 달라 그대로 쓸 수 없다."""
+        from apt_engine.features import stretch as st
+        f = st.price_to_jeonse_stretch(None, 0.55, history=None)
+        assert f.value is None
+        assert "절대 수준은 지역마다" in f.detail["사유"]
+
+    def test_전세가_뒤처지면_stretch_가_커진다(self):
+        from apt_engine.features import stretch as st
+        wide = st.price_to_jeonse_stretch(None, 0.45, history=[0.60] * 24)
+        tight = st.price_to_jeonse_stretch(None, 0.59, history=[0.60] * 24)
+        assert wide.value > tight.value
+
+    def test_Leader_가_꼭대기면_따라갈_자리가_없다고_말한다(self):
+        """Follower 논리의 전제가 무너진다."""
+        from apt_engine.features import leader as lm
+        rising = bands.BandSeries(1, "84", [
+            bands.BandPoint(f"{2024 - i // 12:04d}{12 - i % 12:02d}",
+                            95, 200 - i * 3, 210, 8) for i in range(24)])
+        f = lm.leader_exhaustion(rising)
+        assert f.value > 0.85
+        assert "따라갈 자리가 없습니다" in f.detail["해석"]
+
+    def test_실투자금을_모르면_같은자본_비교를_안_한다(self):
+        from apt_engine.features import demand
+        market = demand.Market([demand.Cohort(i, 500_000_000, 500, 8, "11110")
+                                for i in range(1, 8)])
+        f = demand.same_capital_value(market, price=500_000_000,
+                                      required_equity=None,
+                                      capital=300_000_000)
+        assert f.value is None
+
+    def test_이웃_확인은_이미_계산된_값에서_읽는다(self):
+        """이웃마다 시계열을 다시 로드하면 후보 수의 제곱만큼 쿼리가 나간다."""
+        from apt_engine.features import demand
+        sets = {
+            1: _fs(band_shift_strength=0.9),
+            2: _fs(band_shift_strength=0.8),
+            3: _fs(band_shift_strength=0.1),
+        }
+        regions = {1: "11110", 2: "11110", 3: "11110"}
+        f = demand.neighbour_confirmation_from(sets, complex_id=1,
+                                               regions=regions)
+        assert f.value == pytest.approx(0.5)      # 이웃 2개 중 1개가 움직임
+
+    def test_다른_생활권_이웃은_안_센다(self):
+        from apt_engine.features import demand
+        sets = {1: _fs(band_shift_strength=0.9),
+                2: _fs(band_shift_strength=0.9)}
+        f = demand.neighbour_confirmation_from(
+            sets, complex_id=1, regions={1: "11110", 2: "41110"})
+        assert f.value is None
+
+
+# ── 목표수익률 역산 매수가 — "얼마 이하에서 사야 하는가" ─────────────
+
+class TestTargetPrice:
+    def _linear(self, exit_value=130_000_000, cost=1.10, years=5):
+        """비싸게 살수록 수익률이 낮아지는 단순 모델."""
+        def ret(price):
+            return (exit_value - price * cost) / price / years
+        return ret
+
+    def test_목표가_높을수록_매수가가_낮아진다(self):
+        from apt_engine.reverse import target_price as tp
+        low = tp.solve(target_return=0.05, current_price=100_000_000,
+                       return_at=self._linear())
+        high = tp.solve(target_return=0.15, current_price=100_000_000,
+                        return_at=self._linear())
+        assert low.known and high.known
+        assert high.price < low.price
+
+    def test_도달_불가능하면_싸게_사면_된다고_하지_않는다(self):
+        """0원에 사도 안 되는 경우가 있다 — 보유비용이 기대 상승을 넘을 때."""
+        from apt_engine.reverse import target_price as tp
+        # 탐색 하한(현재가의 30% = 3천만원)에 사도 매도가가 비용에 못 미친다
+        r = tp.solve(target_return=0.10, current_price=100_000_000,
+                     return_at=self._linear(exit_value=20_000_000, cost=1.10))
+        assert not r.known
+        assert "이 목표로는 살 수 없습니다" in r.reason
+
+    def test_수익률을_못_내면_가격을_지어내지_않는다(self):
+        from apt_engine.reverse import target_price as tp
+        r = tp.solve(target_return=0.07, current_price=100_000_000,
+                     return_at=lambda p: None)
+        assert not r.known
+        assert "계산하지 못했습니다" in r.reason
+
+    def test_단조성이_깨지면_그_사실을_남긴다(self):
+        """싸게 살수록 수익률이 낮게 나오면 결과를 그대로 믿으면 안 된다."""
+        from apt_engine.reverse import target_price as tp
+        r = tp.solve(target_return=0.05, current_price=100_000_000,
+                     return_at=lambda p: p / 1_000_000_000)   # 비쌀수록 좋음
+        assert any("단조성 가정이 깨졌" in n for n in r.notes)
+
+    def test_지금_살_수_있는지_말한다(self):
+        from apt_engine.reverse import target_price as tp
+        cheap = tp.solve(target_return=0.02, current_price=100_000_000,
+                         return_at=self._linear())
+        assert cheap.buyable_now is True
+        assert "지금 가능" in cheap.label
+
+    def test_사다리는_목표별로_가격을_준다(self):
+        from apt_engine.reverse import target_price as tp
+        rungs = tp.ladder(targets=(0.05, 0.10), current_price=100_000_000,
+                          return_at=self._linear())
+        assert len(rungs) == 2
+        assert rungs[0].price > rungs[1].price
+
+    def test_시장이_요구수익률을_안_주면_말한다(self):
+        from apt_engine.reverse import target_price as tp
+        from apt_engine.ranking import executable as ex
+        rungs = tp.ladder(targets=(0.30,), current_price=100_000_000,
+                          return_at=self._linear())
+        bands_obj = ex.PriceBands(50_000_000, 90_000_000, 150_000_000,
+                                  100_000_000)
+        msgs = tp.compare_with_bands(rungs, bands_obj)
+        assert any("요구수익률을 주지 않습니다" in m for m in msgs)

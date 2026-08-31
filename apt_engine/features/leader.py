@@ -486,3 +486,40 @@ def save_transmission(conn: sqlite3.Connection, complex_id: int, area_band: str,
          d.recoverable, d.ratio, t.failure,
          json.dumps(d.why_not_yet, ensure_ascii=False) if d.why_not_yet else None,
          None if d.known else (d.reason or t.reason or "사유 미기록")))
+
+
+def leader_exhaustion(leader_series, *, months: int = 24) -> Feature:
+    """Relevant Leader 가 이미 소진됐는가 (§4-D).
+
+    Follower 를 사는 논리는 "Leader 가 올랐으니 이것도 따라 오른다" 인데,
+    **Leader 자신이 이미 꼭대기면 따라갈 자리가 없다.** 그러면 Follower 의
+    상승 여지도 같이 사라진다.
+
+    Leader 의 역사적 가격 위치로 본다. 100% 에 가까우면 소진이다.
+    """
+    from apt_engine.features import bands as bands_mod
+
+    usable = leader_series.usable if leader_series else []
+    if len(usable) < 12:
+        return Feature.missing(
+            "leader_exhaustion",
+            f"Leader 관측이 {len(usable)}개월뿐입니다(최소 12개월)")
+
+    prices = [p.p50 for p in usable[:months] if p.p50]
+    if len(prices) < 12:
+        return Feature.missing("leader_exhaustion",
+                               "Leader 중앙값이 있는 달이 모자랍니다")
+    now = prices[0]
+    below = sum(1 for p in prices if p < now)
+    value = below / len(prices)
+    return Feature(
+        "leader_exhaustion", value, "0~1",
+        sample_confidence(len(prices), full_at=months), Status.OK,
+        {"Leader 가격 위치": f"과거 {len(prices)}개월 중 상위 "
+                          f"{(1 - value):.0%}",
+         "해석": ("Leader 가 이미 꼭대기입니다 — 따라갈 자리가 없습니다"
+                if value > 0.85 else "Leader 에게 아직 여지가 있습니다"),
+         "주의": "높을수록 감점입니다. Follower 논리의 전제가 무너집니다"},
+        Calc(value=value, unit="0~1",
+             formula="Leader 현재가보다 쌌던 달의 비율",
+             intermediates={"관측 개월": len(prices)}, grade="CONFIRMED"))

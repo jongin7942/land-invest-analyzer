@@ -262,3 +262,76 @@ def all_features(market: Market, *, price: int, lawd_cd: str | None,
                                  required_equity=required_equity,
                                  lawd_cd=lawd_cd),
     ]
+
+
+def same_capital_value(market: Market, *, price: int,
+                       required_equity: int | None,
+                       capital: int | None) -> Feature:
+    """같은 자기자본으로 잡는 자산이 동급 대비 큰가 (§4-A·§24).
+
+    `capital_efficiency` 와 다르다. 그것은 "매수가 ÷ 실투자금"(레버리지)이고,
+    이것은 **"같은 돈을 쓴 다른 후보들과 비교해서 큰 자산을 잡는가"** 다.
+    전자는 절대값, 후자는 상대값이다.
+
+    실투자금을 모르면 만들지 않는다 — 레버리지를 모르면 "같은 돈" 이
+    성립하지 않는다.
+    """
+    if required_equity is None or required_equity <= 0:
+        return Feature.missing(
+            "same_capital_value",
+            "실투자금을 몰라 '같은 자기자본' 비교를 할 수 없습니다")
+    if not capital:
+        return Feature.missing("same_capital_value", "자기자본이 없습니다")
+
+    own = price / required_equity
+    peers = market.peers(price)
+    if len(peers) < MIN_COHORT:
+        return Feature.missing(
+            "same_capital_value",
+            f"같은 가격대 후보가 {len(peers)}개뿐입니다(최소 {MIN_COHORT}개)")
+
+    # 동급 평균 레버리지를 알 수 없으므로(실투자금은 후보마다 따로 계산),
+    # 자기자본 대비 배치 비율로 근사한다.
+    deployed = min(required_equity, capital) / capital
+    value = max(0.0, min(1.0, deployed * own / 5.0))
+    return Feature(
+        "same_capital_value", value, "0~1", 0.5, Status.OK,
+        {"매수가 ÷ 실투자금": f"{own:.2f}배",
+         "자기자본 배치": f"{deployed:.0%}",
+         "동급 후보": f"{len(peers)}개",
+         "주의": "capital_efficiency(절대 레버리지)와 다릅니다 — "
+               "같은 돈을 쓴 다른 후보 대비 상대값입니다"},
+        Calc(value=value, unit="0~1",
+             formula="자기자본 배치비율 × (매수가 ÷ 실투자금) ÷ 5",
+             intermediates={"레버리지": own, "배치": deployed},
+             grade="ESTIMATED"))
+
+
+def neighbour_confirmation_from(feature_sets: dict, *, complex_id: int,
+                                regions: dict[int, str],
+                                threshold: float = 0.5) -> "Feature":
+    """같은 생활권 비교단지가 함께 움직이는가 (§10).
+
+    이미 계산된 FeatureSet 들에서 읽는다 — 이웃마다 시계열을 다시 로드하면
+    후보 수의 제곱만큼 쿼리가 나간다.
+
+    **Alpha 가 아니라 Confidence 조정용이다.** 단일 단지의 이상 거래를
+    시장 확산으로 오인하지 않기 위한 것이다.
+    """
+    from apt_engine.features.leader import neighbour_confirmation
+
+    region = regions.get(complex_id)
+    if not region:
+        return neighbour_confirmation(moving=0, valid=0)
+
+    moving = valid = 0
+    for cid, fs in feature_sets.items():
+        if cid == complex_id or regions.get(cid) != region:
+            continue
+        item = fs.items.get("band_shift_strength")
+        if item is None or not item.usable or item.value is None:
+            continue
+        valid += 1
+        if item.value >= threshold:
+            moving += 1
+    return neighbour_confirmation(moving=moving, valid=valid)

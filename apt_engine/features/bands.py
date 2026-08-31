@@ -370,3 +370,76 @@ def visible_movement(series: BandSeries, band_shift: Feature, *,
 def _shift(ym: str, months: int) -> str:
     total = int(ym[:4]) * 12 + (int(ym[4:6]) - 1) + months
     return f"{total // 12:04d}{total % 12 + 1:02d}"
+
+
+def transaction_recovery(series: BandSeries, *, recent: int = 6,
+                         base: int = 12) -> Feature:
+    """거래가 되살아나고 있는가 (§17 Pre-Breakout 조건).
+
+    **거래량 증가만으로 가산점을 주지 않는다**(§49-5). 이 값은 Stage 분류의
+    입력이지 그 자체로 매수 신호가 아니다. 조정기에 거래가 마르고 나서
+    돌아오는 것이 Reset 완료의 신호이기 때문에 본다.
+    """
+    usable = series.usable
+    if len(usable) < recent + 3:
+        return Feature.missing(
+            "transaction_recovery",
+            f"관측이 {len(usable)}개월뿐입니다(최소 {recent + 3}개월)")
+
+    now = [p.sample_n for p in usable[:recent]]
+    before = [p.sample_n for p in usable[recent:recent + base]]
+    if not before:
+        return Feature.missing("transaction_recovery",
+                               "비교할 이전 구간이 없습니다")
+    now_avg = sum(now) / len(now)
+    before_avg = sum(before) / len(before)
+    if before_avg <= 0:
+        return Feature.missing(
+            "transaction_recovery",
+            "이전 구간 거래가 0 입니다 — 비율을 만들지 않습니다")
+
+    ratio = now_avg / before_avg
+    value = max(0.0, min(1.0, (ratio - 0.8) / 0.7))     # 0.8배→0, 1.5배→1
+    return Feature(
+        "transaction_recovery", value, "0~1",
+        sample_confidence(len(usable), full_at=recent + base), Status.OK,
+        {"최근": f"{recent}개월 평균 {now_avg:.1f}건",
+         "이전": f"{base}개월 평균 {before_avg:.1f}건",
+         "배율": f"{ratio:.2f}배",
+         "주의": "거래량 증가만으로 가산점을 주지 않습니다(§49-5). "
+               "Stage 분류의 입력입니다"},
+        Calc(value=value, unit="0~1",
+             formula="최근 거래건수 ÷ 이전 거래건수 (0.8배→0 · 1.5배→1)",
+             intermediates={"최근": now_avg, "이전": before_avg},
+             grade="CONFIRMED"))
+
+
+def distribution_exhaustion(series: BandSeries) -> Feature:
+    """가격 분포가 더 밀어올릴 여지가 없는가 (§4-D).
+
+    중앙값이 P75 에 붙어 있으면 위쪽이 비어 있다는 뜻이다 — 비싼 물건이
+    이미 다 팔렸고 남은 것은 아래쪽뿐이다. 반대로 P75 가 멀면 위로 갈 자리가
+    남아 있다.
+    """
+    latest = series.latest
+    if latest is None or not latest.complete:
+        return Feature.missing("distribution_exhaustion",
+                               "분위수가 있는 최신 스냅샷이 없습니다")
+    if latest.p50 <= 0:
+        return Feature.missing("distribution_exhaustion", "중앙값이 0 이하입니다")
+
+    headroom = (latest.p75 - latest.p50) / latest.p50
+    # 여유가 8% 면 소진 0, 0% 면 소진 1
+    value = max(0.0, min(1.0, 1.0 - headroom / 0.08))
+    return Feature(
+        "distribution_exhaustion", value, "0~1",
+        sample_confidence(latest.sample_n, full_at=10), Status.OK,
+        {"P50": f"{latest.p50:,}원", "P75": f"{latest.p75:,}원",
+         "위쪽 여유": f"{headroom:.1%}",
+         "해석": ("위쪽이 비었습니다 — 더 밀어올릴 자리가 없습니다"
+                if value > 0.6 else "위로 갈 자리가 남아 있습니다"),
+         "주의": "높을수록 감점입니다"},
+        Calc(value=value, unit="0~1",
+             formula="1 − (P75 − P50) ÷ P50 ÷ 8%",
+             intermediates={"p50": latest.p50, "p75": latest.p75},
+             grade="CONFIRMED"))

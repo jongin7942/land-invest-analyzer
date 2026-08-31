@@ -188,6 +188,9 @@ def run(conn: sqlite3.Connection, *, as_of: cutoff_mod.AsOf, profile: Profile,
                 required_equity=c.required_equity,
                 supply_values=supply_values, cliff=cliff):
             features = features.add(f)
+        features = features.add(demand_mod.same_capital_value(
+            market, price=c.price, required_equity=c.required_equity,
+            capital=profile.available_cash))
         c = _with_features(c, features)
 
         verdict = stage_mod.classify(c.features)
@@ -203,6 +206,19 @@ def run(conn: sqlite3.Connection, *, as_of: cutoff_mod.AsOf, profile: Profile,
         candidates.append(DeltaCandidate(
             c.complex_id, band, c.price, c.features, alpha, verdict,
             price_bands, c.required_equity, leader_label))
+
+    # ⑤-1 Neighbour Confirmation (§10) — **모든 후보의 Feature 가 나온 뒤**
+    # 계산한다. 이웃마다 시계열을 다시 로드하면 후보 수의 제곱만큼 쿼리가 나간다.
+    # 이미 계산된 band_shift_strength 를 읽어서 센다.
+    all_sets = {c.complex_id: c.features for c in candidates}
+    regions = {cid: meta.get(cid, (None, ""))[1] for cid in all_sets}
+    candidates = [
+        DeltaCandidate(
+            c.complex_id, c.area_band, c.price,
+            c.features.add(demand_mod.neighbour_confirmation_from(
+                all_sets, complex_id=c.complex_id, regions=regions)),
+            c.alpha, c.stage, c.bands, c.required_equity, c.relevant_leader)
+        for c in candidates]
 
     # ⑤-2 Competitive Buy Price — 대안의 질이 정해진 뒤에야 계산된다(§39).
     scored = [c for c in candidates if c.alpha.known]
@@ -264,6 +280,7 @@ def _leader_features(conn, complex_id: int, band: str, *,
         from apt_engine.features.base import Feature
         return ([Feature.missing("transmission_failure", why),
                  Feature.missing("recoverable_discount_ratio", why),
+                 Feature.missing("leader_exhaustion", why),
                  Feature.missing("next_node_score", why)], None)
 
     # 겹침이 가장 큰 Leader 하나로 본다. 여러 Leader 를 평균하면
@@ -281,6 +298,7 @@ def _leader_features(conn, complex_id: int, band: str, *,
     from apt_engine.features.base import Feature
     return ([leader_mod.transmission_feature(t),
              leader_mod.recoverable_feature(d),
+             leader_mod.leader_exhaustion(leader_series),
              Feature.missing("next_node_score",
                              "생활권 가격 사다리가 아직 입력되지 않았습니다 "
                              "(`ladder import`)")],
