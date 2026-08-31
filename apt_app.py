@@ -114,8 +114,8 @@ RULE_LABELS = {"regulation": "규제지역", "permit": "토지거래허가구역
                "tax": "세법", "loan": "대출규제", "cost": "취득 부대비용"}
 
 
-@app.route("/")
-def index():
+@app.route("/status")
+def status():
     with ro_conn() as conn:
         stats = _collection_stats(conn)
         cov = rule_repo.coverage(conn)
@@ -129,6 +129,159 @@ def index():
             "ORDER BY c.apt_households DESC LIMIT 12").fetchall()
     return render_template("apt_index.html", stats=stats, rules=rules_rows,
                            big=recent, port=PORT)
+
+
+# ── 첫 화면: 현금을 넣으면 순위가 나온다 ──────────────────────────────
+
+DEFAULT_HORIZON = 2
+
+
+@app.route("/")
+def home():
+    cash_in = (request.args.get("cash") or "").strip()
+    house_count = int(request.args.get("house_count") or 1)
+    horizon = int(request.args.get("horizon") or DEFAULT_HORIZON)
+    limit = int(request.args.get("limit") or 10)
+    form = {"cash": cash_in, "house_count": house_count,
+            "horizon": horizon, "limit": limit}
+
+    if not cash_in:
+        return render_template("apt_home.html", form=form, result=None)
+
+    with ro_conn() as conn:
+        view = _rank_view(conn, cash_in, house_count, horizon, limit)
+    return render_template("apt_home.html", form=form, result=view)
+
+
+def _rank_view(conn, cash_in, house_count, horizon, limit):
+    """랭킹 한 번. 후보가 0 이면 '왜 0 인지'까지 담아 돌려준다.
+
+    빈 화면에 '후보 없음' 만 띄우면 사용자가 할 수 있는 게 없다. 이 엔진에서
+    후보가 0 이 되는 이유는 거의 정해져 있어서(스냅샷 개월 부족 · 표본 부족 ·
+    현금 부족 · 규칙 미입력) 그걸 그대로 보여준다.
+    """
+    from dataclasses import replace
+
+    from apt_engine.blind import cutoff as cutoff_mod
+    from apt_engine.invest.budget import Profile
+    from apt_engine.listing.provider import parse_price
+    from apt_engine.ranking import explain as explain_mod
+    from apt_engine.ranking import pipeline as pipeline_mod
+
+    try:
+        cash = parse_price(cash_in)
+    except Exception:
+        return {"error": f"투자금을 읽지 못했습니다: {cash_in!r} (예: 3 또는 300000000)"}
+
+    profile = replace(Profile(name="balanced"), available_cash=cash)
+    as_of = cutoff_mod.AsOf(date.today().isoformat())
+
+    try:
+        result = pipeline_mod.run(conn, as_of=as_of, profile=profile,
+                                  horizon_years=horizon, scan_limit=2000)
+    except ValueError as e:
+        return {"error": str(e)}
+
+    rows = []
+    if result.top10:
+        ids = [c.complex_id for c in result.top10]
+        meta = {r["id"]: r for r in conn.execute(
+            f"SELECT id, name, lawd_cd, emd_name, apt_households, approval_year "
+            f"FROM complex WHERE id IN ({','.join('?' * len(ids))})", ids)}
+        for i, c in enumerate(result.top10[:limit], 1):
+            rows.append(_card(c, i, meta.get(c.complex_id), house_count))
+
+    return {
+        "summary": result.summary,
+        "regime": result.regime,
+        "weights_label": result.weights.label,
+        "weights_source": result.weights.source,
+        "heuristic": result.weights.source == "HEURISTIC",
+        "cash_recommended": result.cash_recommended,
+        "cash_reason": result.cash_reason,
+        "rows": rows,
+        "total": len(result.top10),
+        "diagnosis": None if result.top10 else _why_empty(conn, as_of, result),
+        "explain": explain_mod,
+    }
+
+
+def _card(c, rank, meta, house_count):
+    """카드 하나에 들어갈 것만 추린다 — 이유 / 주의 / 매수가 구간 / 업사이드."""
+    from apt_engine.ranking import explain as explain_mod
+
+    entry = c.features["entry_position"]
+    detail = entry.detail if entry.usable else {}
+    bands = detail.get("구간") or {}
+    market = explain_mod.what_market_prices(c.features)
+
+    # 대출 한도 규칙이 다 채워지지 않으면 policy_max 가 과대평가된다
+    # (규제지역 데이터가 없으면 LTV 규칙이 안 걸리고 '집값' 이라는 산술 상한만 남는다).
+    # 그 상태의 실투자금 하나만 크게 띄우면 "400만원이면 산다"로 읽힌다.
+    # 확실한 값(대출 없이)과 하한(대출 최대)을 같이 보여준다.
+    cap = c.capital
+    mortgage = getattr(cap, "mortgage", None) if cap else None
+
+    return {
+        "rank": rank,
+        "id": c.complex_id,
+        "name": meta["name"] if meta else f"#{c.complex_id}",
+        "region": (f"{regions.name_of(meta['lawd_cd'])} {meta['emd_name'] or ''}"
+                   if meta else ""),
+        "households": meta["apt_households"] if meta else None,
+        "year": meta["approval_year"] if meta else None,
+        "band": c.area_band,
+        "price": c.price,
+        "equity": c.required_equity,
+        "equity_no_loan": getattr(cap, "required_without_loan", None) if cap else None,
+        "mortgage_label": mortgage.label if mortgage else None,
+        "mortgage_unknown": list(mortgage.unknown) if mortgage else [],
+        "capital_unknown": list(cap.unknown) if cap else [],
+        "score": c.score,
+        "confidence": c.confidence,
+        "kill": c.kill.label,
+        "why_buy": explain_mod.why_buy(c),
+        "why_not": explain_mod.why_not(c),
+        "verdict": detail.get("판정"),
+        "strong_buy": bands.get("Strong Buy"),
+        "fair_buy": bands.get("Fair Buy"),
+        "wait": bands.get("Wait"),
+        "peak": detail.get("과거 고점"),
+        "upside": market["아직 반영 안 된 것"],
+        "priced": market["시장이 반영한 것"],
+        "coverage": c.features.coverage,
+        "house_count": house_count,
+    }
+
+
+def _why_empty(conn, as_of, result) -> dict:
+    """후보가 0 인 이유를 데이터로 설명한다."""
+    from apt_engine import area as area_mod
+    from apt_engine.blind import universe as universe_mod
+
+    months = [r[0] for r in conn.execute(
+        "SELECT DISTINCT as_of_ym FROM price_snapshot ORDER BY 1")]
+    uni = universe_mod.build(conn, as_of=as_of, area_band=area_mod.DEFAULT_BAND)
+
+    reasons = []
+    if not months:
+        reasons.append("대표가격 스냅샷이 하나도 없습니다. `cli snapshot` 을 먼저 돌리세요.")
+    elif not uni.rows:
+        reasons.append(
+            f"스냅샷이 {', '.join(months)} 뿐인데, 랭킹은 신고 지연을 감안해 "
+            f"관측 가능 시점({as_of.observable.ym})의 **직전 달까지만** 봅니다. "
+            f"그래서 가장 최근 달 스냅샷은 후보에 들어가지 않습니다 — "
+            f"`cli snapshot --months 6` 처럼 과거 달도 만들어야 합니다.")
+    if uni.excluded:
+        reasons.append("표본 기준에서 빠진 단지: "
+                       + " · ".join(f"{k} {v}개" for k, v in uni.excluded.items()))
+    drops = {}
+    for d in result.dropped:
+        drops[d.stage] = drops.get(d.stage, 0) + 1
+    return {"reasons": reasons, "universe": len(uni.rows),
+            "snapshot_months": months, "observable": as_of.observable.ym,
+            "dropped": drops,
+            "dropped_examples": [(d.stage, d.reason) for d in result.dropped[:5]]}
 
 
 # ── 검색 ──────────────────────────────────────────────────────────────
