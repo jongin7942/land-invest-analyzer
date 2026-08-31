@@ -1358,3 +1358,75 @@ class TestSanity:
         from apt_engine.backtest import sanity
         r = sanity.SanityReport([])
         assert "True Blind Test 가 아닙니다" in r.summary
+
+
+# ── §44 CORE 승격 ────────────────────────────────────────────────────
+
+class TestCorePromotion:
+    def test_낮을수록_좋은_Feature_의_IC_를_뒤집어_본다(self):
+        """§44 — 방향을 안 맞추면 CORE 승격이 정확히 반대로 돈다.
+
+        `price_stretch` 는 낮을수록 좋으므로 원시 IC 가 음수여야 정상이다.
+        보정 없이 보면 '낮을수록 좋은' Feature 12개가 통째로 HARMFUL 로 나온다.
+        """
+        from apt_engine.backtest import usefulness as u
+        assert u._orientation("price_stretch") == -1.0
+        assert u._orientation("band_shift_strength") == 1.0
+        assert u._orientation("모르는_피처") == 1.0
+
+    def test_한_분할에서만_좋으면_CORE_가_아니다(self, db):
+        """§44 — 한 시기에서만 잘 맞는 Feature 는 Diagnostic 에 둔다."""
+        from apt_engine.backtest import usefulness as u
+        from apt_engine.features import registry as reg
+        with get_conn(db) as conn:
+            reg.sync(conn)
+            promoted, _ = u.promote_core(
+                conn, run_key="t",
+                per_split={"TRAIN": [u.Usefulness("price_stretch", "TRAIN",
+                                                  0.3, 0.6, 10, u.USEFUL,
+                                                  effective_n=5)],
+                           "VALIDATION": []})
+        assert promoted == []
+
+    def test_두_분할을_살아남으면_CORE_로_올라간다(self, db):
+        from apt_engine.backtest import usefulness as u
+        from apt_engine.features import registry as reg
+        with get_conn(db) as conn:
+            reg.sync(conn)
+            promoted, _ = u.promote_core(
+                conn, run_key="t",
+                per_split={
+                    "TRAIN": [u.Usefulness("price_stretch", "TRAIN", 0.3, 0.6,
+                                           10, u.USEFUL, effective_n=5)],
+                    "VALIDATION": [u.Usefulness("price_stretch", "VALIDATION",
+                                                0.3, 0.6, 8, u.USEFUL,
+                                                effective_n=4)]})
+            assert promoted == ["price_stretch"]
+            assert reg.core_keys(conn) == ["price_stretch"]
+
+    def test_다음_실행에서_못_살아남으면_강등된다(self, db):
+        from apt_engine.backtest import usefulness as u
+        from apt_engine.features import registry as reg
+        good = {"TRAIN": [u.Usefulness("price_stretch", "TRAIN", 0.3, 0.6, 10,
+                                       u.USEFUL, effective_n=5)],
+                "VALIDATION": [u.Usefulness("price_stretch", "VALIDATION", 0.3,
+                                            0.6, 8, u.USEFUL, effective_n=4)]}
+        with get_conn(db) as conn:
+            reg.sync(conn)
+            u.promote_core(conn, run_key="t1", per_split=good)
+            _, demoted = u.promote_core(conn, run_key="t2",
+                                        per_split={"TRAIN": [], "VALIDATION": []})
+            assert demoted == ["price_stretch"]
+            assert reg.core_keys(conn) == []
+
+    def test_등록부에_없는_키는_승격_대상이_아니다(self, db):
+        from apt_engine.backtest import usefulness as u
+        from apt_engine.features import registry as reg
+        entry = u.Usefulness("모르는_피처", "TRAIN", 0.3, 0.6, 10, u.USEFUL,
+                             effective_n=5)
+        with get_conn(db) as conn:
+            reg.sync(conn)
+            promoted, _ = u.promote_core(
+                conn, run_key="t",
+                per_split={"TRAIN": [entry], "VALIDATION": [entry]})
+        assert promoted == []

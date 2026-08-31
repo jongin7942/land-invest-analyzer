@@ -92,6 +92,12 @@ def measure(window_results, *, level: str = "model",
     창마다 IC 를 따로 내고 그 **중앙값**을 쓴다. 창을 합쳐서 한 번에 계산하면
     시점마다 다른 가격 수준이 섞여서, 시장 전체가 오른 시기의 후보가 전부
     "좋은 후보" 로 보인다.
+
+    **방향을 맞춘다.** `price_stretch` 처럼 낮을수록 좋은 Feature 는 원시
+    IC 가 음수여야 정상이다. 방향을 안 맞추면 그런 Feature 가 전부 HARMFUL 로
+    뒤집혀 나오고, CORE 승격이 정확히 반대로 돈다. 실제로 합성 시장에서
+    낮을수록 좋은 Feature 12개가 통째로 HARMFUL 로 나오는 것을 봤다.
+    모델(9종)은 이미 방향이 맞춰진 값이라 보정하지 않는다.
     """
     picked = [w for w in window_results
               if w.scored and (split is None or w.window.split == split)]
@@ -128,6 +134,11 @@ def measure(window_results, *, level: str = "model",
                 effective_n=n_eff))
             continue
 
+        sign = _orientation(key) if level == "feature" else 1.0
+        ics = [x * sign for x in ics]
+        if sign < 0 and hits:
+            hits = [1.0 - h for h in hits]
+
         ic = statistics.median(ics)
         hit = statistics.median(hits) if hits else None
         same_way = sum(1 for x in ics if (x > 0) == (ic > 0)) / len(ics)
@@ -158,6 +169,15 @@ def measure(window_results, *, level: str = "model",
     return out
 
 
+def _orientation(feature_key: str) -> float:
+    """등록부가 정한 방향. 낮을수록 좋으면 −1 을 곱해 IC 를 뒤집는다."""
+    from apt_engine.features import registry as registry_mod
+    entry = registry_mod.get(feature_key)
+    if entry is None:
+        return 1.0
+    return 1.0 if entry.higher_is_better else -1.0
+
+
 def effective_n(windows, *, counted: int | None = None) -> int:
     """서로 겹치지 않는 창의 최대 개수.
 
@@ -177,7 +197,7 @@ def effective_n(windows, *, counted: int | None = None) -> int:
 
 
 def _hit_rate(values: dict[int, float],
-              returns: dict[int, float]) -> float | None:
+              returns: dict[int, float]) -> float | None:  # noqa: D401
     """상위 절반이 실제로 중앙값을 넘긴 비율."""
     common = sorted(set(values) & set(returns))
     if len(common) < 4:
@@ -318,6 +338,45 @@ def save(conn: sqlite3.Connection, run_id: int, results: list[Usefulness], *,
              u.key, u.rank_ic, u.hit_rate, u.ablation_delta, u.sample_n,
              u.verdict, u.note or None))
     return len(results)
+
+
+def promote_core(conn: sqlite3.Connection, *, run_key: str,
+                 per_split: dict[str, list[Usefulness]]) -> tuple[list[str], list[str]]:
+    """§44 — 여러 Fold 를 살아남은 Feature 만 CORE 로 올린다.
+
+    "여러 Fold" 를 TRAIN·VALIDATION 두 분할로 센다. 한 분할에서만 USEFUL 이면
+    그건 그 시기의 우연일 수 있고, §44 가 "한 시기에서만 잘 맞는 Feature 는
+    Diagnostic/Research 로 내린다" 고 한 이유다.
+
+    사람이 부르는 함수가 아니다. 백테스트가 끝나고 자동으로 돈다.
+    승격/강등 목록을 돌려주므로 리포트에 그대로 찍을 수 있다.
+    """
+    from apt_engine.features import registry as registry_mod
+
+    survived: dict[str, int] = {}
+    for split, entries in per_split.items():
+        for u in entries:
+            if u.verdict == USEFUL:
+                survived[u.key] = survived.get(u.key, 0) + 1
+
+    promoted: list[str] = []
+    for key, folds in sorted(survived.items()):
+        if folds < registry_mod.MIN_FOLDS_FOR_CORE:
+            continue
+        if registry_mod.get(key) is None:
+            continue          # 등록부에 없는 것은 승격 대상이 아니다
+        registry_mod.promote(conn, key, run_key=run_key, folds=folds)
+        promoted.append(key)
+
+    # 전에 CORE 였는데 이번에 살아남지 못한 것은 내린다.
+    current = set(registry_mod.core_keys(conn))
+    demoted: list[str] = []
+    for key in sorted(current - set(promoted)):
+        registry_mod.demote(
+            conn, key, reason=f"{run_key} 에서 Fold {registry_mod.MIN_FOLDS_FOR_CORE}개를 "
+                              f"살아남지 못했습니다")
+        demoted.append(key)
+    return promoted, demoted
 
 
 def save_weights(conn: sqlite3.Connection, run_id: int,

@@ -26,6 +26,7 @@ from apt_engine.backtest import outcome as outcome_mod
 from apt_engine.backtest import usefulness as useful_mod
 from apt_engine.backtest import windows as windows_mod
 from apt_engine.blind import cutoff as cutoff_mod
+from apt_engine.features import registry as registry_mod
 from apt_engine.invest import buckets as buckets_mod
 from apt_engine.invest.budget import Profile
 from apt_engine.ranking import lists as lists_mod
@@ -68,6 +69,8 @@ class RunResult:
     usefulness: dict[str, useful_mod.Usefulness] = field(default_factory=dict)
     fitted: weights_mod.Weights | None = None
     fit_notes: list[str] = field(default_factory=list)
+    promoted: list[str] = field(default_factory=list)   # §44 CORE 승격
+    demoted: list[str] = field(default_factory=list)
 
     @property
     def scored_windows(self) -> list[WindowResult]:
@@ -101,6 +104,19 @@ class RunResult:
                     head.append(f"    {model:<20} {value:.3f}")
             for note in self.fit_notes:
                 head.append(f"    · {note}")
+        if self.promoted or self.demoted:
+            head.append("")
+            head.append("  ── CORE Feature (§44) ──")
+            if self.promoted:
+                head.append(f"    승격 {len(self.promoted)}: "
+                            f"{', '.join(self.promoted)}")
+            if self.demoted:
+                head.append(f"    강등 {len(self.demoted)}: "
+                            f"{', '.join(self.demoted)}")
+        elif self.status == "COMPLETE":
+            head.append("")
+            head.append("  ── CORE Feature (§44) ── 승격된 것이 없습니다 "
+                        "(여러 Fold 를 살아남은 Feature 가 없습니다)")
         return "\n".join(head)
 
 
@@ -166,7 +182,7 @@ def run(conn: sqlite3.Connection, *, run_key: str, data_start: str,
     return result
 
 
-def _fit(conn, run_id: int, result: RunResult, *, market_source: str) -> None:
+def _fit(conn, run_id: int, result: RunResult, *, market_source: str) -> None:  # noqa: C901
     """TRAIN 에서 찾고 VALIDATION 에서 확인해 가중치를 만든다 (§74).
 
     확인되지 않으면 **가중치를 만들지 않는다.** heuristic 을 그대로 두고 그 이유를
@@ -180,6 +196,28 @@ def _fit(conn, run_id: int, result: RunResult, *, market_source: str) -> None:
         useful_mod.save(conn, run_id, train)
     if validation:
         useful_mod.save(conn, run_id, validation)
+
+    # §44 — Feature 티어 갱신.
+    #
+    # 가중치는 **모델** 단위로 학습하지만(9모델), CORE 티어는 **Feature** 단위다.
+    # 등록부 키가 feature key 라서 모델 이름으로 승격시키면 하나도 안 맞는다.
+    # 그래서 두 수준을 각각 잰다.
+    #
+    # 여기가 KPI 를 낸 **뒤**인 것도 중요하다 — 성적을 보고 CORE 를 고르는
+    # 일이 안 생긴다.
+    feat_train = useful_mod.measure(result.windows, level="feature",
+                                    split=windows_mod.TRAIN)
+    feat_val = useful_mod.measure(result.windows, level="feature",
+                                  split=windows_mod.VALIDATION)
+    if feat_train:
+        useful_mod.save(conn, run_id, feat_train)
+    if feat_val:
+        useful_mod.save(conn, run_id, feat_val)
+    registry_mod.sync(conn)
+    result.promoted, result.demoted = useful_mod.promote_core(
+        conn, run_key=result.run_key,
+        per_split={windows_mod.TRAIN: feat_train,
+                   windows_mod.VALIDATION: feat_val})
 
     result.usefulness = useful_mod.confirm(train, validation)
     fitted, notes = useful_mod.fit_weights(result.usefulness)
