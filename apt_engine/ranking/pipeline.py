@@ -39,6 +39,20 @@ TOP_FINAL = 10
 # 이 점수 아래면 아무것도 추천하지 않는다(§60). **판정 기준**이라 백테스트가 대체한다.
 CASH_THRESHOLD = 45.0
 
+# 자본 게이트 방식.
+#   STRICT      실투자금(대출·세금·비용 전부)을 계산해서 거른다. 기본값이고 §26 이 요구하는 것.
+#   PRICE_ONLY  매매가 ≤ 현금. 대출 규칙이 없는 DB(과거 시점 백테스트 등)에서
+#               쓰는 대체 경로다. **대출이 나온다고 가정하지 않는다** — 전액 현금
+#               매수만 가능하다고 보는 것이라 실제보다 후보가 좁게 잡힌다.
+#               이 모드로 돈 결과에는 그 사실이 항상 붙어 다닌다.
+GATE_STRICT = "STRICT"
+GATE_PRICE_ONLY = "PRICE_ONLY"
+GATE_NOTE = {
+    GATE_STRICT: "실투자금 기준(§26)",
+    GATE_PRICE_ONLY: ("매매가 기준 — 대출 규칙이 없어 전액 현금 매수만 가능하다고 "
+                      "봤습니다. 실제보다 후보가 좁습니다"),
+}
+
 
 @dataclass(frozen=True)
 class Candidate:
@@ -81,6 +95,7 @@ class Result:
     regime: str | None
     weights: weights_mod.Weights
     universe_size: int
+    gate: str = GATE_STRICT
     feasible: list[Candidate] = field(default_factory=list)
     top100: list[Candidate] = field(default_factory=list)
     top30: list[Candidate] = field(default_factory=list)
@@ -93,6 +108,8 @@ class Result:
     def summary(self) -> str:
         head = (f"{self.as_of} · 현금 {units.fmt_eok(self.cash)} · "
                 f"{self.horizon_years}년 · {self.profile_name}")
+        if self.gate != GATE_STRICT:
+            head += f"\n  자본 게이트: {GATE_NOTE[self.gate]}"
         return (f"{head}\n  후보 {self.universe_size} → 매수가능 {len(self.feasible)} "
                 f"→ TOP100 {len(self.top100)} → TOP30 {len(self.top30)} "
                 f"→ TOP10 {len(self.top10)}")
@@ -102,10 +119,13 @@ def run(conn: sqlite3.Connection, *, as_of: cutoff_mod.AsOf, profile: Profile,
         horizon_years: int = 5, area_band: str | None = None,
         lawd_cd: str | None = None, scan_limit: int = 2000,
         groups: list[str] | None = None,
-        weights_source: str = weights_mod.HEURISTIC) -> Result:
+        weights_source: str = weights_mod.HEURISTIC,
+        gate: str = GATE_STRICT) -> Result:
     """전체 파이프라인 한 번."""
     if not profile.available_cash:
         raise ValueError("가용 현금이 없으면 매수 가능 판정을 할 수 없습니다")
+    if gate not in GATE_NOTE:
+        raise ValueError(f"모르는 자본 게이트: {gate} (가능: {', '.join(GATE_NOTE)})")
 
     band = area_band or area_mod.DEFAULT_BAND
 
@@ -116,8 +136,20 @@ def run(conn: sqlite3.Connection, *, as_of: cutoff_mod.AsOf, profile: Profile,
 
     # ② Capital Feasibility Gate (§26) — 점수 매기기 전에 거른다
     feasible_rows = []
-    capitals: dict[int, capital_mod.SelfCapital] = {}
+    capitals: dict[int, capital_mod.SelfCapital | None] = {}
     for row in rows:
+        if gate == GATE_PRICE_ONLY:
+            # 대출을 가정하지 않는다. 매매가가 현금을 넘으면 못 산다.
+            if row.representative_price > profile.available_cash:
+                dropped.append(Dropped(
+                    row.complex_id, "feasibility",
+                    f"매매가 {units.fmt_eok(row.representative_price)} > "
+                    f"현금 {units.fmt_eok(profile.available_cash)} "
+                    f"(대출 규칙이 없어 전액 현금 기준으로 봤습니다)"))
+                continue
+            capitals[row.complex_id] = None
+            feasible_rows.append(row)
+            continue
         capital = _capital_of(conn, row, profile=profile, as_of=as_of, band=band)
         if capital is None:
             dropped.append(Dropped(row.complex_id, "feasibility",
@@ -146,8 +178,16 @@ def run(conn: sqlite3.Connection, *, as_of: cutoff_mod.AsOf, profile: Profile,
 
     # Capital Efficiency 는 후보 집단이 있어야 계산된다(상대적 개념).
     for row in feasible_rows:
+        capital = capitals[row.complex_id]
+        if capital is None:
+            from apt_engine.features.base import Feature
+            feature_sets[row.complex_id] = feature_sets[row.complex_id].add(
+                Feature.missing("capital_efficiency",
+                                "대출 규칙이 없어 실투자금을 계산하지 못했습니다 "
+                                "— 레버리지 효율을 0 으로 두지 않습니다"))
+            continue
         feature_sets[row.complex_id] = _add_capital_efficiency(
-            feature_sets[row.complex_id], capitals[row.complex_id])
+            feature_sets[row.complex_id], capital)
 
     regime_name = _regime_name(feature_sets)
     weights = weights_mod.for_regime(regime_name, source=weights_source)
@@ -189,8 +229,8 @@ def run(conn: sqlite3.Connection, *, as_of: cutoff_mod.AsOf, profile: Profile,
     cash_reco, cash_reason = _cash_option(top10)
 
     return Result(as_of.day, profile.available_cash, horizon_years, profile.name,
-                  band, regime_name, weights, len(universe), candidates, top100,
-                  top30, top10, dropped, cash_reco, cash_reason)
+                  band, regime_name, weights, len(universe), gate, candidates,
+                  top100, top30, top10, dropped, cash_reco, cash_reason)
 
 
 def _capital_of(conn, row, *, profile: Profile, as_of: cutoff_mod.AsOf,

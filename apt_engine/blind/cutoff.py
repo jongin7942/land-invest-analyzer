@@ -41,13 +41,13 @@ class LookAheadError(RuntimeError):
 # 감안하도록 `reporting_lag_days` 를 둔다.
 DATED_TABLES: dict[str, tuple[str, ...]] = {
     "trade": ("deal_ymd",),
-    "jeonse_contract": ("deal_ymd",),
+    "jeonse_contract": ("contract_ymd",),
     "price_snapshot": ("as_of_ym",),
     "jeonse_snapshot": ("as_of_ym",),
     "listing": ("first_seen_at",),
     "listing_snapshot": ("snapshot_date",),
     "market_pressure": ("as_of_date",),
-    "field_note": ("observed_at",),
+    "field_note": ("noted_on",),
     "regulation_zone": ("effective_from",),
     "land_permit_zone": ("effective_from",),
     "tax_rule": ("effective_from",),
@@ -57,11 +57,14 @@ DATED_TABLES: dict[str, tuple[str, ...]] = {
     # 공급은 '언제 알았나'(announced_ym)로 컷오프한다. move_in_ym 은 '언제 들어오나'라
     # 미래여도 정상이다 — 그걸로 자르면 향후 공급을 아예 못 보게 된다.
     "supply_plan": ("announced_ym",),
-    "future_catalyst": ("as_of",),
+    # future_catalyst 는 "언제 알았나" 컬럼이 없다. 계산 시점(calculated_at)이
+    # 그나마 가장 가까운 대체물이라 그걸 쓴다 — expected_year 는 미래라 컷오프가
+    # 될 수 없다. 원장 방식(catalyst_state)이 이걸 대체한다.
+    "future_catalyst": ("calculated_at",),
     "redevelopment_project": ("stage_date",),
     "redevelopment_scenario": ("as_of",),
     "price_ratio_history": ("as_of_ym",),
-    "ratio_norm": ("as_of_ym",),
+    "ratio_norm": ("to_ym",),
     "cashflow_snapshot": ("as_of",),
     "ranking_run": ("as_of",),
     # Phase 2 — 값마다 시점이 붙는 속성. as_of 가 없는 행은 조회에서 제외된다
@@ -71,6 +74,9 @@ DATED_TABLES: dict[str, tuple[str, ...]] = {
     # Phase 4 — 호재 원장. 시점별 상태를 쌓고, 그 시점 행만 읽는다(§18)
     "catalyst_state": ("as_of",),
     "catalyst_exposure": ("as_of",),
+    # Phase 8 — 백테스트. 창과 선택은 '그 시점의 결정' 이라 시점 컬럼이 있다.
+    # (정답지는 아래 ANSWER_KEY_TABLES 로 따로 차단한다)
+    "backtest_window": ("as_of",),
 }
 
 # 컷오프와 무관한 테이블(시점 개념이 없는 마스터·참조 데이터).
@@ -86,6 +92,20 @@ TIMELESS_TABLES = frozenset({
     # Phase 2 — 시점 개념이 없는 마스터·큐레이션 데이터
     "complex_alias", "job_center", "life_zone", "life_zone_adjacency",
     "catalyst",
+    # Phase 8 — 실험 메타. 시점 개념이 없다.
+    "backtest_run", "backtest_pick",
+})
+
+# ── 정답지 (§55) ──────────────────────────────────────────────────────
+# 백테스트 정답지에는 **미래 수익률**이 들어 있다. Feature 계산 코드가 실수로
+# 한 번이라도 이걸 읽으면 그 백테스트도, 그 백테스트로 학습한 가중치도 전부
+# 거짓이 된다. 그리고 이런 실수는 결과가 "너무 좋게" 나오는 형태로 나타나서
+# 사람 눈에는 성공처럼 보인다.
+#
+# 그래서 컷오프 guard 안에서는 아래 테이블을 **어떤 WHERE 절을 붙여도** 읽을 수
+# 없다. 채점 코드는 guard 밖에서 돈다(backtest/outcome.py).
+ANSWER_KEY_TABLES = frozenset({
+    "backtest_outcome", "backtest_kpi", "feature_usefulness", "weight_fit",
 })
 
 # 실거래는 계약 후 신고까지 시간이 걸린다. 그 시점에 **실제로 볼 수 있었던** 것만
@@ -181,6 +201,11 @@ class GuardedConnection:
 
     def _check(self, sql: str) -> None:
         for table in tables_in(sql):
+            if table in ANSWER_KEY_TABLES:
+                raise LookAheadError(
+                    f"'{table}' 은 백테스트 정답지입니다. 미래 수익률이 들어 있어서 "
+                    f"컷오프 안에서는 어떤 조건을 붙여도 읽을 수 없습니다. "
+                    f"채점은 guard 밖(backtest/outcome.py)에서 하세요.")
             columns = DATED_TABLES.get(table)
             if not columns:
                 if table not in TIMELESS_TABLES:

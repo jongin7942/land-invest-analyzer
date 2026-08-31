@@ -1669,6 +1669,143 @@ def cmd_resolve(args):
               "수익률이\n     전부 다른 단지 것이 됩니다.")
 
 
+def cmd_backtest(args):
+    """Walk-forward 백테스트 (지시서 §55·§56·§57·§72·§74).
+
+        backtest plan   --start 2015-01-01 --end 2026-01-01
+        backtest run    --start ... --end ... --cash 3 --horizon 2
+        backtest weights --run-key wf1
+    """
+    from apt_engine.backtest import kpi as kpi_mod
+    from apt_engine.backtest import runner as bt_runner
+    from apt_engine.backtest import usefulness as useful_mod
+    from apt_engine.backtest import windows as win_mod
+    from apt_engine.invest import buckets as bucket_mod
+    from apt_engine.invest.budget import Profile
+    from apt_engine.listing.provider import parse_price
+    from apt_engine.ranking import pipeline as pipeline_mod
+
+    action = args.action
+    horizons = tuple(int(h) for h in (args.horizon or "2,5").split(","))
+
+    if action == "plan":
+        ws = win_mod.generate(args.start, args.end, horizons=horizons,
+                              step_months=args.step,
+                              train_fraction=args.train_frac,
+                              validation_fraction=args.val_frac)
+        print(f"{args.start} ~ {args.end} · {args.step}개월 간격 · "
+              f"horizon {','.join(str(h) for h in horizons)}년")
+        print(f"  창 {len(ws)}개 (채점 가능 {sum(1 for w in ws if w.scorable)}개)")
+        print()
+        print("  ── 분할 (§72) ──")
+        for split, bound in win_mod.boundary(ws).items():
+            print(f"    {split}: " + (f"{bound[0]} ~ {bound[1]}" if bound else "없음"))
+        print()
+        print("  ── 통계적 검정력 ──")
+        for line in win_mod.power_report(ws):
+            print(f"    {line}")
+        for note in win_mod.embargo_conflicts(ws):
+            print(f"  ⚠ {note}")
+        print(f"\n  {win_mod.SPLIT_NOTE}")
+        return
+
+    with get_conn(args.db) as conn:
+        if action == "weights":
+            _backtest_weights(conn, args)
+            return
+
+        profile = _backtest_profile(args, Profile, parse_price)
+        buckets = (tuple(int(parse_price(b)) for b in args.buckets.split(","))
+                   if args.buckets else bucket_mod.BUCKETS)
+        result = bt_runner.run(
+            conn, run_key=args.run_key, data_start=args.start,
+            data_end=args.end, profile=profile, area_band=args.band or "84",
+            horizons=horizons, step_months=args.step, cash_buckets=buckets,
+            top_k=args.top, market_source=bt_runner.REAL,
+            gate=(pipeline_mod.GATE_PRICE_ONLY if args.price_only
+                  else pipeline_mod.GATE_STRICT),
+            purge_embargo=args.purge, max_windows=args.max_windows,
+            train_fraction=args.train_frac,
+            validation_fraction=args.val_frac)
+        print(result.summary)
+        if args.show_windows:
+            print()
+            for w in result.windows:
+                mark = "채점" if w.scored else f"건너뜀 — {w.skip_reason}"
+                print(f"    {w.window.label}  {mark}")
+        print()
+        print(f"  {kpi_mod.KPI_LABEL['winner_recall_at_k']} 등 KPI 는 "
+              f"backtest_kpi 에 저장됩니다. `backtest weights --run-key "
+              f"{args.run_key}` 로 가중치 학습을 이어가세요")
+
+
+def _backtest_profile(args, Profile, parse_price):
+    return Profile(
+        name=args.profile or "backtest",
+        available_cash=int(parse_price(args.cash)) if args.cash else None,
+        annual_income=int(parse_price(args.income)) if args.income else None,
+        interest_rate=args.rate)
+
+
+def _backtest_weights(conn, args):
+    """§74 — 백테스트 결과로 가중치를 학습한다. 근거가 없으면 학습하지 않는다."""
+    from apt_engine.backtest import usefulness as useful_mod
+
+    row = conn.execute(
+        "SELECT id, status, invalid_reason, market_source FROM backtest_run "
+        " WHERE run_key=?", (args.run_key,)).fetchone()
+    if row is None:
+        sys.exit(f"'{args.run_key}' 백테스트 실행이 없습니다. `backtest run` 을 먼저 하세요")
+    if row["status"] != "COMPLETE":
+        sys.exit(f"'{args.run_key}' 은 {row['status']} 상태입니다"
+                 + (f" — {row['invalid_reason']}" if row["invalid_reason"] else "")
+                 + "\n무효인 백테스트로 가중치를 학습하지 않습니다(§55)")
+
+    rows = conn.execute(
+        "SELECT split, feature_key, rank_ic, verdict, note, sample_n "
+        "  FROM feature_usefulness WHERE run_id=? ORDER BY split, feature_key",
+        (row["id"],)).fetchall()
+    if not rows:
+        sys.exit("저장된 Feature 유용성이 없습니다. `backtest run` 이 채점까지 "
+                 "끝났는지 확인하세요")
+
+    print(f"백테스트 {args.run_key} ({row['market_source']}) — Feature 유용성")
+    for r in rows:
+        ic = "확인 불가" if r["rank_ic"] is None else f"{r['rank_ic']:+.3f}"
+        print(f"  [{r['split']:<10}] {r['feature_key']:<20} IC {ic:>10}  "
+              f"{r['verdict']}"
+              + (f"  — {r['note']}" if r["note"] else ""))
+    print()
+    print(f"  {useful_mod.CRITERIA_NOTE}")
+    w = useful_mod.load_weights(conn, market_source=row["market_source"])
+    if w is None:
+        print("  학습된 가중치가 없습니다 — 랭킹은 heuristic 가중치를 씁니다")
+        return
+    print("\n  ── 학습된 가중치 ──")
+    for model, value in sorted(w.values.items(), key=lambda kv: -kv[1]):
+        if value > 0:
+            print(f"    {model:<20} {value:.3f}")
+
+
+def _rank_weights_source(conn, args):
+    """--weights backtested 를 줬을 때만 학습 가중치를 쓴다 (§74).
+
+    없으면 **조용히 heuristic 으로 돌아가지 않는다.** 학습된 줄 알고 본 결과와
+    임시 가중치로 본 결과는 다른 것이라, 어느 쪽인지 화면에 남겨야 한다.
+    """
+    from apt_engine.scoring import weights as weights_mod
+    if getattr(args, "weights", "heuristic") != "backtested":
+        return weights_mod.HEURISTIC, ""
+    from apt_engine.backtest import usefulness as useful_mod
+    learned = useful_mod.load_weights(conn, market_source="REAL")
+    if learned is None:
+        return (weights_mod.HEURISTIC,
+                "⚠ --weights backtested 를 줬지만 학습된 가중치가 없습니다. "
+                "임시(heuristic) 가중치로 계산했습니다 — `backtest run` 을 먼저 "
+                "돌리세요")
+    return weights_mod.BACKTESTED, ""
+
+
 def cmd_rank(args):
     """수도권 전체에서 내 현금으로 살 수 있는 최적 후보 (지시서 §78).
 
@@ -1699,16 +1836,21 @@ def cmd_rank(args):
         if not profile.available_cash:
             sys.exit("--cash 를 주거나 `profile set` 으로 가용 현금을 등록하세요.")
 
+        weights_source, weights_note = _rank_weights_source(conn, args)
+
         try:
             result = pipeline_mod.run(
                 conn, as_of=as_of, profile=profile, horizon_years=args.horizon,
-                area_band=args.band, lawd_cd=args.lawd, scan_limit=args.scan)
+                area_band=args.band, lawd_cd=args.lawd, scan_limit=args.scan,
+                weights_source=weights_source)
         except ValueError as e:
             sys.exit(str(e))
 
         print(f"\n{result.summary}")
         print(f"  시장국면 {result.regime or '확인 불가'} · "
               f"가중치 {result.weights.label}")
+        if weights_note:
+            print(f"  {weights_note}")
 
         if result.cash_recommended:
             print(f"\n  ★ #1 CASH / WAIT")
@@ -2099,6 +2241,37 @@ def build_parser() -> argparse.ArgumentParser:
     rk.add_argument("--save", action="store_true")
     rk.add_argument("--show-dropped", action="store_true", help="탈락 이유도 보기")
     rk.add_argument("--verbose", action="store_true", help="1위 상세 설명")
+    rk.add_argument("--weights", default="heuristic",
+                    choices=["heuristic", "backtested"],
+                    help="backtested 는 `backtest run` 이 학습한 가중치를 쓴다. "
+                         "학습된 게 없으면 heuristic 으로 돌아가고 그 사실을 표시한다")
+
+    bt = sub.add_parser("backtest", help="walk-forward 백테스트 (§55) · 가중치 학습 (§74)")
+    bt.add_argument("action", help="plan / run / weights")
+    bt.add_argument("--start", help="데이터 시작 YYYY-MM-DD")
+    bt.add_argument("--end", help="데이터 끝 YYYY-MM-DD")
+    bt.add_argument("--horizon", help="보유기간(년), 쉼표로 여러 개. 기본 2,5")
+    bt.add_argument("--step", type=int, default=6, help="창 간격(개월)")
+    bt.add_argument("--cash", help="기본 현금 (버킷을 따로 주지 않을 때)")
+    bt.add_argument("--buckets", help="현금 버킷, 쉼표로 (기본 §27 의 9종)")
+    bt.add_argument("--income", help="연소득")
+    bt.add_argument("--rate", type=float, help="대출금리")
+    bt.add_argument("--band", help="전용면적 밴드 (기본 84)")
+    bt.add_argument("--profile", help="프로필 이름표")
+    bt.add_argument("--top", type=int, default=10, help="TOP K")
+    bt.add_argument("--run-key", default="wf1", help="실행 이름")
+    bt.add_argument("--price-only", action="store_true",
+                    help="대출 규칙이 없을 때 매매가 기준으로 거른다 "
+                         "(전액 현금 가정 — 실제보다 후보가 좁다)")
+    bt.add_argument("--purge", action="store_true",
+                    help="정답 구간이 다음 분할을 침범하는 창을 뺀다 (embargo)")
+    bt.add_argument("--max-windows", type=int, help="창 수 제한 (시험용)")
+    bt.add_argument("--show-windows", action="store_true")
+    bt.add_argument("--train-frac", type=float, default=0.60,
+                    help="TRAIN 비율 (기본 0.60). 보유기간이 길면 검증 구간이 "
+                         "모자라니 이걸 줄여서 VALIDATION 을 늘린다")
+    bt.add_argument("--val-frac", type=float, default=0.20,
+                    help="VALIDATION 비율 (기본 0.20)")
 
     sub.add_parser("validate", help="요구사항 26 검증 규칙 실행")
 
@@ -2119,7 +2292,7 @@ HANDLERS = {
     "ladder": cmd_ladder, "relative": cmd_relative,
     "transit": cmd_transit, "supply": cmd_supply, "geocode": cmd_geocode,
     "catalyst": cmd_catalyst, "redev": cmd_redev,
-    "validate": cmd_validate, "report": cmd_report,
+    "backtest": cmd_backtest, "validate": cmd_validate, "report": cmd_report,
 }
 
 

@@ -52,24 +52,24 @@
 | 24 | 대출 시점별 versioning | ✅ | `regulation/mortgage.py` + `loan_rule.effective_from/to` |
 | 25 | 세금 시점별 versioning | ✅ | `tax/*` + `tax_rule.effective_from/to` |
 | 26 | Capital Feasibility Gate | ✅ | `cash/self_capital.py` |
-| 27 | 투자금 버킷 9종 | 🟡 | `invest/budget.py` 단일 금액. 버킷 루프 없음 |
+| 27 | 투자금 버킷 9종 | ✅ | `invest/buckets.py` + 백테스트가 버킷별로 돈다 |
 | 28 | Capital Utilization Efficiency | 🟡 | `cash_utilization` 있음. **한계효용·기회비용 없음** |
 | 29 | Return on Deployable Cash | ✅ | `invest/roe.py` |
-| 30 | Capital Frontier · Pareto | ⬜ | |
+| 30 | Capital Frontier · Pareto | 🟡 | `buckets.frontier()` (버킷 간 증감). Pareto 곡선 미구현 |
 | 31 | Alternative Purchase Test | ⬜ | |
 | 32 | Price/Capital Cohort 2중 랭킹 | ⬜ | |
-| 33 | Opportunity Alpha | 🔴 | 동시점 전체 후보 실제 성과 필요 |
-| 34 | Ex-post Capital Rank | 🔴 | 〃 |
-| 35 | Regret | 🔴 | 〃 |
-| 36 | Recovery Time | 🔴 | 하락·회복 이력 필요 |
+| 33 | Opportunity Alpha | 🟡 | `kpi.opportunity_alpha`. **실거래 대기** |
+| 34 | Ex-post Capital Rank | 🟡 | `kpi.ex_post_capital_rank`. **실거래 대기** |
+| 35 | Regret | 🟡 | `kpi.regret`. **실거래 대기** |
+| 36 | Recovery Time | 🟡 | `outcome._recovery` + `kpi.recovery_months`. **실거래 대기** |
 | 37 | Recovery Quality | 🔴 | 〃 |
 | 38 | Recovery Exhaustion | 🔴 | 〃 |
 | 39 | Remaining Alpha · Past≠Current | ⬜ | 개념은 `redev/`·`catalyst/` 에 부분 반영 |
-| 40 | Discovery Lag · MISSED_WINNER | 🔴 | 백테스트 산출물 |
-| 41 | Winner 4상태 분류 | 🔴 | 〃 |
-| 42 | Winner Recall@K | 🔴 | 〃 |
-| 43 | False Positive 분석 | 🔴 | 〃 |
-| 44 | False Follower | 🔴 | 〃 |
+| 40 | Discovery Lag · MISSED_WINNER | 🟡 | `outcome._rise_start` + `kpi.discovery_lag`. **실거래 대기** |
+| 41 | Winner 4상태 분류 | ✅ | `outcome.classify()` |
+| 42 | Winner Recall@K | 🟡 | `kpi.winner_recall_at_k`. **실거래 대기** |
+| 43 | False Positive 분석 | 🟡 | `kpi.false_positive_rate` + `precision_at_k`. **실거래 대기** |
+| 44 | False Follower | 🟡 | `kpi.false_follower_rate`. **실거래 대기** |
 | 45 | Kill Score | ⬜ | 재료(공급·전세·급등·선반영)는 대부분 있음 |
 | 46 | Winner vs Survivor 별도학습 | 🔴 | |
 | 47 | 2Y/5Y/10Y 별도 랭킹 | 🟡 | `cashflow` 가 기간별 계산은 함. 랭킹 분리 없음 |
@@ -80,9 +80,9 @@
 | 52 | Expected Rank Range | ⬜ | bootstrap |
 | 53 | Monte Carlo | 🟡 | Bear/Base/Bull + Stress 4종. **확률분포 시뮬 없음** |
 | 54 | Historical Analog Engine | 🔴 | |
-| 55 | Walk-forward Backtest | 🔴 | **가장 큰 항목** |
+| 55 | Walk-forward Backtest | ✅ | `backtest/` 전체. 합성 시장으로 검증. **실거래 대기** |
 | 56 | 2022~2023 하락장 테스트 | 🔴 | |
-| 57 | Backtest KPI 14종 | 🔴 | |
+| 57 | Backtest KPI 14종 | ✅ | `backtest/kpi.py` |
 | 58 | Investment Lessons DB | ⬜ | 테이블 설계만 하면 됨 |
 | 59 | Lessons 20개 seed | ⬜ | |
 | 60 | CASH 옵션 | ⬜ | |
@@ -94,15 +94,15 @@
 | 66 | 날짜별 snapshot 비덮어쓰기 | 🟡 | 가격·호가·시나리오는 시점별 저장. **랭킹 snapshot 없음** |
 | 67 | DATA_MISSING 등 표시 | ✅ | 전 계층 |
 | 68 | unit tests 13종 | 🟡 | 704개 중 상당수 해당. 신규 항목(익명성·누출) 없음 |
-| 69 | Look-ahead Leakage Test | ⬜ | **최우선** |
+| 69 | Look-ahead Leakage Test | ✅ | 세 겹(구조·정적·미래삭제 비교) + 누출을 심어 잡히는지 확인 |
 | 70 | User Interest Leakage Test | ⬜ | **최우선** |
 | 71 | Ablation Test | ⬜ | |
-| 72 | Train/Validation/Out-of-time 분리 | 🔴 | |
+| 72 | Train/Validation/Out-of-time 분리 | ✅ | `windows.assign_splits` + embargo 보고 + 검정력 리포트 |
 | 73 | known examples 는 fixture 전용 | ⬜ | 회귀 테스트로 고정 |
-| 74 | 데이터→Feature→Backtest→Weight 순서 | 🔴 | **원칙 자체가 데이터 대기** |
+| 74 | 데이터→Feature→Backtest→Weight 순서 | 🟡 | `usefulness.py` 가 그 순서를 강제. **실거래가 오면 즉시 돈다** |
 | 75 | Explainability (왜 A가 B보다) | ⬜ | |
 | 76 | Feature Attribution | ⬜ | SHAP 대신 가법 분해 |
-| 77 | 문서 11종 | 🟡 | 2/11 (이 문서 + audit) |
+| 77 | 문서 11종 | 🟡 | 3/11 (이 문서 + audit + backtest_methodology) |
 | 78 | `rank --cash --horizon --profile` | ⬜ | |
 | 79 | Phase 1~10 진행 | 🟡 | Phase 1 완료 |
 | 80 | 완료조건 20개 | ⬜ | 현재 6/20 |

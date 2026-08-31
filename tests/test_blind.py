@@ -79,18 +79,34 @@ class TestLookAhead:
             tables = {r[0] for r in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' "
                 "AND name NOT LIKE 'sqlite_%'")}
-        classified = set(cutoff_mod.DATED_TABLES) | set(cutoff_mod.TIMELESS_TABLES)
+        classified = (set(cutoff_mod.DATED_TABLES) | set(cutoff_mod.TIMELESS_TABLES)
+                      | set(cutoff_mod.ANSWER_KEY_TABLES))
         missing = tables - classified
         assert missing == set(), (
             f"시점 분류가 없는 테이블: {sorted(missing)}. "
             f"blind/cutoff.py 의 DATED_TABLES 또는 TIMELESS_TABLES 에 넣으세요")
+
+    def test_컷오프_컬럼이_실제로_그_테이블에_있다(self, db):
+        """컬럼 이름이 틀리면 guard 가 **정상 쿼리를 반칙으로** 잡는다.
+
+        DATED_TABLES 는 SQL 문자열에 그 이름이 들어 있는지로 검사하므로,
+        실제 컬럼이 contract_ymd 인데 deal_ymd 로 등록해 두면 올바르게
+        컷오프한 쿼리가 거부된다. 실제로 4개 테이블이 그 상태였다.
+        """
+        with get_conn(db) as conn:
+            wrong = []
+            for table, columns in cutoff_mod.DATED_TABLES.items():
+                have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+                wrong += [f"{table}.{c}" for c in columns if c not in have]
+        assert wrong == [], f"스키마에 없는 컷오프 컬럼: {wrong}"
 
     def test_분류에만_있고_스키마에_없는_테이블은_오타다(self, db):
         with get_conn(db) as conn:
             tables = {r[0] for r in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' "
                 "AND name NOT LIKE 'sqlite_%'")}
-        classified = set(cutoff_mod.DATED_TABLES) | set(cutoff_mod.TIMELESS_TABLES)
+        classified = (set(cutoff_mod.DATED_TABLES) | set(cutoff_mod.TIMELESS_TABLES)
+                      | set(cutoff_mod.ANSWER_KEY_TABLES))
         assert classified - tables == set()
 
     def test_미래_스냅샷은_후보에_들어오지_않는다(self, db):
