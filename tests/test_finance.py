@@ -854,3 +854,370 @@ def test_실제_규칙_CSV_가_그대로_들어간다(db):
         got = acquisition.assess(conn, price=units.from_eok(7.5), as_of=TODAY,
                                  resulting_home_count=1, exclusive_area_m2=84)
     assert got.acquisition_tax.amount == pytest.approx(units.from_eok(7.5) * 0.02)
+
+
+# ── 실제 rules/*.csv 로 하는 검증 (2026-08-31 제공값) ───────────────────
+#
+# 아래 테스트는 픽스처가 아니라 **리포지토리에 들어 있는 실제 규칙 파일**을 쓴다.
+# CSV 를 잘못 고치면 여기서 깨진다.
+
+REAL_AS_OF = "2026-08-31"
+LAWD_FREE = "28237"          # 인천 부평구 — 비규제
+LAWD_REG = "28185"           # 인천 연수구 — 아래 픽스처에서 조정대상지역으로 지정
+
+
+@pytest.fixture
+def real_rules(db):
+    """리포지토리의 rules/*.csv 를 그대로 적재한 DB."""
+    from pathlib import Path
+    from apt_engine.repo import rules as rule_repo
+
+    root = Path(__file__).resolve().parents[1] / "rules"
+    with get_conn(db) as conn:
+        for kind in ("tax", "cost", "loan"):
+            rule_repo.import_csv(conn, kind, root / f"{kind}.csv")
+        conn.execute(
+            "INSERT INTO regulation_zone (lawd_cd, zone_type, effective_from, "
+            " source_name, last_verified) VALUES (?,?,?,?,?)",
+            (LAWD_REG, "조정대상지역", "2025-10-16", "테스트용 지정", REAL_AS_OF))
+    return db
+
+
+class TestVerifiedRates:
+    """§4 취득세 점증세율 — 조문의 반올림까지 맞는가."""
+
+    @pytest.mark.parametrize("eok, expected_rate, expected_tax", [
+        (5.0,   0.0100,   5_000_000),
+        (6.0,   0.0100,   6_000_000),
+        (7.0,   0.0167,  11_690_000),    # 1.6666…% → 넷째 자리 반올림 1.67%
+        (7.5,   0.0200,  15_000_000),
+        (8.0,   0.0233,  18_640_000),    # 2.3333…% → 2.33%
+        (9.0,   0.0300,  27_000_000),
+        (10.0,  0.0300,  30_000_000),
+        (20.0,  0.0300,  60_000_000),
+    ])
+    def test_취득세율과_세액(self, real_rules, eok, expected_rate, expected_tax):
+        with get_conn(real_rules) as conn:
+            got = acquisition.assess(conn, price=units.from_eok(eok), as_of=REAL_AS_OF,
+                                     resulting_home_count=1, exclusive_area_m2=84)
+        assert got.acquisition_tax.amount == expected_tax
+        assert got.acquisition_tax.amount / units.from_eok(eok) == pytest.approx(
+            expected_rate, abs=1e-9)
+
+    def test_반올림하지_않으면_틀린다(self, real_rules):
+        """조문의 반올림이 빠지면 7억에서 23,333원이 어긋난다."""
+        with get_conn(real_rules) as conn:
+            got = acquisition.assess(conn, price=units.from_eok(7), as_of=REAL_AS_OF,
+                                     resulting_home_count=1, exclusive_area_m2=84)
+        unrounded = units.from_eok(7) * (7 * 2 / 3 - 3) / 100
+        assert got.acquisition_tax.amount != int(unrounded)
+        assert got.acquisition_tax.amount - unrounded == pytest.approx(23_333, abs=1)
+
+    def test_지방교육세는_취득세율의_1할이다(self, real_rules):
+        with get_conn(real_rules) as conn:
+            for eok in (5, 7, 8, 10):
+                got = acquisition.assess(conn, price=units.from_eok(eok),
+                                         as_of=REAL_AS_OF, resulting_home_count=1,
+                                         exclusive_area_m2=84)
+                assert got.local_education_tax.amount == got.acquisition_tax.amount // 10
+
+
+class TestHeavyTaxTable:
+    """§6 다주택 판정표 — 조합마다 맞는 세율이 나오는가."""
+
+    @pytest.mark.parametrize("homes, regulated, temporary, rate", [
+        (1, False, False, 0.03),
+        (1, True,  False, 0.03),
+        (2, False, False, 0.03),          # 2주택 비조정 → 일반세율
+        (2, True,  False, 0.08),          # 2주택 조정   → 8%
+        (2, True,  True,  0.03),          # 일시적 2주택 → 일반세율
+        (3, False, False, 0.08),          # 3주택 비조정 → 8%
+        (3, True,  False, 0.12),          # 3주택 조정   → 12%
+        (4, False, False, 0.12),          # 4주택 비조정 → 12%
+        (4, True,  False, 0.12),
+        (5, True,  False, 0.12),
+    ])
+    def test_판정표(self, real_rules, homes, regulated, temporary, rate):
+        with get_conn(real_rules) as conn:
+            got = acquisition.assess(
+                conn, price=units.from_eok(10), as_of=REAL_AS_OF,
+                resulting_home_count=homes, regulated_area=regulated,
+                temporary_two_home=temporary, exclusive_area_m2=84)
+        assert got.acquisition_tax.amount == pytest.approx(units.from_eok(10) * rate)
+
+    def test_법인은_개인_세율이_잡히지_않는다(self, real_rules):
+        with get_conn(real_rules) as conn:
+            got = acquisition.assess(conn, price=units.from_eok(10), as_of=REAL_AS_OF,
+                                     resulting_home_count=1, buyer_type="법인",
+                                     exclusive_area_m2=84)
+        assert got.acquisition_tax.amount == pytest.approx(units.from_eok(10) * 0.12)
+
+    def test_중과_시_지방교육세는_아직_확인_불가다(self, real_rules):
+        """중과세율 건의 지방교육세 산식을 받지 못했다. 0원으로 세지 않는다."""
+        with get_conn(real_rules) as conn:
+            got = acquisition.assess(conn, price=units.from_eok(10), as_of=REAL_AS_OF,
+                                     resulting_home_count=2, regulated_area=True,
+                                     exclusive_area_m2=84)
+        assert got.local_education_tax.amount is None
+        assert "지방교육세" in got.unknown
+
+
+class TestRealCosts:
+    """§7 인지세 · §9 법무사 보수 · §10 부가세."""
+
+    @pytest.mark.parametrize("eok, stamp", [
+        (0.05, 0), (0.2, 20_000), (0.4, 40_000), (0.8, 70_000),
+        (5.0, 150_000), (15.0, 350_000),
+    ])
+    def test_인지세_구간(self, real_rules, eok, stamp):
+        with get_conn(real_rules) as conn:
+            legal = cost_mod.calculate_legal_fee(conn, price=units.from_eok(eok),
+                                                 as_of=REAL_AS_OF)
+        got = next(i for i in legal.registration_expenses if i.name == "인지세")
+        assert got.amount == stamp
+        assert got.verification == rules.VERIFIED
+
+    @pytest.mark.parametrize("eok, fee", [
+        (0.4,  105_000),                       # 5천만원까지 정액
+        (1.0,  105_000 + 50_000_000 * 0.0005),   # 130,000
+        (2.0,  180_000),
+        (5.0,  180_000 + 300_000_000 * 0.0002),  # 240,000
+        (10.0, 340_000),
+        (15.0, 340_000 + 500_000_000 * 0.0001),  # 390,000
+    ])
+    def test_법무사_기본보수_누진식(self, real_rules, eok, fee):
+        with get_conn(real_rules) as conn:
+            legal = cost_mod.calculate_legal_fee(conn, price=units.from_eok(eok),
+                                                 as_of=REAL_AS_OF)
+        assert legal.base_fee.amount == int(fee)
+
+    def test_법무비는_세금이_아니라서_확정으로_표시하지_않는다(self, real_rules):
+        with get_conn(real_rules) as conn:
+            legal = cost_mod.calculate_legal_fee(conn, price=units.from_eok(6),
+                                                 as_of=REAL_AS_OF)
+        assert legal.base_fee.verification == rules.ESTIMATED
+        assert legal.verification != rules.VERIFIED
+
+    def test_중개보수와_법무보수의_부가세가_각각_계산된다(self, real_rules):
+        with get_conn(real_rules) as conn:
+            fee, vat, _ = cost_mod.brokerage(conn, price=units.from_eok(6),
+                                             as_of=REAL_AS_OF, region="인천")
+            legal = cost_mod.calculate_legal_fee(conn, price=units.from_eok(6),
+                                                 as_of=REAL_AS_OF, region="인천")
+        assert vat.amount == fee.amount // 10
+        assert legal.vat.amount == legal.base_fee.amount // 10
+        assert vat.amount != legal.vat.amount        # 서로 다른 항목이다
+
+
+class TestRealLoan:
+    """§1 DSR · §2 LTV · §3 절대한도."""
+
+    def test_업권마다_DSR_이_다르다(self, real_rules):
+        with get_conn(real_rules) as conn:
+            bank, _ = mortgage_mod.calculate_dsr_limit(
+                conn, price=units.from_eok(10), as_of=REAL_AS_OF, home_status="무주택",
+                regulated_area=False, region="인천", annual_income=units.from_eok(1),
+                interest_rate=0.045, lender_type="은행")
+            nonbank, _ = mortgage_mod.calculate_dsr_limit(
+                conn, price=units.from_eok(10), as_of=REAL_AS_OF, home_status="무주택",
+                regulated_area=False, region="인천", annual_income=units.from_eok(1),
+                interest_rate=0.045, lender_type="비은행")
+        assert nonbank.amount > bank.amount
+        assert nonbank.amount / bank.amount == pytest.approx(0.5 / 0.4, rel=0.01)
+
+    def test_수도권은_스트레스_금리가_300bp_다(self, real_rules):
+        with get_conn(real_rules) as conn:
+            metro, _ = mortgage_mod.calculate_dsr_limit(
+                conn, price=units.from_eok(10), as_of=REAL_AS_OF, home_status="무주택",
+                regulated_area=False, region="인천", annual_income=units.from_eok(1),
+                interest_rate=0.045)
+            other, _ = mortgage_mod.calculate_dsr_limit(
+                conn, price=units.from_eok(10), as_of=REAL_AS_OF, home_status="무주택",
+                regulated_area=False, region="부산", annual_income=units.from_eok(1),
+                interest_rate=0.045)
+        assert "300bp" in metro.note
+        assert "150bp" in other.note
+        assert metro.amount < other.amount        # 가산금리가 크면 한도가 준다
+
+    def test_규제지역_무주택_LTV_는_40퍼센트다(self, real_rules):
+        with get_conn(real_rules) as conn:
+            got, _ = mortgage_mod.calculate_ltv_limit(
+                conn, price=units.from_eok(10), as_of=REAL_AS_OF, home_status="무주택",
+                regulated_area=True, region="인천")
+        assert got.amount == units.from_eok(4)
+
+    def test_비규제_LTV_는_아직_확인_불가다(self, real_rules):
+        """값을 받지 못했다. 70% 같은 숫자를 지어내지 않는다."""
+        with get_conn(real_rules) as conn:
+            got, _ = mortgage_mod.calculate_ltv_limit(
+                conn, price=units.from_eok(10), as_of=REAL_AS_OF, home_status="무주택",
+                regulated_area=False, region="인천")
+        assert got.amount is None
+        assert got.verification == rules.UNKNOWN
+
+    def test_처분조건_없는_1주택자는_추정하지_않는다(self, real_rules):
+        with get_conn(real_rules) as conn:
+            without, _ = mortgage_mod.calculate_ltv_limit(
+                conn, price=units.from_eok(10), as_of=REAL_AS_OF, home_status="1주택",
+                regulated_area=True, region="인천", disposal_condition=False)
+            with_cond, _ = mortgage_mod.calculate_ltv_limit(
+                conn, price=units.from_eok(10), as_of=REAL_AS_OF, home_status="1주택",
+                regulated_area=True, region="인천", disposal_condition=True)
+        assert without.amount is None
+        assert with_cond.amount == units.from_eok(4)
+
+    @pytest.mark.parametrize("eok, cap_eok", [
+        (10, 6), (15, 4), (20, 4), (25, 2), (30, 2),
+    ])
+    def test_절대한도_3구간(self, real_rules, eok, cap_eok):
+        with get_conn(real_rules) as conn:
+            got, _ = mortgage_mod.calculate_absolute_mortgage_cap(
+                conn, price=units.from_eok(eok), as_of=REAL_AS_OF,
+                home_status="무주택", regulated_area=False, region="인천")
+        assert got.amount == units.from_eok(cap_eok)
+
+    def test_수도권이_아니고_규제지역도_아니면_절대한도가_없다(self, real_rules):
+        with get_conn(real_rules) as conn:
+            got, _ = mortgage_mod.calculate_absolute_mortgage_cap(
+                conn, price=units.from_eok(10), as_of=REAL_AS_OF,
+                home_status="무주택", regulated_area=False, region="부산")
+        assert got.amount is None          # '상한 없음' 이 아니라 '확인 불가'
+
+    def test_최종한도는_세_한도의_최솟값이다(self, real_rules):
+        with get_conn(real_rules) as conn:
+            got = mortgage_mod.calculate_final_mortgage_limit(
+                conn, price=units.from_eok(10), as_of=REAL_AS_OF, regulated_area=True,
+                region="인천", annual_income=units.from_eok(3), interest_rate=0.045)
+        usable = {l.name: l.amount for l in got.limits if l.known}
+        assert got.policy_max == min(usable.values())
+        assert got.policy_max == units.from_eok(4)      # LTV 40% 와 절대한도 6억 중 작은 값
+
+
+# ── §11 여섯 개 CASE ───────────────────────────────────────────────────
+
+CASES = [
+    # 이름,   매매가(억), 전용, 취득후주택수, 조정지역, 기대 취득세
+    ("CASE 1",  5, 84,  1, False,   5_000_000),
+    ("CASE 2",  8, 84,  1, False,  18_640_000),
+    ("CASE 3", 10, 101, 1, False,  30_000_000),
+    ("CASE 4", 10, 84,  2, True,   80_000_000),
+    ("CASE 5", 10, 84,  3, False,  80_000_000),
+    ("CASE 6", 10, 84,  3, True,  120_000_000),
+]
+
+
+@pytest.mark.parametrize("name, eok, area, homes, regulated, expected_tax", CASES)
+def test_지정된_6개_CASE(real_rules, name, eok, area, homes, regulated, expected_tax):
+    with get_conn(real_rules) as conn:
+        cap = capital_mod.compute(
+            conn, price=units.from_eok(eok), as_of=REAL_AS_OF,
+            lawd_cd=LAWD_REG if regulated else LAWD_FREE,
+            current_home_count=homes - 1, exclusive_area_m2=area,
+            annual_income=units.from_eok(0.8), interest_rate=0.045, region="인천")
+
+    by_name = {i.name: i for i in cap.cost_items}
+    assert by_name["취득세"].amount == expected_tax
+
+    # 농특세는 전용면적으로 갈린다
+    assert by_name["농어촌특별세(일반)"].amount == (
+        0 if area <= 85 else int(units.from_eok(eok) * 0.002))
+
+    # 중개보수와 부가세는 별도 항목이다
+    assert by_name["중개보수 부가세"].amount == by_name["중개보수"].amount // 10
+    assert by_name["법무보수 부가세"].amount == by_name["법무사 기본보수"].amount // 10
+
+    # 대출 세 한도가 모두 계산 시도되고, 최종값은 그중 최솟값이다
+    limits = {l.name: l for l in cap.mortgage.limits}
+    assert set(limits) >= {"LTV 한도", "DSR 한도", "절대 상한"}
+    known = {k: v.amount for k, v in limits.items() if v.known}
+    assert cap.mortgage.policy_max == min(known.values())
+
+    # 총취득비용과 실투자금이 앞뒤가 맞는다
+    assert cap.total_purchase_cost > cap.purchase_price
+    assert cap.required == (cap.total_purchase_cost - cap.available_mortgage
+                            - cap.assumable_deposit)
+    # 실비를 못 구했으므로 '확정' 이 아니라 '예상' 이어야 한다
+    assert cap.title == "예상 실투자금"
+
+
+def test_CASE_4_와_5_는_세율이_같고_6_은_더_높다(real_rules):
+    """조정 2주택 = 비조정 3주택 = 8%, 조정 3주택 = 12%."""
+    out = {}
+    with get_conn(real_rules) as conn:
+        for name, eok, area, homes, regulated, _ in CASES[3:]:
+            got = acquisition.assess(
+                conn, price=units.from_eok(eok), as_of=REAL_AS_OF,
+                resulting_home_count=homes, regulated_area=regulated,
+                exclusive_area_m2=area)
+            out[name] = got.acquisition_tax.amount
+    assert out["CASE 4"] == out["CASE 5"]
+    assert out["CASE 6"] > out["CASE 4"]
+
+
+# ── §12 랭킹 순서: 거른 다음 줄 세운다 ─────────────────────────────────
+
+def _seed_complex(conn, name, lawd, price_eok, kapt):
+    from apt_engine import units as u
+    repo.upsert_complexes(conn, [{"kapt_code": kapt, "name": name, "name_norm": name,
+                                  "lawd_cd": lawd}])
+    cid = conn.execute("SELECT id FROM complex WHERE kapt_code=?", (kapt,)).fetchone()[0]
+    conn.execute(
+        "INSERT INTO price_snapshot (complex_id, area_band, as_of_ym, window_months, "
+        " representative_price, method, sample_n, confidence, data_grade, "
+        " engine_version, calc_trace) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (cid, "84", "202608", 6, u.from_eok(price_eok), "median", 10, "HIGH",
+         "CONFIRMED", "0.9.1", "{}"))
+    return cid
+
+
+def test_현금_한도를_넘는_단지는_랭킹에_아예_오르지_않는다(real_rules):
+    with get_conn(real_rules) as conn:
+        cheap = _seed_complex(conn, "싼단지", LAWD_FREE, 4, "KC")
+        pricey = _seed_complex(conn, "비싼단지", LAWD_FREE, 30, "KP")
+        profile = budget_mod.Profile(
+            available_cash=units.from_eok(3), annual_income=units.from_eok(1),
+            interest_rate=0.045, region="인천")
+        ranked, screened = budget_mod.rank(
+            conn, profile=profile, as_of=REAL_AS_OF, area_band="84",
+            future_prices={cheap: units.from_eok(5), pricey: units.from_eok(40)})
+
+    ids = [r.candidate.complex_id for r in ranked]
+    assert cheap in ids
+    # 30억짜리는 기대수익이 아무리 커도 살 수 없으므로 순위에 없다
+    assert pricey not in ids
+    assert pricey in [c.complex_id for c in screened.too_expensive]
+
+
+def test_예상_매도가를_안_주면_비교_대상에서_빠진다(real_rules):
+    with get_conn(real_rules) as conn:
+        _seed_complex(conn, "가격미상", LAWD_FREE, 4, "KU")
+        profile = budget_mod.Profile(
+            available_cash=units.from_eok(3), annual_income=units.from_eok(1),
+            interest_rate=0.045, region="인천")
+        ranked, _ = budget_mod.rank(conn, profile=profile, as_of=REAL_AS_OF,
+                                    area_band="84")
+    assert len(ranked) == 1
+    assert ranked[0].metrics.expected_roe is None
+    assert not ranked[0].comparable
+
+
+def test_ROE_가_높은_단지가_먼저_온다(real_rules):
+    with get_conn(real_rules) as conn:
+        a = _seed_complex(conn, "저수익", LAWD_FREE, 4, "KA")
+        b = _seed_complex(conn, "고수익", LAWD_FREE, 4, "KB")
+        conn.execute("INSERT INTO tax_rule (tax_kind, rule_key, rate, effective_from, "
+                     " source_name, last_verified, status, verification) "
+                     "VALUES ('양도소득세','cgt',0.2,'2020-01-01','x',?, 'ENACTED',"
+                     " 'VERIFIED')", (REAL_AS_OF,))
+        conn.execute("INSERT INTO tax_rule (tax_kind, rule_key, rate, effective_from, "
+                     " source_name, last_verified, status, verification) "
+                     "VALUES ('지방소득세','linc',0.02,'2020-01-01','x',?, 'ENACTED',"
+                     " 'VERIFIED')", (REAL_AS_OF,))
+        profile = budget_mod.Profile(
+            available_cash=units.from_eok(3), annual_income=units.from_eok(1),
+            interest_rate=0.045, region="인천")
+        ranked, _ = budget_mod.rank(
+            conn, profile=profile, as_of=REAL_AS_OF, area_band="84",
+            future_prices={a: units.from_eok(4.5), b: units.from_eok(6)})
+    assert [r.candidate.name for r in ranked] == ["고수익", "저수익"]
+    assert ranked[0].metrics.expected_roe > ranked[1].metrics.expected_roe

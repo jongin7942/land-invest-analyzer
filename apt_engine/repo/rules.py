@@ -23,7 +23,7 @@ TABLES = {
     "tax": ("tax_rule",
             ("tax_kind", "rule_key", "conditions_json", "bracket_min", "bracket_max",
              "rate", "progressive_deduction", "fixed_amount", "rate_formula",
-             "max_amount", "base_kind", "effective_from", "effective_to",
+             "rate_decimals", "max_amount", "base_kind", "effective_from", "effective_to",
              "source_name", "source_url", "last_verified", "status", "verification",
              "note")),
     "loan": ("loan_rule",
@@ -48,6 +48,7 @@ INT_COLUMNS = {
     "price_min", "price_max", "stress_rate_bp", "max_loan_amount",
     "residence_duty_months", "jeonse_succession_allowed", "residence_required",
     "max_amount", "regulated_area", "first_home_buyer", "vat_applicable",
+    "rate_decimals",
 }
 FLOAT_COLUMNS = {"rate", "ltv", "dsr", "dti", "value"}
 DEFAULT_ZERO = {"bracket_min", "price_min", "progressive_deduction",
@@ -56,7 +57,7 @@ DEFAULT_ZERO = {"bracket_min", "price_min", "progressive_deduction",
 
 # NOT NULL 컬럼은 비어 있을 때 채울 값이 있어야 한다.
 # status 를 비우면 '시행 중'으로 본다 — 발표·예정 정책은 반드시 명시해야 한다.
-DEFAULT_TEXT = {"status": "ENACTED"}
+DEFAULT_TEXT = {"status": "ENACTED", "conditions_json": "{}"}
 
 
 class RuleImportError(ValueError):
@@ -204,10 +205,10 @@ TEMPLATES = {
         "# jeonse_succession_allowed: 1=전세 끼고 매수 가능, 0=실거주 의무로 불가\n"),
     "tax": (
         "tax_kind,rule_key,conditions_json,bracket_min,bracket_max,rate,"
-        "progressive_deduction,fixed_amount,rate_formula,max_amount,base_kind,"
+        "progressive_deduction,fixed_amount,rate_formula,rate_decimals,max_amount,base_kind,"
         "effective_from,effective_to,source_name,source_url,last_verified,"
         "status,verification,note\n"
-        "# 예) 취득세,acq/1주택/6억이하,\"{\"\"house_count\"\":1}\",0,600000000,0.01,0,,,,"
+        "# 예) 취득세,acq/1주택/6억이하,\"{\"\"house_count\"\":1}\",0,600000000,0.01,0,,,,,"
         "취득가액,2020-08-12,,지방세법 제11조,https://www.law.go.kr/...,2026-08-30,"
         "ENACTED,VERIFIED,\n"
         "# tax_kind: 취득세/취득세감면/지방교육세/농어촌특별세/재산세/종합부동산세/"

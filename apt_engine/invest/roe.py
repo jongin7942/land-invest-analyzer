@@ -163,8 +163,11 @@ def expected_return(conn: sqlite3.Connection, *, capital: SelfCapital,
     roe = None
     if fin.known:
         profit = (sale_price - exits.total - capital.total_purchase_cost - fin.amount)
-        if capital.required and capital.required > 0:
+        if capital.required is not None and capital.required > 0:
             roe = profit / capital.required
+        elif capital.required is not None:
+            # 실투자금이 0 이하면 수익률이 정의되지 않는다(무한대). 숫자로 만들지 않는다.
+            unknown.append("EXPECTED_ROE (실투자금이 0 이하 — 수익률이 정의되지 않음)")
 
     price_return = (sale_price - capital.purchase_price) / capital.purchase_price
 

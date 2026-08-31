@@ -172,3 +172,25 @@ class TestDatabasesAreSeparate:
                 if count > 1:
                     offenders.append(f"{path.relative_to(root)}: {name} × {count}")
         assert offenders == [], f"같은 이름의 함수가 여러 번 정의됐습니다: {offenders}"
+
+    def test_아파트_CLI_모든_서브명령의_help_가_렌더링된다(self):
+        """argparse 는 help 문자열을 %-포맷한다. 리터럴 '%' 를 그대로 쓰면
+        그 명령을 --help 로 여는 순간 ValueError 로 죽는다.
+
+        `--max-far` 도움말의 '(%)' 와 `--lender` 의 '40% / 50%' 에서 실제로 두 번
+        났다. build_parser() 만으로는 잡히지 않고 format_help() 를 호출해야 한다.
+        """
+        from apt_engine.cli import build_parser
+
+        parser = build_parser()
+        subparsers = [a for a in parser._actions
+                      if a.__class__.__name__ == "_SubParsersAction"]
+        assert subparsers, "서브명령이 하나도 없습니다"
+        broken = []
+        parser.format_help()
+        for name, sub in subparsers[0].choices.items():
+            try:
+                sub.format_help()
+            except Exception as e:                      # noqa: BLE001
+                broken.append(f"{name}: {type(e).__name__} {e}")
+        assert broken == [], f"--help 가 깨지는 서브명령: {broken}"

@@ -66,15 +66,29 @@ def _find(conn: sqlite3.Connection, cost_kind: str, *, price: int, as_of: str,
 
 
 def _apply(rule: rules.Rule, price: int) -> tuple[int, str]:
-    """요율/정액/상한을 적용한다."""
+    """요율 / 정액 / 누진(기본액 + 초과분 × 요율) / 상한을 적용한다.
+
+    법무사 보수표처럼 "5천만원까지 105,000원, 초과분은 0.05%" 형태의 누진 구조는
+    fixed_amount(구간 기본액) 와 rate(초과분 요율)를 **둘 다** 적은 행으로 표현한다.
+    구간 하한은 price_min 이다. 하나만 적으면 정액 또는 단순 요율이다.
+    """
     fixed = rule.get("fixed_amount")
-    if fixed is not None:
-        return int(fixed), f"정액 {units.fmt_won(int(fixed))}"
     rate = rule.get("rate")
-    if rate is None:
+    floor = int(rule.get("price_min") or 0)
+
+    if fixed is not None and rate is not None:
+        excess = max(price - floor, 0)
+        amount = int(units.won_round(int(fixed) + excess * float(rate)))
+        formula = (f"{units.fmt_won(int(fixed))} + (초과 {units.fmt_won(excess)} × "
+                   f"{units.fmt_pct(float(rate), digits=4)})")
+    elif fixed is not None:
+        return int(fixed), f"정액 {units.fmt_won(int(fixed))}"
+    elif rate is not None:
+        amount = int(units.won_round(price * float(rate)))
+        formula = f"{units.fmt_eok(price)} × {units.fmt_pct(float(rate), digits=2)}"
+    else:
         raise rules.RuleError(f"'{rule.get('rule_key')}' 에 요율도 정액도 없습니다")
-    amount = int(units.won_round(price * float(rate)))
-    formula = f"{units.fmt_eok(price)} × {units.fmt_pct(float(rate), digits=2)}"
+
     cap = rule.get("max_amount")
     if cap is not None and amount > int(cap):
         return int(cap), formula + f" → 한도 {units.fmt_won(int(cap))}"

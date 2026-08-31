@@ -36,6 +36,18 @@ RULE_TYPES = (LTV, DSR, STRESS_DSR, MORTGAGE_CAP, DTI)
 
 REPAYMENT_TYPES = ("원리금균등", "원금균등", "만기일시")
 
+# DSR 한도는 업권마다 다르다(은행권 40% / 비은행권 50%). 코드가 아니라 규칙이
+# 정하는 값이지만, 어느 업권으로 물어볼지는 호출부가 정해야 한다.
+LENDER_TYPES = ("은행", "비은행")
+DEFAULT_LENDER = "은행"
+
+# 수도권. 스트레스 DSR 가산금리가 여기서 달라진다.
+METRO_SIDO = ("서울", "경기", "인천")
+
+
+def is_metro(region: str | None) -> bool:
+    return region in METRO_SIDO
+
 DISCLAIMER = ("정책 기준 추정치이며 실제 금융기관 심사 결과와 다를 수 있습니다 "
               "(은행별 가산금리·내부등급·담보평가에 따라 달라집니다)")
 
@@ -105,6 +117,8 @@ class Limit:
 def find_policy(conn: sqlite3.Connection, rule_type: str, *, as_of: str | date,
                 price: int, home_status: str, regulated_area: bool,
                 region: str | None = None, first_home_buyer: bool = False,
+                lender_type: str = DEFAULT_LENDER, purpose: str = "주택구입",
+                disposal_condition: bool = False,
                 allow_unverified: bool = False) -> rules.Rule | None:
     """rule_type 하나에 대해 그 시점·조건에 맞는 정책 규칙."""
     day = rules.as_ymd(as_of)
@@ -115,8 +129,15 @@ def find_policy(conn: sqlite3.Connection, rule_type: str, *, as_of: str | date,
     context = {
         "house_count": {"무주택": 0, "1주택": 1, "다주택": 2}.get(home_status, 0),
         "regulated": regulated_area,
+        "regulated_area": regulated_area,
         "home_status": home_status,
         "first_home_buyer": first_home_buyer,
+        "lender_type": lender_type,
+        "metro": is_metro(region),
+        "purpose": purpose,
+        # 규제지역 1주택자는 '기존 주택 처분 조건' 을 걸어야 대출이 나온다.
+        # 조건을 걸지 않은 1주택자의 한도는 별개 규칙이라, 여기서 추정하지 않는다.
+        "disposal_condition": disposal_condition,
     }
     found = rules.pick(rows, context, amount=price,
                        min_col="price_min", max_col="price_max")
@@ -154,11 +175,14 @@ def find_policy(conn: sqlite3.Connection, rule_type: str, *, as_of: str | date,
 def calculate_ltv_limit(conn: sqlite3.Connection, *, price: int, as_of: str | date,
                         home_status: str, regulated_area: bool,
                         region: str | None = None, first_home_buyer: bool = False,
+                        lender_type: str = DEFAULT_LENDER, purpose: str = "주택구입",
+                        disposal_condition: bool = False,
                         allow_unverified: bool = False) -> tuple[Limit, Evidence | None]:
     """담보만 보는 이론상 한도. 이것만으로 대출가능액이라 부르지 않는다."""
     rule = find_policy(conn, LTV, as_of=as_of, price=price, home_status=home_status,
                        regulated_area=regulated_area, region=region,
-                       first_home_buyer=first_home_buyer,
+                       first_home_buyer=first_home_buyer, lender_type=lender_type,
+                       purpose=purpose, disposal_condition=disposal_condition,
                        allow_unverified=allow_unverified)
     if rule is None:
         return Limit("LTV 한도", None, rules.UNKNOWN, "규칙 미입력",
@@ -184,6 +208,8 @@ def calculate_dsr_limit(conn: sqlite3.Connection, *, price: int, as_of: str | da
                         mortgage_term_years: int = 30,
                         repayment_type: str = "원리금균등",
                         region: str | None = None, first_home_buyer: bool = False,
+                        lender_type: str = DEFAULT_LENDER, purpose: str = "주택구입",
+                        disposal_condition: bool = False,
                         allow_unverified: bool = False) -> tuple[Limit, Evidence | None]:
     """소득으로 감당 가능한 원리금에서 역산한 한도.
 
@@ -192,7 +218,8 @@ def calculate_dsr_limit(conn: sqlite3.Connection, *, price: int, as_of: str | da
     """
     rule = find_policy(conn, DSR, as_of=as_of, price=price, home_status=home_status,
                        regulated_area=regulated_area, region=region,
-                       first_home_buyer=first_home_buyer,
+                       first_home_buyer=first_home_buyer, lender_type=lender_type,
+                       purpose=purpose, disposal_condition=disposal_condition,
                        allow_unverified=allow_unverified)
     if rule is None:
         return Limit("DSR 한도", None, rules.UNKNOWN, "규칙 미입력",
@@ -217,6 +244,8 @@ def calculate_dsr_limit(conn: sqlite3.Connection, *, price: int, as_of: str | da
     stress = find_policy(conn, STRESS_DSR, as_of=as_of, price=price,
                          home_status=home_status, regulated_area=regulated_area,
                          region=region, first_home_buyer=first_home_buyer,
+                         lender_type=lender_type, purpose=purpose,
+                         disposal_condition=disposal_condition,
                          allow_unverified=allow_unverified)
     stress_bp = float(stress.get("value") or 0) if stress is not None else 0.0
     applied_rate = interest_rate + stress_bp / 10000.0
@@ -252,12 +281,15 @@ def calculate_dsr_limit(conn: sqlite3.Connection, *, price: int, as_of: str | da
 def calculate_absolute_mortgage_cap(
         conn: sqlite3.Connection, *, price: int, as_of: str | date,
         home_status: str, regulated_area: bool, region: str | None = None,
-        first_home_buyer: bool = False,
+        first_home_buyer: bool = False, lender_type: str = DEFAULT_LENDER,
+        purpose: str = "주택구입", disposal_condition: bool = False,
         allow_unverified: bool = False) -> tuple[Limit, Evidence | None]:
     """대출 총액 자체에 걸리는 상한(있을 때만)."""
     rule = find_policy(conn, MORTGAGE_CAP, as_of=as_of, price=price,
                        home_status=home_status, regulated_area=regulated_area,
                        region=region, first_home_buyer=first_home_buyer,
+                       lender_type=lender_type, purpose=purpose,
+                       disposal_condition=disposal_condition,
                        allow_unverified=allow_unverified)
     if rule is None:
         # 상한 규칙이 '없다'는 것과 '상한이 없다'는 것은 다르다. 후자로 단정하지 않는다.
@@ -304,6 +336,8 @@ def calculate_final_mortgage_limit(
         interest_rate: float | None = None, mortgage_term_years: int = 30,
         repayment_type: str = "원리금균등",
         requested: int | None = None, bank_quote: int | None = None,
+        lender_type: str = DEFAULT_LENDER, purpose: str = "주택구입",
+        disposal_condition: bool = False,
         allow_unverified: bool = False) -> Mortgage:
     """최종 대출 한도. min(LTV, DSR, 절대상한, 요청액)."""
     price = units.as_won(price)
@@ -311,7 +345,8 @@ def calculate_final_mortgage_limit(
     home_status = home_status_of(current_home_count)
     common = dict(price=price, as_of=day, home_status=home_status,
                   regulated_area=regulated_area, region=region,
-                  first_home_buyer=first_home_buyer,
+                  first_home_buyer=first_home_buyer, lender_type=lender_type,
+                  purpose=purpose, disposal_condition=disposal_condition,
                   allow_unverified=allow_unverified)
 
     evidence: list[Evidence] = []
@@ -334,8 +369,26 @@ def calculate_final_mortgage_limit(
 
     usable = {l.name: l.amount for l in limits if l.known}
     unknown = [l.name for l in limits if not l.known]
+
+    # 담보가액은 **정책이 아니라 산술적 상한**이다. LTV 는 정의상 100%를 넘을 수
+    # 없으므로 집값보다 많이 빌릴 수는 없다. 이걸 두지 않으면 LTV 규칙이 없고
+    # 소득만 큰 경우 DSR 한도만 남아 "집값보다 큰 대출"이 나오고 실투자금이 음수가 된다.
+    #
+    # 다만 이건 **좁히기만 한다.** 정책 한도를 하나도 못 구했으면 여전히
+    # '확인 불가' 다 — 규칙이 없다고 "집값만큼 빌릴 수 있다"고 말하지 않는다.
+    collateral = Limit("담보가액(LTV 100%)", price, rules.VERIFIED,
+                       f"집값 {units.fmt_eok(price)}",
+                       "정책이 아니라 산술적 상한입니다. 실제 LTV 는 이보다 낮습니다")
+    if usable:
+        limits.append(collateral)
+        usable[collateral.name] = price
+
     policy_max = min(usable.values()) if usable else None
     binding = min(usable, key=usable.get) if usable else None
+    if binding == collateral.name and not any(
+            l.name == "LTV 한도" and l.known for l in limits):
+        unknown.append("LTV 한도가 없어 담보가액이 한도가 됐습니다 — "
+                       "실제 대출은 이보다 훨씬 작습니다")
 
     verification = rules.weakest_verification(
         *([l.verification for l in limits if l.known] or [rules.UNKNOWN]))
@@ -364,7 +417,9 @@ def calculate_final_mortgage_limit(
                               else "확인 불가"),
         "예상액 근거": expected_note,
         "조건": {"주택보유": home_status, "규제지역": regulated_area,
-                "지역": region or "전국", "생애최초": first_home_buyer,
+                "지역": (region or "전국") + (" · 수도권" if is_metro(region) else ""),
+                "업권": lender_type, "자금용도": purpose,
+                "생애최초": first_home_buyer,
                 "연소득": units.fmt_eok(annual_income) if annual_income else "미입력",
                 "금리": (units.fmt_pct(interest_rate, digits=2)
                        if interest_rate is not None else "미입력"),

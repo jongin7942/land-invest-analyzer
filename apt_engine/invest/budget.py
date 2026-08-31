@@ -35,6 +35,7 @@ class Profile:
     mortgage_term_years: int = 30
     interest_rate: float | None = None
     repayment_type: str = "원리금균등"
+    lender_type: str = "은행"          # 은행권 DSR 40% / 비은행권 50%
     region: str | None = None
 
     @classmethod
@@ -53,14 +54,16 @@ class Profile:
             mortgage_term_years=row["mortgage_term_years"] or 30,
             interest_rate=row["interest_rate"],
             repayment_type=row["repayment_type"] or "원리금균등",
+            lender_type=row["lender_type"] or "은행",
             region=row["region"])
 
     def save(self, conn: sqlite3.Connection) -> None:
         conn.execute(
             "INSERT INTO user_profile (name, available_cash, annual_income, "
             " existing_annual_payment, current_home_count, first_home_buyer, "
-            " buyer_type, mortgage_term_years, interest_rate, repayment_type, region) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?) "
+            " buyer_type, mortgage_term_years, interest_rate, repayment_type, "
+            " lender_type, region) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?) "
             "ON CONFLICT(name) DO UPDATE SET "
             " available_cash=excluded.available_cash, "
             " annual_income=excluded.annual_income, "
@@ -75,7 +78,7 @@ class Profile:
             (self.name, self.available_cash, self.annual_income,
              self.existing_annual_payment, self.current_home_count,
              int(self.first_home_buyer), self.buyer_type, self.mortgage_term_years,
-             self.interest_rate, self.repayment_type, self.region))
+             self.interest_rate, self.repayment_type, self.lender_type, self.region))
 
 
 @dataclass(frozen=True)
@@ -154,7 +157,8 @@ def evaluate(conn: sqlite3.Connection, complex_id: int, *, profile: Profile,
         existing_annual_payment=profile.existing_annual_payment,
         interest_rate=profile.interest_rate,
         mortgage_term_years=profile.mortgage_term_years,
-        repayment_type=profile.repayment_type, use_mortgage=use_mortgage,
+        repayment_type=profile.repayment_type, lender_type=profile.lender_type,
+        use_mortgage=use_mortgage,
         jeonse_deposit=jeonse, assume_jeonse=assume_jeonse,
         region=profile.region or regions.sido_of(row["lawd_cd"]),
         allow_unverified=allow_unverified)
@@ -202,3 +206,66 @@ def screen(conn: sqlite3.Connection, *, profile: Profile, as_of: str | date,
     affordable.sort(key=lambda c: -(c.required or 0))
     too_expensive.sort(key=lambda c: (c.required or 0))
     return Screen(profile.available_cash, affordable, too_expensive, undecidable)
+
+
+# ── 랭킹 (§12·§16) ────────────────────────────────────────────────────
+# "3억짜리 아파트 찾기" 가 아니라 "현금 3억으로 살 수 있는 것 중 가장 좋은 것 찾기".
+# 그래서 순서가 고정돼 있다 — **먼저 거르고, 그다음 줄 세운다.**
+
+@dataclass(frozen=True)
+class Ranked:
+    candidate: Candidate
+    metrics: object                    # invest.ranking.Metrics
+    sort_key: float | None
+
+    @property
+    def comparable(self) -> bool:
+        return self.metrics.comparable
+
+
+def rank(conn: sqlite3.Connection, *, profile: Profile, as_of: str | date,
+         future_prices: dict[int, int] | None = None,
+         downside_prices: dict[int, int] | None = None,
+         holding_years: int = 5, area_band: str | None = None,
+         lawd_cd: str | None = None, assume_jeonse: bool = False,
+         use_mortgage: bool = True, scan: int = 200,
+         allow_unverified: bool = False) -> tuple[list[Ranked], Screen]:
+    """매수 가능한 단지만 골라 EXPECTED_ROE 순으로 줄 세운다.
+
+    `future_prices` 는 {complex_id: 예상 매도가}. 주지 않은 단지는 수익률을
+    계산하지 않는다 — 상승률을 지어내서 순위를 만들지 않는다. 그런 단지는
+    `comparable=False` 로 남아 비교 대상에서 빠진다.
+    """
+    from apt_engine.invest import ranking as ranking_mod
+    from apt_engine.invest import roe as roe_mod
+
+    screened = screen(conn, profile=profile, as_of=as_of, area_band=area_band,
+                      lawd_cd=lawd_cd, assume_jeonse=assume_jeonse,
+                      use_mortgage=use_mortgage, limit=scan,
+                      allow_unverified=allow_unverified)
+
+    out: list[Ranked] = []
+    for candidate in screened.affordable:      # ← 여기서 이미 실투자금 필터를 통과했다
+        future = (future_prices or {}).get(candidate.complex_id)
+        expected = roe_mod.expected_return(
+            conn, capital=candidate.capital, future_sale_price=future, as_of=as_of,
+            holding_years=holding_years, annual_rate=profile.interest_rate,
+            mortgage_term_years=profile.mortgage_term_years,
+            repayment_type=profile.repayment_type,
+            region=profile.region or regions.sido_of(candidate.lawd_cd),
+            house_count=profile.current_home_count + 1,
+            allow_unverified=allow_unverified)
+        metrics = ranking_mod.build(
+            conn, capital=candidate.capital, expected=expected,
+            available_cash=profile.available_cash,
+            downside_sale_price=(downside_prices or {}).get(candidate.complex_id),
+            as_of=as_of, holding_years=holding_years,
+            annual_rate=profile.interest_rate,
+            region=profile.region or regions.sido_of(candidate.lawd_cd),
+            house_count=profile.current_home_count + 1,
+            allow_unverified=allow_unverified)
+        out.append(Ranked(candidate, metrics, metrics.expected_roe))
+
+    # ROE 를 구한 단지가 먼저, 그중 높은 순. 못 구한 단지는 뒤로 밀되 버리지 않는다.
+    out.sort(key=lambda r: (r.sort_key is None, -(r.sort_key or 0)))
+    return out, screened

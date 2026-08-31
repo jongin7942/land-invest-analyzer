@@ -97,6 +97,20 @@ def eval_rate_formula(expr: str, base: int) -> float:
     return rate
 
 
+def round_rate(rate: float, decimals: int | None) -> float:
+    """세율을 조문이 정한 자리수로 반올림한다.
+
+    지방세법 제11조제1항제8호 나목: "소수점 이하 다섯째 자리에서 반올림하여
+    소수점 넷째 자리까지 계산한다". 은행식 반올림(round())은 5를 짝수로 보내므로
+    쓰지 않는다 — 법령은 사사오입이다.
+    """
+    if decimals is None:
+        return rate
+    from decimal import Decimal, ROUND_HALF_UP
+    quantum = Decimal(1).scaleb(-int(decimals))
+    return float(Decimal(str(rate)).quantize(quantum, rounding=ROUND_HALF_UP))
+
+
 def apply_rate(rule: rules.Rule, base: int) -> tuple[int, str]:
     """규칙 하나를 과세표준에 적용. (세액, 계산식 문자열)."""
     from apt_engine import units
@@ -115,6 +129,13 @@ def apply_rate(rule: rules.Rule, base: int) -> tuple[int, str]:
                 f"fixed_amount 도 없습니다")
         rate = eval_rate_formula(str(expr), base)
         note = f" [산식 {expr}]"
+
+    decimals = rule.get("rate_decimals")
+    if decimals is not None:
+        rounded = round_rate(float(rate), int(decimals))
+        if rounded != rate:
+            note += f" [{decimals}자리 반올림 {rate:.8f}→{rounded}]"
+        rate = rounded
 
     deduction = int(rule.get("progressive_deduction") or 0)
     amount = int(units.won_round(base * float(rate))) - deduction

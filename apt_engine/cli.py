@@ -677,7 +677,8 @@ def cmd_cash(args):
             existing_annual_payment=(parse_price(args.existing_payment)
                                      if args.existing_payment else 0),
             interest_rate=args.rate, mortgage_term_years=args.years,
-            repayment_type=args.repayment,
+            repayment_type=args.repayment, lender_type=args.lender,
+            disposal_condition=args.disposal_condition,
             requested_mortgage=parse_price(args.loan) if args.loan else None,
             use_mortgage=not args.no_loan,
             jeonse_deposit=jeonse, assume_jeonse=assume_jeonse,
@@ -716,7 +717,8 @@ def cmd_profile(args):
                 current_home_count=args.home_count,
                 first_home_buyer=args.first_home,
                 mortgage_term_years=args.years, interest_rate=args.rate,
-                repayment_type=args.repayment, region=args.region)
+                repayment_type=args.repayment, lender_type=args.lender,
+                region=args.region)
             p.save(conn)
             print(f"프로필 '{args.name}' 저장했습니다.")
             return
@@ -731,7 +733,8 @@ def cmd_profile(args):
     print(f"  기존 원리금 {units.fmt_won(p.existing_annual_payment)}/년")
     print(f"  보유주택    {p.current_home_count}채 · 생애최초 {'예' if p.first_home_buyer else '아니오'}")
     print(f"  대출 조건   {p.mortgage_term_years}년 · "
-          f"{f'{p.interest_rate:.2%}' if p.interest_rate else '금리 미입력'} · {p.repayment_type}")
+          f"{f'{p.interest_rate:.2%}' if p.interest_rate else '금리 미입력'} · "
+          f"{p.repayment_type} · {p.lender_type}권")
 
 
 def cmd_budget(args):
@@ -1542,6 +1545,10 @@ def build_parser() -> argparse.ArgumentParser:
     ca.add_argument("--years", type=int, default=30, help="대출기간(년)")
     ca.add_argument("--repayment", default="원리금균등",
                     choices=["원리금균등", "원금균등", "만기일시"])
+    ca.add_argument("--lender", default="은행", choices=["은행", "비은행"],
+                    help="업권 — DSR 한도가 다르다 (은행 40%% / 비은행 50%%)")
+    ca.add_argument("--disposal-condition", action="store_true",
+                    help="규제지역 1주택자가 기존 주택 처분 조건을 거는 경우")
     ca.add_argument("--cash", help="내 가용 현금 — 매수 가능 여부·사용효율을 함께 본다")
     ca.add_argument("--repair", help="수리비")
     ca.add_argument("--buffer", help="안전자금")
@@ -1561,6 +1568,7 @@ def build_parser() -> argparse.ArgumentParser:
     pf.add_argument("--years", type=int, default=30)
     pf.add_argument("--repayment", default="원리금균등",
                     choices=["원리금균등", "원금균등", "만기일시"])
+    pf.add_argument("--lender", default="은행", choices=["은행", "비은행"])
     pf.add_argument("--region", help="시도 (중개보수 조례 선택)")
 
     bg = sub.add_parser("budget", help="내 현금으로 살 수 있는 아파트 (실투자금 기준)")

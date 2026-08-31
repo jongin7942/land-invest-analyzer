@@ -97,6 +97,8 @@ def compute(conn: sqlite3.Connection, *, price: int, as_of: str | date,
             repayment_type: str = "원리금균등",
             requested_mortgage: int | None = None,
             bank_quote: int | None = None,
+            lender_type: str = mortgage_mod.DEFAULT_LENDER,
+            disposal_condition: bool = False,
             use_mortgage: bool = True,
             jeonse_deposit: int | None = None,
             assume_jeonse: bool = False,
@@ -169,7 +171,9 @@ def compute(conn: sqlite3.Connection, *, price: int, as_of: str | date,
             existing_annual_payment=existing_annual_payment,
             interest_rate=interest_rate, mortgage_term_years=mortgage_term_years,
             repayment_type=repayment_type, requested=requested_mortgage,
-            bank_quote=bank_quote, allow_unverified=allow_unverified)
+            bank_quote=bank_quote, lender_type=lender_type,
+            disposal_condition=disposal_condition,
+            allow_unverified=allow_unverified)
         available_mortgage = mortgage.expected
         if available_mortgage is None:
             unknown.append("대출 가능액")
