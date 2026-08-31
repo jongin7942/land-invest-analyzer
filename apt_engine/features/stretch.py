@@ -280,3 +280,68 @@ def price_percentile(series: bands_mod.BandSeries) -> Feature:
         Calc(value=value, unit="0~1",
              formula="현재보다 싼 달의 수 ÷ 관측 개월",
              intermediates={"관측 개월": len(prices)}, grade="CONFIRMED"))
+
+
+# 얼마나 오래 싸야 '오래' 인가. §14 의 24개월과 맞춘다.
+CHEAP_LOOKBACK = 36
+
+
+def months_cheap(series: bands_mod.BandSeries,
+                 normal: NormalPrice) -> tuple[int | None, str]:
+    """장기 정상가 대비 몇 달째 싼가 (§14 Persistent Cheapness 의 입력).
+
+    정상가를 모르면 세지 않는다 — 기준선 없이 "싸다" 는 말이 성립하지 않는다.
+    """
+    if not normal.known:
+        return None, normal.reason
+    usable = series.usable[:CHEAP_LOOKBACK]
+    if len(usable) < 12:
+        return None, f"관측이 {len(usable)}개월뿐입니다(최소 12개월)"
+
+    count = 0
+    for p in usable:                       # 최신순
+        if p.p50 and p.p50 < normal.value:
+            count += 1
+        else:
+            break                          # 연속으로 센다. 중간에 비쌌으면 끊는다
+    return count, ""
+
+
+def price_to_jeonse_stretch(price: int | None, jeonse_ratio: float | None,
+                            history: list[float] | None = None) -> Feature:
+    """전세 대비 매매가가 얼마나 벌어졌나 (§4-D).
+
+    전세가율이 낮다 = 매매가가 전세보다 많이 앞서 갔다 = 하방이 얕다.
+    **자기 역사와 비교한다.** 절대 수준은 지역마다 달라서 의미가 없다.
+    """
+    if jeonse_ratio is None or jeonse_ratio <= 0:
+        return Feature.missing(
+            "price_to_jeonse_stretch",
+            "전세가율이 없습니다 — 전월세 실거래가 필요합니다")
+    if not history:
+        return Feature.missing(
+            "price_to_jeonse_stretch",
+            "전세가율 이력이 없어 자기 역사와 비교할 수 없습니다. "
+            "절대 수준은 지역마다 달라 그대로 쓰지 않습니다")
+
+    import statistics
+    base = statistics.median(history)
+    if base <= 0:
+        return Feature.missing("price_to_jeonse_stretch",
+                               "과거 전세가율 중앙값이 0 이하입니다")
+    # 전세가율이 과거보다 낮을수록 stretch 가 크다
+    gap = (base - jeonse_ratio) / base
+    value = max(0.0, min(1.0, gap / 0.20))
+    return Feature(
+        "price_to_jeonse_stretch", value, "0~1",
+        sample_confidence(len(history), full_at=24), Status.OK,
+        {"현재 전세가율": f"{jeonse_ratio:.1%}",
+         "과거 중앙값": f"{base:.1%}",
+         "괴리": f"{gap:+.1%}",
+         "해석": ("매매가가 전세보다 많이 앞서 갔습니다 — 하방이 얕습니다"
+                if value > 0.5 else "전세가 따라오고 있습니다"),
+         "주의": "절대 수준이 아니라 자기 역사와 비교합니다"},
+        Calc(value=value, unit="0~1",
+             formula="(과거 전세가율 중앙값 − 현재) ÷ 과거 중앙값 ÷ 20%",
+             intermediates={"현재": jeonse_ratio, "과거": base},
+             grade="CONFIRMED"))

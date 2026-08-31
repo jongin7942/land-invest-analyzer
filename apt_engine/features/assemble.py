@@ -105,6 +105,8 @@ def build(conn: sqlite3.Connection, complex_id: int, area_band: str, *,
                   and out["investigation_priority"].usable else None)
         out = out.add(bands.visible_movement(series, shift,
                                              volume_recovery=volume))
+        out = out.add(bands.transaction_recovery(series))
+        out = out.add(bands.distribution_exhaustion(series))
 
     if "stretch" in wanted:
         normal = stretch_mod.historical_normal(series)
@@ -113,6 +115,20 @@ def build(conn: sqlite3.Connection, complex_id: int, area_band: str, *,
             out = out.add(f)
         out = out.add(stretch_mod.acceleration_zone(series, slopes))
         out = out.add(stretch_mod.price_percentile(series))
+
+        # §14 — 얼마나 오래 쌌는가. 정상가를 모르면 세지 않는다.
+        from apt_engine.features import leader as leader_mod
+        months, _ = stretch_mod.months_cheap(series, normal)
+        out = out.add(leader_mod.persistent_cheapness(
+            months_cheap=months, gap_closed=None))
+
+        # §4-D — 전세 대비 매매가 괴리. 자기 역사와 비교한다.
+        ratio_now = (out["jeonse_ratio"].value
+                     if "jeonse_ratio" in out and out["jeonse_ratio"].usable
+                     else None)
+        history = _jeonse_history(conn, complex_id, area_band, as_of=as_of)
+        out = out.add(stretch_mod.price_to_jeonse_stretch(
+            None, ratio_now, history))
 
     if "cycle" in wanted:
         held = None
@@ -150,12 +166,32 @@ def group_of(feature_key: str) -> str | None:
         "catalyst": ("catalyst_",),
         "bands": ("p25_migration", "median_migration", "p75_migration",
                   "band_shift_strength", "latent_movement", "visible_movement",
-                  "slope_persistence"),
+                  "slope_persistence", "transaction_recovery",
+                  "distribution_exhaustion"),
         "stretch": ("price_stretch", "runup_", "acceleration_zone",
-                    "price_percentile"),
+                    "price_percentile", "persistent_cheapness",
+                    "price_to_jeonse_stretch"),
         "cycle": ("reset_completion", "path_quality"),
     }
     for group, keys in prefixes.items():
         if any(feature_key.startswith(k) for k in keys):
             return group
     return None
+
+
+def _jeonse_history(conn, complex_id: int, area_band: str, *,
+                    as_of: cutoff_mod.AsOf, months: int = 36) -> list[float]:
+    """전세가율 이력. 없으면 빈 목록 — 절대 수준으로 대체하지 않는다."""
+    observable = as_of.observable
+    end_ym = observable.ym
+    total = int(end_ym[:4]) * 12 + int(end_ym[4:6]) - 1 - months
+    start_ym = f"{total // 12:04d}{total % 12 + 1:02d}"
+    with cutoff_mod.guard(conn, observable) as g:
+        rows = g.execute(
+            "SELECT jeonse_ratio FROM jeonse_snapshot "
+            " WHERE complex_id = ? AND area_band = ? "
+            "   AND as_of_ym >= ? AND as_of_ym <= ? "
+            "   AND jeonse_ratio IS NOT NULL "
+            " ORDER BY as_of_ym DESC",
+            (complex_id, area_band, start_ym, end_ym)).fetchall()
+    return [float(r["jeonse_ratio"]) for r in rows]
