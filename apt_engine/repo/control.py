@@ -19,56 +19,74 @@ Winner 만 모아 놓고 "우리 모델이 이 열 개를 다 찾았다" 고 하
 """
 from __future__ import annotations
 
+import csv
 import sqlite3
 from dataclasses import dataclass
+from pathlib import Path
 
-# 종인님이 지시서 §41 에 준 연구 후보들. **가설이지 정답이 아니다.**
-# 왜 갈렸는지를 Buyer Pool · Latent Movement · Price Ladder · Replacement Gap ·
-# Slope Persistence · Transmission · Supply 로 설명할 수 있는지 검증하는 용도다.
-SEED_PAIRS: tuple[dict, ...] = (
-    {
-        "pair_key": "2019_상계주공13_vs_부개주공5",
-        "as_of": "2019-01-01",
-        "winner_label": "상계주공13 소형",
-        "loser_label": "부개주공5 소형",
-        "area_band": "59",
-        "hypothesis": (
-            "당시 가격대는 비슷했지만 이후 성과가 크게 갈렸다. "
-            "Buyer Pool · Latent Movement · Price Ladder 위치 · "
-            "Replacement Gap · Slope Persistence · Transmission · 공급 중 "
-            "무엇이 차이를 설명하는지 검증한다"),
-        "note": "§27 이 지정한 대표 Control Pair",
-    },
-)
+# ⚠ **단지명은 이 파일에 없다.** `rules/control_pairs.csv` 와
+# `rules/research_set.csv` 에서 읽는다.
+#
+# 왜 코드가 아니라 데이터인가: §73·§41 이 "특정 단지에 맞추지 마라" 고 했고,
+# `tests/test_blind.py` 가 엔진 코드에 단지명 문자열이 있으면 실패시킨다.
+# 이름이 코드에 박히면 언젠가 그 이름을 참조하는 분기가 생긴다 — 데이터로
+# 두면 그럴 수가 없다. 종인님이 CSV 만 고쳐서 연구셋을 바꿀 수도 있다.
+CONTROL_PAIRS_CSV = "rules/control_pairs.csv"
+RESEARCH_SET_CSV = "rules/research_set.csv"
 
-# §41 연구 후보 — Regression/Research Set 전용.
-# 여기 있다는 이유로 점수를 올리거나 내리지 않는다.
-RESEARCH_CANDIDATES = (
-    "김포사우아이파크59", "다산 롯데낙천대59", "호매실스타힐스59",
-    "부평동아1차76", "관악산벽산타운5 59", "상동 한아름마을 삼환·동아·동성59",
-    "계양 하늘채파크포레59", "불암현대59", "구월아시아드선수촌2단지59",
-    "범박힐스테이트1단지59", "선부역어반스퀘어59",
-)
-
-CONTROL_TRAP_CANDIDATES = (
-    "수리산힐스테이트59", "부개주공5 소형", "개봉 거성푸르뫼2 59",
-    "파주 해오름마을10단지59", "송도오션파크베르디움84", "검단 디에트르더펠리체84",
-)
-
-TOO_LATE_CANDIDATES = ("신내6대주59", "답십리동아59")
-
-# §28 2021 Reverse Sanity Test 대상.
-# 2021 고점 부근에 강한 Money Arrival 이 있었지만 Price Stretch 와 Entry Risk 가
-# 매우 높았다. 모델이 MoneyArrival = BUY 로 단순 판단하지 않는지 본다.
-REVERSE_SANITY_2021 = (
-    "김포사우아이파크59", "다산 롯데낙천대59", "호매실스타힐스59",
-    "부평동아1차76", "상계주공13 소형",
-)
+RESEARCH = "RESEARCH"
+CONTROL = "CONTROL"
+TOO_LATE = "TOO_LATE"
+REVERSE_2021 = "REVERSE_2021"
+KINDS = (RESEARCH, CONTROL, TOO_LATE, REVERSE_2021)
 
 USAGE_NOTE = (
     "이 목록은 Regression/Research 전용입니다(§41·§49-2). 여기 있다는 이유로 "
     "Alpha 를 올리거나 내리지 않습니다. 2021 검사는 Reverse Sanity Test 이지 "
     "True Blind Test 가 아닙니다(§28)")
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def load_research_set(kind: str | None = None,
+                      path: str | Path | None = None) -> list[tuple[str, str]]:
+    """연구 후보 목록. 없으면 빈 목록 — 만들어내지 않는다.
+
+    반환: [(kind, label), ...]
+    """
+    target = Path(path) if path else _repo_root() / RESEARCH_SET_CSV
+    if not target.exists():
+        return []
+    out: list[tuple[str, str]] = []
+    with target.open(encoding="utf-8") as fh:
+        rows = csv.DictReader(_strip_comments(fh))
+        for row in rows:
+            k = (row.get("kind") or "").strip()
+            label = (row.get("label") or "").strip()
+            if not k or not label:
+                continue
+            if kind is not None and k != kind:
+                continue
+            out.append((k, label))
+    return out
+
+
+def load_pairs_csv(path: str | Path | None = None) -> list[dict]:
+    target = Path(path) if path else _repo_root() / CONTROL_PAIRS_CSV
+    if not target.exists():
+        return []
+    with target.open(encoding="utf-8") as fh:
+        return [r for r in csv.DictReader(_strip_comments(fh))
+                if (r.get("pair_key") or "").strip()]
+
+
+def _strip_comments(lines):
+    for line in lines:
+        if line.lstrip().startswith("#"):
+            continue
+        yield line
 
 
 @dataclass(frozen=True)
@@ -95,17 +113,17 @@ class Pair:
                 f"[{self.area_band}]{tail}")
 
 
-def seed(conn: sqlite3.Connection) -> int:
-    """지시서가 준 Control Pair 를 넣는다. 이미 있으면 건드리지 않는다."""
+def seed(conn: sqlite3.Connection, path: str | Path | None = None) -> int:
+    """CSV 의 Control Pair 를 넣는다. 이미 있으면 건드리지 않는다."""
     n = 0
-    for row in SEED_PAIRS:
+    for row in load_pairs_csv(path):
         cur = conn.execute(
             "INSERT INTO control_pair (pair_key, as_of, winner_label, "
             " loser_label, area_band, hypothesis, note) "
             "VALUES (?,?,?,?,?,?,?) ON CONFLICT(pair_key) DO NOTHING",
             (row["pair_key"], row["as_of"], row["winner_label"],
              row["loser_label"], row["area_band"], row["hypothesis"],
-             row.get("note")))
+             row.get("note") or None))
         n += cur.rowcount
     return n
 

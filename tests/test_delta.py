@@ -842,13 +842,12 @@ class TestControlPairIsolation:
         import pathlib
         from apt_engine.repo import control
 
-        names = (set(control.RESEARCH_CANDIDATES)
-                 | set(control.CONTROL_TRAP_CANDIDATES)
-                 | set(control.TOO_LATE_CANDIDATES)
-                 | set(control.REVERSE_SANITY_2021))
+        names = {label for _, label in control.load_research_set()}
+        assert names, "연구셋 CSV 를 읽지 못했습니다"
         base = pathlib.Path(control.__file__).resolve().parent.parent
         offenders = []
-        for package in ("features", "scoring", "ranking", "blind", "invest"):
+        for package in ("features", "scoring", "ranking", "blind", "invest",
+                        "repo"):
             for path in sorted((base / package).rglob("*.py")):
                 text = path.read_text(encoding="utf-8")
                 for name in names:
