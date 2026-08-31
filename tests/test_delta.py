@@ -1180,3 +1180,85 @@ class TestNakedValue:
         many, _ = naked.catalyst_paths({k: 0.8
                                         for k in naked.TRANSMISSION_PATHS})
         assert few < many
+
+
+# ── §37·§46 DELTA 파이프라인 조립 ────────────────────────────────────
+
+class TestDeltaPipeline:
+    def _run(self, conn, **kw):
+        from apt_engine.blind import cutoff as cutoff_mod
+        from apt_engine.invest.budget import Profile
+        from apt_engine.ranking import delta_pipeline as delta
+        from apt_engine.ranking import pipeline as bp
+        profile = Profile(name="t", available_cash=900_000_000,
+                          cash_hurdle_rate=kw.pop("hurdle", 0.03))
+        profile.save(conn)
+        return delta.run(conn, as_of=cutoff_mod.AsOf("2024-06-01"),
+                         profile=profile, gate=bp.GATE_PRICE_ONLY, **kw)
+
+    def test_기대수익을_못_내면_EXECUTABLE_에_안_들어간다(self, db):
+        """§46 — 모르면 YES 가 아니다.
+
+        전에는 `returns` 가 비었을 때 검사를 건너뛰어서, 아무 후보도 점수가
+        없을 때 **전부 통과**했다. 동시에 CASH 가 1위로 표시되는 모순이 났다.
+        """
+        with get_conn(db) as conn:
+            synth_mod.build(conn, n_complexes=12, start_ym="201501",
+                            end_ym="202412", rule=synth_mod.MEAN_REVERT)
+            r = self._run(conn, limit=5)
+        scored = [c for c in r.candidates if c.alpha.known]
+        if not scored:
+            assert r.split.executable == [], (
+                "Alpha 를 하나도 못 냈는데 EXECUTABLE 에 후보가 있습니다")
+
+    def test_CASH_순위와_EXECUTABLE_이_모순되지_않는다(self, db):
+        with get_conn(db) as conn:
+            synth_mod.build(conn, n_complexes=12, start_ym="201501",
+                            end_ym="202412", rule=synth_mod.MEAN_REVERT)
+            r = self._run(conn, limit=5)
+        if r.split.cash_rank == 1:
+            assert r.split.executable == [], (
+                "CASH 가 1위인데 그 위에 후보가 있습니다")
+
+    def test_다_못_봤으면_제목이_PARTIAL_이다(self, db):
+        """§43·§49-13."""
+        with get_conn(db) as conn:
+            synth_mod.build(conn, n_complexes=30, start_ym="201501",
+                            end_ym="202412")
+            r = self._run(conn, scan_limit=5, limit=5)
+        assert "PARTIAL" in r.title
+
+    def test_가중치가_임시면_그_사실이_표시된다(self, db):
+        with get_conn(db) as conn:
+            synth_mod.build(conn, n_complexes=8, start_ym="201501",
+                            end_ym="202412")
+            r = self._run(conn, limit=5)
+        assert "가중치 임시" in r.summary
+
+    def test_CASH_기준선이_없으면_경고한다(self, db):
+        with get_conn(db) as conn:
+            synth_mod.build(conn, n_complexes=8, start_ym="201501",
+                            end_ym="202412")
+            r = self._run(conn, hurdle=None, limit=5)
+        assert any("CASH 기준선이 없어" in n for n in r.notes)
+
+    def test_정렬에_이름이_들어가지_않는다(self, db):
+        """§1·§33 — 동점도 id 로 깬다."""
+        import pathlib
+        from apt_engine.ranking import delta_pipeline as delta
+        src = pathlib.Path(delta.__file__).read_text(encoding="utf-8")
+        assert "c.name" not in src and '"name"' not in src
+
+    def test_상세에_핵심_지표가_전부_나온다(self, db):
+        """§48-J."""
+        from apt_engine.ranking import delta_pipeline as delta
+        with get_conn(db) as conn:
+            synth_mod.build(conn, n_complexes=8, start_ym="201501",
+                            end_ym="202412")
+            r = self._run(conn, limit=5)
+        assert r.candidates
+        text = delta.detail(r.candidates[0])
+        for label in ("Normal Executable Price", "매수가 구간", "Stage",
+                      "실투자금", "Price Stretch", "Money Arrival Depth",
+                      "Latent / Visible"):
+            assert label in text, f"상세에 '{label}' 이 없습니다"

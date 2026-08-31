@@ -157,7 +157,7 @@ def split(candidates, stages: dict[int, stage_mod.Verdict], *,
                                  f"{v.stage} — {stage_mod.STAGE_LABEL[v.stage]}"))
             continue
 
-        # §46 최종 질문 — CASH 보다 나은가. 모르면 넣지 않는다.
+        # §46 최종 질문 — CASH 보다 나은가. **모르면 YES 가 아니다.**
         better, why = cash_mod.beats(
             cash, candidate_return=returns.get(c.complex_id),
             risk_penalty=penalties.get(c.complex_id, 0.0))
@@ -166,9 +166,17 @@ def split(candidates, stages: dict[int, stage_mod.Verdict], *,
             if stage_mod.watchable(v):
                 watch.append(c)
             continue
-        if better is None and returns:
-            # 다른 후보는 계산됐는데 이것만 못 냈다면 근거가 없는 것이다.
+        if better is None:
+            # 기대수익을 못 냈거나 CASH 기준선이 없다. 어느 쪽이든 §46 에
+            # 답하지 못한 것이라 Executable 에 넣지 않는다.
+            #
+            # 전에는 `returns` 가 비었을 때 이 검사를 건너뛰었는데, 그러면
+            # **아무 후보도 점수가 없을 때 전부 통과**했다. 실제로 합성 시장에서
+            # Alpha 를 하나도 못 낸 채 5개가 EXECUTABLE 에 올라왔고, 동시에
+            # CASH 가 1위로 표시되는 모순이 나왔다.
             excluded.append((c.complex_id, why))
+            if stage_mod.watchable(v):
+                watch.append(c)
             continue
 
         if stage_mod.executable(v):

@@ -1816,6 +1816,69 @@ def _rank_weights_source(conn, args):
     return weights_mod.BACKTESTED, ""
 
 
+def cmd_today(args):
+    """오늘 실행 가능한 후보 · Pre-Breakout Watch (신규 지시서 §37·§46).
+
+        today --cash 3 --horizon 5
+    """
+    from apt_engine.blind import cutoff as cutoff_mod
+    from apt_engine.invest.budget import Profile
+    from apt_engine.listing.provider import parse_price
+    from apt_engine.ranking import delta_pipeline as delta
+    from apt_engine.ranking import pipeline as pipeline_mod
+
+    as_of = cutoff_mod.AsOf(args.as_of or _today())
+    with get_conn(args.db) as conn:
+        profile = (Profile.load(conn, args.profile_name)
+                   if args.profile_name else None)
+        if profile is None:
+            profile = Profile(name=args.profile_name or "기본")
+        from dataclasses import replace
+        if args.cash:
+            profile = replace(profile, available_cash=parse_price(args.cash))
+        if args.income:
+            profile = replace(profile, annual_income=parse_price(args.income))
+        if args.rate is not None:
+            profile = replace(profile, interest_rate=args.rate)
+        if not profile.available_cash:
+            sys.exit("--cash 를 주거나 `profile set` 으로 가용 현금을 등록하세요.")
+
+        source, note = _rank_weights_source(conn, args)
+        learned = None
+        if source == "BACKTESTED":
+            from apt_engine.backtest import usefulness as useful_mod
+            w = useful_mod.load_weights(conn, market_source="REAL")
+            learned = w.values if w else None
+
+        try:
+            result = delta.run(
+                conn, as_of=as_of, profile=profile,
+                horizon_years=args.horizon, area_band=args.band,
+                lawd_cd=args.lawd, scan_limit=args.scan,
+                gate=(pipeline_mod.GATE_PRICE_ONLY if args.price_only
+                      else pipeline_mod.GATE_STRICT),
+                weights=learned, weights_source=source, limit=args.limit)
+        except ValueError as e:
+            sys.exit(str(e))
+
+        print()
+        print(result.report)
+        if note:
+            print(f"\n  {note}")
+
+        if args.verbose and result.split and result.split.executable:
+            print()
+            print(delta.detail(result.split.executable[0]))
+        elif args.verbose and result.candidates:
+            print()
+            print(delta.detail(result.candidates[0]))
+
+        if args.show_dropped and result.split:
+            print("\n  ── 제외된 후보 ──")
+            for cid, why in result.split.excluded[:20]:
+                print(f"    #{cid}: {why}")
+
+
 def cmd_rank(args):
     """수도권 전체에서 내 현금으로 살 수 있는 최적 후보 (지시서 §78).
 
@@ -2294,6 +2357,25 @@ def build_parser() -> argparse.ArgumentParser:
     bt.add_argument("--val-frac", type=float, default=0.20,
                     help="VALIDATION 비율 (기본 0.20)")
 
+    td = sub.add_parser("today",
+                        help="오늘 실행 가능한 후보 + Pre-Breakout Watch (§37)")
+    td.add_argument("--cash", help="가용 현금 (3 = 3억)")
+    td.add_argument("--horizon", type=int, default=5, help="투자기간(년)")
+    td.add_argument("--profile-name", help="저장된 사용자 프로필 이름")
+    td.add_argument("--income", help="연소득")
+    td.add_argument("--rate", type=float, help="대출금리")
+    td.add_argument("--band", help="전용면적 밴드 (기본 84)")
+    td.add_argument("--lawd", help="시군구 코드로 한정")
+    td.add_argument("--scan", type=int, default=2000)
+    td.add_argument("--limit", type=int, default=10)
+    td.add_argument("--as-of", help="데이터 컷오프 YYYY-MM-DD")
+    td.add_argument("--price-only", action="store_true",
+                    help="대출 규칙이 없을 때 매매가 기준으로 거른다")
+    td.add_argument("--weights", default="heuristic",
+                    choices=["heuristic", "backtested"])
+    td.add_argument("--verbose", action="store_true", help="1위 상세")
+    td.add_argument("--show-dropped", action="store_true", help="제외 사유")
+
     sub.add_parser("validate", help="요구사항 26 검증 규칙 실행")
 
     re_ = sub.add_parser("report", help="진단 리포트")
@@ -2313,7 +2395,7 @@ HANDLERS = {
     "ladder": cmd_ladder, "relative": cmd_relative,
     "transit": cmd_transit, "supply": cmd_supply, "geocode": cmd_geocode,
     "catalyst": cmd_catalyst, "redev": cmd_redev,
-    "backtest": cmd_backtest, "validate": cmd_validate, "report": cmd_report,
+    "today": cmd_today, "backtest": cmd_backtest, "validate": cmd_validate, "report": cmd_report,
 }
 
 
