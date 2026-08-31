@@ -30,7 +30,7 @@ if ($running) {
 }
 
 $action = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$script`""
-schtasks /create /tn $taskName /f /sc once /st 23:59 /tr $action | Out-Null
+schtasks /create /tn $taskName /f /sc daily /st 00:10 /tr $action | Out-Null
 schtasks /run /tn $taskName | Out-Null
 
 Write-Host "등록하고 실행했습니다: $taskName"

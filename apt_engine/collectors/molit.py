@@ -31,6 +31,14 @@ class MolitAuthError(MolitError):
     """인증키 문제 — 미등록/미승인/오타. 재시도해도 소용없다."""
 
 
+class MolitQuotaError(MolitError):
+    """일일 트래픽 한도 소진. 재시도해도 소용없고, 자정에 리셋된다.
+
+    인증 오류와 달리 '내일 다시 하면 되는' 문제라, 실패로 쌓지 말고 즉시 멈춘다.
+    남은 달을 계속 두드리면 실패 기록만 수백 건 쌓이고 시간만 버린다.
+    """
+
+
 def pick(raw: dict, keys: tuple[str, ...]) -> str | None:
     """필드 후보를 순서대로 시도해 처음 발견된 비어 있지 않은 값을 반환."""
     for k in keys:
@@ -142,6 +150,11 @@ def request(url: str, params: dict, *, timeout: int = 25, retries: int = 3) -> s
             return r.text
         except requests.HTTPError as e:
             last = e
+            if r.status_code == 429 or "LIMITED_NUMBER_OF_SERVICE_REQUESTS" in r.text:
+                raise MolitQuotaError(
+                    f"일일 트래픽 한도를 다 썼습니다 (HTTP {r.status_code}). "
+                    f"자정에 리셋되면 다시 돌리세요 — 이미 받은 달은 건너뜁니다."
+                ) from e
             if r.status_code < 500:  # 4xx 는 재시도해도 같다
                 raise MolitError(f"HTTP {r.status_code}: {r.text[:200]}") from e
         except (requests.ConnectionError, requests.Timeout) as e:

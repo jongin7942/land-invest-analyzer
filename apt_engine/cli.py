@@ -225,8 +225,15 @@ def cmd_collect(args):
 
 
 def _print_deal_stats(s: dict):
-    print(f"\n{s['months']}개월 · 조회 {s['fetched']:,}건 · 신규 {s['inserted']:,}건 · "
-          f"데이터없음 {s['empty']}건 · 실패 {s['failed']}건")
+    line = (f"\n{s['months']}개월 · 조회 {s['fetched']:,}건 · 신규 {s['inserted']:,}건 · "
+            f"데이터없음 {s['empty']}건 · 실패 {s['failed']}건")
+    if s.get("skipped"):
+        line += f" · 이미 받아서 건너뜀 {s['skipped']:,}건"
+    print(line)
+    if s.get("quota_exhausted"):
+        print("\n  ⚠ 일일 트래픽 한도를 다 써서 중간에 멈췄습니다.")
+        print("    자정에 리셋됩니다. 같은 명령을 다시 돌리면 이어받습니다.")
+        return
     if s["inserted"]:
         print("다음: python -m apt_engine.cli match")
 
