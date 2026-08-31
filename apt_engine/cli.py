@@ -575,7 +575,7 @@ def cmd_regulation(args):
     print(f"\n  기준일 {day} · 대상 {args.scope}")
     print(f"    규제지역          {z.label}")
     print(f"    토지거래허가구역   {p.label}")
-    print(f"    전세 활용         {calc.intermediates['전세 활용']}")
+    print(f"    전세 활용         {calc.intermediates['전세 활용 가능']}")
     if "주의" in calc.intermediates:
         print(f"\n    ⚠ {calc.intermediates['주의']}")
 
