@@ -738,7 +738,9 @@ def cmd_profile(args):
                 first_home_buyer=args.first_home,
                 mortgage_term_years=args.years, interest_rate=args.rate,
                 repayment_type=args.repayment, lender_type=args.lender,
-                region=args.region)
+                region=args.region, cash_hurdle_rate=args.cash_hurdle,
+                initial_repair_cost=(parse_price(args.repair_cost)
+                                     if args.repair_cost else None))
             p.save(conn)
             print(f"프로필 '{args.name}' 저장했습니다.")
             return
@@ -755,6 +757,11 @@ def cmd_profile(args):
     print(f"  대출 조건   {p.mortgage_term_years}년 · "
           f"{f'{p.interest_rate:.2%}' if p.interest_rate else '금리 미입력'} · "
           f"{p.repayment_type} · {p.lender_type}권")
+    print(f"  현금 기준선 " + (f"연 {p.cash_hurdle_rate:.2%} (§3 CASH 후보)"
+                          if p.cash_hurdle_rate is not None else
+                          "미입력 — CASH 순위를 만들지 않습니다"))
+    print(f"  초기 수리비 " + (units.fmt_eok(p.initial_repair_cost)
+                          if p.initial_repair_cost else "미입력"))
 
 
 def cmd_budget(args):
@@ -2067,6 +2074,11 @@ def build_parser() -> argparse.ArgumentParser:
                     choices=["원리금균등", "원금균등", "만기일시"])
     pf.add_argument("--lender", default="은행", choices=["은행", "비은행"])
     pf.add_argument("--region", help="시도 (중개보수 조례 선택)")
+    pf.add_argument("--cash-hurdle", type=float,
+                    help="세후 현금 수익률 (0.03 = 연 3%%). §3 CASH 후보의 기준선. "
+                         "없으면 CASH 순위를 만들지 않습니다 — 0 으로 가정하면 "
+                         "현금이 항상 최악이 됩니다")
+    pf.add_argument("--repair-cost", help="초기 수리비 (§2 InitialRepairCost)")
 
     bg = sub.add_parser("budget", help="내 현금으로 살 수 있는 아파트 (실투자금 기준)")
     bg.add_argument("--profile", default="기본")

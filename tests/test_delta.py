@@ -415,3 +415,151 @@ class TestCoverage:
                 conn.execute(
                     "INSERT INTO universe_coverage (as_of, area_band, scanned_n, "
                     " known_n, verdict) VALUES ('2023-01-01','84',10,100,'거의 전체')")
+
+
+# ── §2·§3 Capital Gate · CASH 후보 ───────────────────────────────────
+
+class TestCashCandidate:
+    def test_전세승계와_주담대를_동시에_적용하면_거부한다(self, db):
+        """메모에 있던 실투자금 음수 버그. UI 가 아니라 엔진이 막아야 한다(§2)."""
+        from apt_engine.cash import self_capital as cap
+        with get_conn(db) as conn:
+            synth_mod.build(conn, n_complexes=1, start_ym="202301",
+                            end_ym="202312")
+            with pytest.raises(cap.CapitalCombinationError, match="선순위"):
+                cap.compute(conn, price=500_000_000, as_of="2023-06-01",
+                            lawd_cd="11110", use_mortgage=True,
+                            assume_jeonse=True, jeonse_deposit=300_000_000)
+
+    def test_현금수익률이_없으면_0_으로_가정하지_않는다(self):
+        """0% 로 가정하면 현금이 항상 최악이 되어 §3 이 무의미해진다."""
+        from apt_engine.invest import cash_candidate as cc
+        c = cc.CashOption(300_000_000, None, 5, "프로필에 없음")
+        assert c.expected_return is None
+        assert not c.known
+        better, why = cc.beats(c, candidate_return=0.10)
+        assert better is None
+        assert "기준선이 없습니다" in why
+
+    def test_남는_현금을_버리지_않는다(self):
+        from apt_engine.invest import cash_candidate as cc
+        c = cc.CashOption(500_000_000, 0.03, 5)
+        leftover, gain, why = cc.unused_cash_return(c,
+                                                    required_equity=300_000_000)
+        assert leftover == 200_000_000
+        assert gain > 0
+
+    def test_남는_현금_수익을_모르면_총자본수익률을_내지_않는다(self):
+        """0 으로 세면 비싼 물건이 부당하게 유리해진다."""
+        from apt_engine.invest import cash_candidate as cc
+        c = cc.CashOption(500_000_000, None, 5, "없음")
+        total, detail = cc.total_capital_return(
+            property_gain=0.20, purchase_price=400_000_000,
+            required_equity=300_000_000, cash=c)
+        assert total is None
+        assert "부당하게 유리" in detail["주의"]
+
+    def test_현금보다_못하면_False_모르면_None(self):
+        from apt_engine.invest import cash_candidate as cc
+        c = cc.CashOption(300_000_000, 0.03, 5)
+        assert cc.beats(c, candidate_return=0.50)[0] is True
+        assert cc.beats(c, candidate_return=0.05)[0] is False
+        assert cc.beats(c, candidate_return=None)[0] is None
+
+
+# ── §37·§39·§40·§43 실행 랭킹 ────────────────────────────────────────
+
+class _C:
+    def __init__(self, cid):
+        self.complex_id = cid
+
+
+class TestExecutableSplit:
+    def _stage(self, name, quiet=False):
+        return stage.Verdict(name, None, quiet, ["테스트"])
+
+    def test_EXHAUSTED_는_실행목록에_안_들어간다(self):
+        from apt_engine.invest import cash_candidate as cc
+        from apt_engine.ranking import executable as ex
+        cands = [_C(1), _C(2)]
+        stages = {1: self._stage(stage.EMERGING), 2: self._stage(stage.EXHAUSTED)}
+        s = ex.split(cands, stages, cash=cc.CashOption(300_000_000, 0.03, 5),
+                     expected_returns={1: 0.50, 2: 0.50})
+        assert [c.complex_id for c in s.executable] == [1]
+        assert any(cid == 2 for cid, _ in s.excluded)
+
+    def test_현금보다_못하면_TOP_에_넣지_않는다(self):
+        """§46 — YES 가 아니면 억지로 넣지 않는다."""
+        from apt_engine.invest import cash_candidate as cc
+        from apt_engine.ranking import executable as ex
+        s = ex.split([_C(1)], {1: self._stage(stage.EMERGING)},
+                     cash=cc.CashOption(300_000_000, 0.05, 5),
+                     expected_returns={1: 0.02})
+        assert s.executable == []
+        assert "매수하지 않는 것이 우위" in s.excluded[0][1]
+
+    def test_기대수익을_모르면_YES_로_치지_않는다(self):
+        from apt_engine.invest import cash_candidate as cc
+        from apt_engine.ranking import executable as ex
+        s = ex.split([_C(1), _C(2)], {1: self._stage(stage.EMERGING),
+                                      2: self._stage(stage.EMERGING)},
+                     cash=cc.CashOption(300_000_000, 0.03, 5),
+                     expected_returns={1: 0.50})
+        assert [c.complex_id for c in s.executable] == [1]
+
+    def test_CASH_가_순위를_갖는다(self):
+        from apt_engine.invest import cash_candidate as cc
+        from apt_engine.ranking import executable as ex
+        s = ex.split([_C(1), _C(2)], {1: self._stage(stage.EMERGING),
+                                      2: self._stage(stage.EMERGING)},
+                     cash=cc.CashOption(300_000_000, 0.03, 5),
+                     expected_returns={1: 0.50, 2: 0.40})
+        assert s.cash_rank == 3, "둘 다 현금을 이겼으면 CASH 는 3위다"
+
+    def test_살_만한_게_없으면_CASH_DOMINANT(self):
+        from apt_engine.invest import cash_candidate as cc
+        from apt_engine.ranking import executable as ex
+        cands = [_C(i) for i in range(1, 11)]
+        stages = {i: self._stage(stage.EXHAUSTED) for i in range(1, 11)}
+        s = ex.split(cands, stages, cash=cc.CashOption(300_000_000, 0.03, 5))
+        assert s.temperature == ex.CASH_DOMINANT
+
+    def test_시장온도가_개별_점수를_바꾸지_않는다(self):
+        from apt_engine.ranking import executable as ex
+        assert "강제로 바꾸지 않습니다" in ex.TEMPERATURE_NOTE
+
+    def test_대안이_좋으면_최대매수가를_낮춘다(self):
+        """§39 Competitive Buy Price."""
+        from apt_engine.ranking import executable as ex
+        plain = ex.price_bands(500_000_000, entry_position=0.25)
+        rich = ex.price_bands(500_000_000, entry_position=0.25,
+                              alternatives_quality=1.0)
+        assert rich.do_not_buy < plain.do_not_buy
+        assert "Competitive Buy Price" in rich.competitive_note
+
+    def test_매수구간을_모르면_가격대를_지어내지_않는다(self):
+        from apt_engine.ranking import executable as ex
+        b = ex.price_bands(500_000_000, entry_position=None)
+        assert b.strong_buy is None
+        assert b.verdict() == "확인 불가"
+
+    def test_다_못_봤으면_전체라고_쓰지_않는다(self, db):
+        """§43·§49-13."""
+        from apt_engine.ranking import executable as ex
+        with get_conn(db) as conn:
+            synth_mod.build(conn, n_complexes=20, start_ym="202301",
+                            end_ym="202312")
+            partial = ex.measure(conn, as_of="2023-06-01", area_band="84",
+                                 scanned_ids={1, 2, 3})
+            full = ex.measure(conn, as_of="2023-06-01", area_band="84",
+                              scanned_ids=set(range(1, 21)))
+        assert partial.verdict == "PARTIAL_VERIFIED_UNIVERSE"
+        assert "PARTIAL" in partial.title
+        assert full.verdict == "FULL_UNIVERSE"
+
+    def test_모수를_모르면_전체로_치지_않는다(self, db):
+        from apt_engine.ranking import executable as ex
+        with get_conn(db) as conn:
+            c = ex.measure(conn, as_of="2023-06-01", area_band="84",
+                           scanned_ids=set())
+        assert c.verdict == "PARTIAL_VERIFIED_UNIVERSE"

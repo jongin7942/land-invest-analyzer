@@ -37,6 +37,10 @@ class Profile:
     repayment_type: str = "원리금균등"
     lender_type: str = "은행"          # 은행권 DSR 40% / 비은행권 50%
     region: str | None = None
+    # §3 CASH 후보의 기준선. 추정하지 않는다 — 없으면 CASH 순위를 못 만든다.
+    cash_hurdle_rate: float | None = None
+    # §2 RequiredCash 구성요소. 없으면 0 이 아니라 '확인 불가' 로 다룬다.
+    initial_repair_cost: int | None = None
 
     @classmethod
     def load(cls, conn: sqlite3.Connection, name: str) -> "Profile | None":
@@ -55,15 +59,17 @@ class Profile:
             interest_rate=row["interest_rate"],
             repayment_type=row["repayment_type"] or "원리금균등",
             lender_type=row["lender_type"] or "은행",
-            region=row["region"])
+            region=row["region"],
+            cash_hurdle_rate=row["cash_hurdle_rate"],
+            initial_repair_cost=row["initial_repair_cost"])
 
     def save(self, conn: sqlite3.Connection) -> None:
         conn.execute(
             "INSERT INTO user_profile (name, available_cash, annual_income, "
             " existing_annual_payment, current_home_count, first_home_buyer, "
             " buyer_type, mortgage_term_years, interest_rate, repayment_type, "
-            " lender_type, region) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?) "
+            " lender_type, region, cash_hurdle_rate, initial_repair_cost) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
             "ON CONFLICT(name) DO UPDATE SET "
             " available_cash=excluded.available_cash, "
             " annual_income=excluded.annual_income, "
@@ -74,11 +80,14 @@ class Profile:
             " mortgage_term_years=excluded.mortgage_term_years, "
             " interest_rate=excluded.interest_rate, "
             " repayment_type=excluded.repayment_type, region=excluded.region, "
+            " cash_hurdle_rate=excluded.cash_hurdle_rate, "
+            " initial_repair_cost=excluded.initial_repair_cost, "
             " updated_at=datetime('now','localtime')",
             (self.name, self.available_cash, self.annual_income,
              self.existing_annual_payment, self.current_home_count,
              int(self.first_home_buyer), self.buyer_type, self.mortgage_term_years,
-             self.interest_rate, self.repayment_type, self.lender_type, self.region))
+             self.interest_rate, self.repayment_type, self.lender_type,
+             self.region, self.cash_hurdle_rate, self.initial_repair_cost))
 
 
 @dataclass(frozen=True)
