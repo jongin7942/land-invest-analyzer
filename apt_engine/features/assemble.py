@@ -12,7 +12,8 @@ import sqlite3
 from typing import Callable, Iterable
 
 from apt_engine.blind import cutoff as cutoff_mod
-from apt_engine.features import flow, jeonse, momentum, regime, supply
+from apt_engine.features import (catalyst, entry, flow, jeonse, momentum,
+                                 regime, supply)
 from apt_engine.features.base import Feature, FeatureSet
 
 # 그룹 이름 → 그 그룹의 feature 를 만드는 함수.
@@ -23,11 +24,14 @@ GROUPS: dict[str, str] = {
     "flow": "거래량 단계·조사우선순위·거래 질 (§15·§16)",
     "supply": "공급 비율·공급 절벽 (§13)",
     "jeonse": "전세가율·하방방어·전세선행 (§14)",
+    "entry": "매수가 구간 대비 현재 위치 (§7)",
+    "catalyst": "남은 호재 알파 (§17·§18)",
 }
 
 
 def build(conn: sqlite3.Connection, complex_id: int, area_band: str, *,
           as_of: cutoff_mod.AsOf, lawd_cd: str | None = None,
+          horizon_years: int = 5,
           groups: Iterable[str] | None = None) -> FeatureSet:
     """후보 하나의 Feature 전부. 못 구한 것은 DATA_MISSING 으로 남는다."""
     wanted = set(groups) if groups is not None else set(GROUPS)
@@ -66,6 +70,26 @@ def build(conn: sqlite3.Connection, complex_id: int, area_band: str, *,
         for f in jeonse.all_features(conn, complex_id, area_band, as_of=as_of):
             out = out.add(f)
 
+    if "entry" in wanted:
+        # 공급이 많으면 매수가를 낮춘다. supply 그룹을 껐으면 조정 없이 간다.
+        ratio = out["supply_ratio_3y"].value if "supply_ratio_3y" in out else None
+        for f in entry.all_features(conn, complex_id, area_band, as_of=as_of,
+                                    supply_ratio=ratio):
+            out = out.add(f)
+
+    if "catalyst" in wanted:
+        price = None
+        row = conn.execute(
+            "SELECT representative_price FROM price_snapshot "
+            " WHERE complex_id = ? AND area_band = ? AND as_of_ym <= ? "
+            " ORDER BY as_of_ym DESC LIMIT 1",
+            (complex_id, area_band, as_of.observable.ym)).fetchone()
+        if row and row["representative_price"]:
+            price = int(row["representative_price"])
+        for f in catalyst.all_features(conn, complex_id, as_of=as_of,
+                                       horizon_years=horizon_years, price=price):
+            out = out.add(f)
+
     return out
 
 
@@ -77,6 +101,8 @@ def group_of(feature_key: str) -> str | None:
         "flow": ("flow_stage", "investigation_priority", "transaction_quality"),
         "supply": ("supply_",),
         "jeonse": ("jeonse_", "downside_defense"),
+        "entry": ("entry_",),
+        "catalyst": ("catalyst_",),
     }
     for group, keys in prefixes.items():
         if any(feature_key.startswith(k) for k in keys):

@@ -444,3 +444,199 @@ class TestAssemble:
             add_price(conn, cid, "202602", 20.0)      # 컷오프 이후 급등
             fs = assemble.build(conn, cid, BAND, as_of=AS_OF)
         assert fs["momentum_12m"].value == pytest.approx(0.2, abs=1e-6)
+
+
+# ── §7 Entry Price Engine ──────────────────────────────────────────────
+
+class TestEntryPrice:
+    def test_앵커가_하나면_매수가를_만들지_않는다(self, db):
+        from apt_engine.features import entry
+        with get_conn(db) as conn:
+            cid = add_complex(conn)
+            monthly(conn, cid, "202312", [5.0] * 24)      # long_term 앵커 하나뿐
+            got = entry.build(conn, cid, BAND, as_of=AS_OF)
+        assert len(got.anchors) < entry.MIN_ANCHORS
+        assert not got.known
+        assert not entry.feature(got).known
+
+    def test_앵커가_둘_이상이면_구간이_나온다(self, db):
+        from apt_engine.features import entry
+        with get_conn(db) as conn:
+            cid = add_complex(conn)
+            monthly(conn, cid, "202312", [5.0] * 24)
+            for d in ("20250310", "20250515", "20250710", "20250910", "20251110"):
+                add_trade(conn, cid, d, 5.0)
+            got = entry.build(conn, cid, BAND, as_of=AS_OF)
+        assert len(got.anchors) >= entry.MIN_ANCHORS
+        assert got.strong_buy <= got.fair_buy <= got.wait
+
+    def test_임의_퍼센트가_아니라_앵커_분위수다(self, db):
+        from apt_engine.features import entry
+        with get_conn(db) as conn:
+            cid = add_complex(conn)
+            monthly(conn, cid, "202312", [5.0] * 24)
+            for d in ("20250310", "20250515", "20250710", "20250910"):
+                add_trade(conn, cid, d, 4.0)
+            got = entry.build(conn, cid, BAND, as_of=AS_OF)
+            f = entry.feature(got)
+        assert "임의 퍼센트가 아니라" in f.calc.intermediates["산출 방식"]
+        # 서로 다른 근거가 다른 가격을 말하면 구간이 벌어진다
+        assert got.strong_buy < got.wait
+
+    def test_과거_고점을_저평가_근거로_쓰지_않는다(self, db):
+        """§7 — 고점이 거품이었다면 그 대비 할인은 저평가가 아니라 정상화다."""
+        from apt_engine.features import entry
+        with get_conn(db) as conn:
+            cid = add_complex(conn)
+            monthly(conn, cid, "202312", [5.0] * 12 + [10.0] + [5.0] * 11)
+            for d in ("20250310", "20250515", "20250710", "20250910"):
+                add_trade(conn, cid, d, 5.0)
+            got = entry.build(conn, cid, BAND, as_of=AS_OF)
+            f = entry.feature(got)
+        assert got.past_peak == units.from_eok(10.0)
+        assert "past_peak" not in [a.key for a in got.anchors]
+        assert "정상화" in f.calc.intermediates["고점 대비"]
+
+    def test_전세가_받쳐주는_하한이_앵커가_된다(self, db):
+        from apt_engine.features import entry
+        with get_conn(db) as conn:
+            cid = add_complex(conn)
+            monthly(conn, cid, "202312", [6.0] * 24)
+            add_jeonse(conn, cid, "202511", 4.0)
+            got = entry.build(conn, cid, BAND, as_of=AS_OF)
+        keys = [a.key for a in got.anchors]
+        assert "jeonse_floor" in keys
+
+    def test_공급이_많으면_매수가를_낮춘다(self, db):
+        from apt_engine.features import entry
+        with get_conn(db) as conn:
+            cid = add_complex(conn)
+            monthly(conn, cid, "202312", [5.0] * 24)
+            for d in ("20250310", "20250515", "20250710", "20250910"):
+                add_trade(conn, cid, d, 5.0)
+            plain = entry.build(conn, cid, BAND, as_of=AS_OF)
+            heavy = entry.build(conn, cid, BAND, as_of=AS_OF, supply_ratio=0.15)
+        assert heavy.fair_buy < plain.fair_buy
+
+    def test_현재가가_어느_구간인지_말한다(self, db):
+        from apt_engine.features import entry
+        with get_conn(db) as conn:
+            cid = add_complex(conn)
+            monthly(conn, cid, "202312", [5.0] * 24)
+            for d in ("20250310", "20250515", "20250710", "20250910"):
+                add_trade(conn, cid, d, 5.0)
+            got = entry.build(conn, cid, BAND, as_of=AS_OF)
+        assert got.verdict in ("Strong Buy 구간", "Fair Buy 구간", "Wait 구간",
+                               "Overpriced 구간")
+
+
+# ── §17·§18 Catalyst Alpha ─────────────────────────────────────────────
+
+class TestCatalystAlpha:
+    def _catalyst(self, conn, cid, *, key="gtx-b", stage="착공",
+                  realization=0.8, impact=None, priced_in=0.3,
+                  completion="2030", state_as_of="2025-06-01", exposure=0.9):
+        conn.execute(
+            "INSERT INTO catalyst (catalyst_key, catalyst_type, name) "
+            "VALUES (?,?,?) ON CONFLICT(catalyst_key) DO NOTHING",
+            (key, "GTX", key))
+        catalyst_id = conn.execute(
+            "SELECT id FROM catalyst WHERE catalyst_key = ?", (key,)).fetchone()[0]
+        conn.execute(
+            "INSERT INTO catalyst_state (catalyst_id, as_of, stage, "
+            " realization_probability, economic_impact, priced_in_fraction, "
+            " expected_completion, evidence_json) VALUES (?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(catalyst_id, as_of) DO UPDATE SET stage=excluded.stage",
+            (catalyst_id, state_as_of, stage, realization,
+             impact if impact is not None else int(units.from_eok(1.0)),
+             priced_in, completion, '{"src":"보도자료"}'))
+        conn.execute(
+            "INSERT INTO catalyst_exposure (catalyst_id, complex_id, exposure, "
+            " method, rationale) VALUES (?,?,?,?,?) "
+            "ON CONFLICT(catalyst_id, complex_id) DO UPDATE SET exposure=excluded.exposure",
+            (catalyst_id, cid, exposure, "직선거리", "역 도보 5분"))
+        return catalyst_id
+
+    def test_다섯_항목을_곱한다(self, db):
+        from apt_engine.features import catalyst as cat
+        with get_conn(db) as conn:
+            cid = add_complex(conn)
+            self._catalyst(conn, cid, realization=0.8, impact=int(units.from_eok(1.0)),
+                           priced_in=0.25, exposure=0.5, completion="2028")
+            got = cat.feature(conn, cid, as_of=AS_OF, horizon_years=5)
+        # 1억 × 0.8 × 1.0(기간 안) × 0.5 × 0.75 = 3천만원
+        assert got.known
+        assert got.calc.intermediates["합계"] == "0.3억"
+
+    def test_이미_반영된_호재는_알파가_거의_없다(self, db):
+        from apt_engine.features import catalyst as cat
+        with get_conn(db) as conn:
+            cid = add_complex(conn)
+            self._catalyst(conn, cid, priced_in=0.95)
+            got = cat.feature(conn, cid, as_of=AS_OF)
+        assert "선반영 경고" in got.calc.intermediates["호재별"][0]
+
+    def test_항목이_하나라도_없으면_알파를_만들지_않는다(self, db):
+        """모르는 걸 1.0 으로 두면 데이터가 부실한 호재가 가장 큰 알파를 받는다."""
+        from apt_engine.features import catalyst as cat
+        with get_conn(db) as conn:
+            cid = add_complex(conn)
+            self._catalyst(conn, cid, priced_in=None)
+            got = cat.feature(conn, cid, as_of=AS_OF)
+        assert not got.known
+        assert "항목이 부족" in got.detail["사유"]
+
+    def test_단계_상한이_낙관적_실현확률을_깎는다(self, db):
+        from apt_engine.features import catalyst as cat
+        with get_conn(db) as conn:
+            cid = add_complex(conn)
+            self._catalyst(conn, cid, stage="계획", realization=0.95)
+            got = cat.feature(conn, cid, as_of=AS_OF)
+        assert "실현확률 조정" in got.calc.intermediates["호재별"][0]
+
+    def test_투자기간_밖_호재는_기대감만_반영한다(self, db):
+        from apt_engine.features import catalyst as cat
+        with get_conn(db) as conn:
+            cid = add_complex(conn)
+            near = self._catalyst(conn, cid, key="near", completion="2028")
+            got_near = cat.feature(conn, cid, as_of=AS_OF, horizon_years=5)
+            conn.execute("DELETE FROM catalyst_exposure")
+            conn.execute("DELETE FROM catalyst_state")
+            conn.execute("DELETE FROM catalyst")
+            self._catalyst(conn, cid, key="far", completion="2040")
+            got_far = cat.feature(conn, cid, as_of=AS_OF, horizon_years=5)
+        assert got_far.value < got_near.value
+        assert "기대감만" in str(got_far.calc.intermediates["호재별"][0])
+
+    def test_컷오프_이후_상태는_보이지_않는다(self, db):
+        """§18 — 2024년 확정 사실을 2023년 모델이 알면 반칙이다."""
+        from apt_engine.features import catalyst as cat
+        with get_conn(db) as conn:
+            cid = add_complex(conn)
+            self._catalyst(conn, cid, stage="계획", realization=0.3,
+                           state_as_of="2025-06-01")
+            self._catalyst(conn, cid, stage="착공", realization=0.9,
+                           state_as_of="2026-06-01")     # 컷오프 이후
+            got = cat.feature(conn, cid, as_of=AS_OF)
+        assert got.calc.intermediates["호재별"][0]["단계"] == "계획"
+
+    def test_상태를_모르는_시점이면_호재로_세지_않는다(self, db):
+        from apt_engine.features import catalyst as cat
+        with get_conn(db) as conn:
+            cid = add_complex(conn)
+            self._catalyst(conn, cid, state_as_of="2027-01-01")
+            got = cat.feature(conn, cid, as_of=AS_OF)
+        assert not got.known
+        assert "알려진 호재가 없습니다" in got.detail["사유"]
+
+    def test_완공으로_적으려면_실제_완공일이_있어야_한다(self, db):
+        import sqlite3
+        with get_conn(db) as conn:
+            conn.execute("INSERT INTO catalyst (catalyst_key, catalyst_type, name) "
+                         "VALUES ('x','GTX','x')")
+            cid_row = conn.execute("SELECT id FROM catalyst").fetchone()[0]
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO catalyst_state (catalyst_id, as_of, stage, "
+                    " evidence_json) VALUES (?,?,'완공','{\"s\":1}')",
+                    (cid_row, "2025-01-01"))
