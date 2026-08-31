@@ -58,6 +58,7 @@
 from __future__ import annotations
 
 import argparse
+import sqlite3
 import sys
 
 import config
@@ -1704,6 +1705,10 @@ def cmd_backtest(args):
     action = args.action
     horizons = tuple(int(h) for h in (args.horizon or "2,5").split(","))
 
+    if action == "sanity":
+        _backtest_sanity(args)
+        return
+
     if action == "plan":
         ws = win_mod.generate(args.start, args.end, horizons=horizons,
                               step_months=args.step,
@@ -1754,6 +1759,21 @@ def cmd_backtest(args):
         print(f"  {kpi_mod.KPI_LABEL['winner_recall_at_k']} 등 KPI 는 "
               f"backtest_kpi 에 저장됩니다. `backtest weights --run-key "
               f"{args.run_key}` 로 가중치 학습을 이어가세요")
+
+
+def _backtest_sanity(args):
+    """§28·§29·§31 — 2017/2019/2021/2023 을 **같은 가중치로** 검사한다."""
+    from apt_engine.backtest import sanity
+    from apt_engine.ranking import pipeline as pipeline_mod
+
+    gate = (pipeline_mod.GATE_PRICE_ONLY if args.price_only
+            else pipeline_mod.GATE_STRICT)
+    with get_conn(args.db) as conn:
+        report = sanity.run_all(
+            conn, run_fn=sanity.buy_counter(gate=gate, limit=args.top),
+            weights_source=("BACKTESTED" if args.weights == "backtested"
+                            else "HEURISTIC"))
+    print(report.summary)
 
 
 def _backtest_profile(args, Profile, parse_price):
@@ -1821,6 +1841,197 @@ def _rank_weights_source(conn, args):
                 "임시(heuristic) 가중치로 계산했습니다 — `backtest run` 을 먼저 "
                 "돌리세요")
     return weights_mod.BACKTESTED, ""
+
+
+def cmd_today(args):
+    """오늘 실행 가능한 후보 · Pre-Breakout Watch (신규 지시서 §37·§46).
+
+        today --cash 3 --horizon 5
+    """
+    from apt_engine.blind import cutoff as cutoff_mod
+    from apt_engine.invest.budget import Profile
+    from apt_engine.listing.provider import parse_price
+    from apt_engine.ranking import delta_pipeline as delta
+    from apt_engine.ranking import pipeline as pipeline_mod
+
+    as_of = cutoff_mod.AsOf(args.as_of or _today())
+    with get_conn(args.db) as conn:
+        profile = (Profile.load(conn, args.profile_name)
+                   if args.profile_name else None)
+        if profile is None:
+            profile = Profile(name=args.profile_name or "기본")
+        from dataclasses import replace
+        if args.cash:
+            profile = replace(profile, available_cash=parse_price(args.cash))
+        if args.income:
+            profile = replace(profile, annual_income=parse_price(args.income))
+        if args.rate is not None:
+            profile = replace(profile, interest_rate=args.rate)
+        if not profile.available_cash:
+            sys.exit("--cash 를 주거나 `profile set` 으로 가용 현금을 등록하세요.")
+
+        source, note = _rank_weights_source(conn, args)
+        learned = None
+        if source == "BACKTESTED":
+            from apt_engine.backtest import usefulness as useful_mod
+            w = useful_mod.load_weights(conn, market_source="REAL")
+            learned = w.values if w else None
+
+        try:
+            result = delta.run(
+                conn, as_of=as_of, profile=profile,
+                horizon_years=args.horizon, area_band=args.band,
+                lawd_cd=args.lawd, scan_limit=args.scan,
+                gate=(pipeline_mod.GATE_PRICE_ONLY if args.price_only
+                      else pipeline_mod.GATE_STRICT),
+                weights=learned, weights_source=source, limit=args.limit)
+        except ValueError as e:
+            sys.exit(str(e))
+        except sqlite3.OperationalError as e:
+            if _needs_migration(e):
+                sys.exit(f"{e}\n\n{MIGRATION_HINT}")
+            raise
+
+        print()
+        print(result.report)
+        if note:
+            print(f"\n  {note}")
+
+        if args.verbose and result.split and result.split.executable:
+            print()
+            print(delta.detail(result.split.executable[0]))
+        elif args.verbose and result.candidates:
+            print()
+            print(delta.detail(result.candidates[0]))
+
+        if args.frontier:
+            _print_frontier(conn, args, as_of, profile, source, learned)
+
+        if args.columns and result.split:
+            _print_columns(conn, result, args)
+
+        if args.show_dropped and result.split:
+            print("\n  ── 제외된 후보 ──")
+            for cid, why in result.split.excluded[:20]:
+                print(f"    #{cid}: {why}")
+
+
+def _print_frontier(conn, args, as_of, profile, source, learned):
+    """§30 — 현금 버킷을 올릴 때 답이 어떻게 바뀌는가."""
+    from dataclasses import replace
+    from apt_engine.ranking import delta_pipeline as delta
+    from apt_engine.ranking import frontier as frontier_mod
+    from apt_engine.ranking import pipeline as pipeline_mod
+
+    gate = (pipeline_mod.GATE_PRICE_ONLY if args.price_only
+            else pipeline_mod.GATE_STRICT)
+    buckets = frontier_mod.default_buckets(profile.available_cash)
+    results = {}
+    for cash in buckets:
+        try:
+            results[cash] = delta.run(
+                conn, as_of=as_of, profile=replace(profile,
+                                                   available_cash=cash),
+                horizon_years=args.horizon, area_band=args.band,
+                lawd_cd=args.lawd, scan_limit=args.scan, gate=gate,
+                weights=learned, weights_source=source, limit=args.limit)
+        except ValueError:
+            continue
+    if not results:
+        print("\n  Capital Frontier: 버킷을 하나도 돌리지 못했습니다")
+        return
+    print()
+    print(frontier_mod.build(results).summary)
+
+
+def _print_columns(conn, result, args):
+    """§62 TOP10 전체 컬럼 + §64 순위변경."""
+    from apt_engine.invest import cash_candidate as cash_mod
+    from apt_engine.ranking import rotation
+
+    previous = rotation.load_previous(
+        conn, run_key=args.run_key, as_of=result.as_of, cash=result.cash,
+        horizon_years=result.horizon_years, profile="delta",
+        list_kind="executable")
+    current = {c.complex_id: (i, c.alpha.alpha or 0.0, c.alpha.confidence)
+               for i, c in enumerate(result.split.executable, 1)}
+    changes = {c.complex_id: c for c in rotation.explain(
+        previous, current,
+        dropped_reasons=dict(result.split.excluded))}
+
+    print("\n  ── TOP 전체 컬럼 (§62) ──")
+    for i, cand in enumerate(result.split.executable, 1):
+        leftover, _, _ = cash_mod.unused_cash_return(
+            result.cash_option, required_equity=cand.required_equity)
+        row = rotation.row_of(cand, rank=i, change=changes.get(cand.complex_id),
+                              unused_cash=leftover,
+                              coverage=result.coverage.verdict
+                              if result.coverage else None)
+        print(f"\n  [{i}] 단지 #{row['complex_id']} · {row['area_band']}㎡ "
+              f"· {row['stage']}")
+        for key, label in rotation.COLUMNS:
+            if key in ("rank", "complex_id", "area_band", "stage"):
+                continue
+            print(f"      {label:<16} {row[key]}")
+    if not previous:
+        print("\n    (직전 실행이 없어 순위변화를 낼 수 없습니다)")
+
+
+MIGRATION_HINT = (
+    "이 명령은 마이그레이션 016 이후의 표를 씁니다. `python -m apt_engine.cli init` "
+    "으로 적용하세요.\n"
+    "  ⚠ **수집이 도는 중이면 지금 돌리지 마세요.** 마이그레이션은 쓰기라서 "
+    "락 충돌로 수집이 죽습니다. 수집이 끝난 뒤에 하세요.")
+
+
+def _needs_migration(exc: Exception) -> bool:
+    return isinstance(exc, sqlite3.OperationalError) and "no such table" in str(exc)
+
+
+def cmd_leaders(args):
+    """Leader 망 생성 (§11) — 겹침 기준으로 선도단지를 붙인다.
+
+        leaders build --as-of 2024-06-01 --band 84
+    """
+    from apt_engine.blind import cutoff as cutoff_mod
+    from apt_engine.relative import leaders as leader_build
+
+    as_of = cutoff_mod.AsOf(args.as_of or _today())
+    try:
+        _leaders_body(args, as_of, leader_build)
+    except Exception as exc:                       # noqa: BLE001
+        if _needs_migration(exc):
+            sys.exit(f"{exc}\n\n{MIGRATION_HINT}")
+        raise
+
+
+def _leaders_body(args, as_of, leader_build):
+    with get_conn(args.db) as conn:
+        if args.action == "build":
+            result = leader_build.build(conn, as_of=as_of,
+                                        area_band=args.band or "84",
+                                        limit=args.limit)
+            if result.get("사유"):
+                print(result["사유"])
+                return
+            print(f"Leader 망 · {result['as_of']} 기준 (신고지연 반영)")
+            print(f"  단지 {result['단지']}개 → 링크 {result['링크']}개")
+            print(f"  종류 {', '.join(result['종류'])}")
+            print(f"  ⚠ {result['주의']}")
+            return
+
+        rows = conn.execute(
+            "SELECT leader_kind, COUNT(*) n, AVG(buyer_overlap) o "
+            "  FROM leader_link WHERE area_band = ? "
+            " GROUP BY leader_kind ORDER BY leader_kind",
+            (args.band or "84",)).fetchall()
+        if not rows:
+            print("Leader 망이 없습니다. `leaders build` 를 먼저 돌리세요.")
+            return
+        print(f"Leader 망 현황 ({args.band or '84'}㎡)")
+        for r in rows:
+            print(f"  {r['leader_kind']:<16} {r['n']:>6}개 · "
+                  f"평균 겹침 {r['o']:.2f}")
 
 
 def cmd_rank(args):
@@ -2272,7 +2483,7 @@ def build_parser() -> argparse.ArgumentParser:
                          "학습된 게 없으면 heuristic 으로 돌아가고 그 사실을 표시한다")
 
     bt = sub.add_parser("backtest", help="walk-forward 백테스트 (§55) · 가중치 학습 (§74)")
-    bt.add_argument("action", help="plan / run / weights")
+    bt.add_argument("action", help="plan / run / weights / sanity")
     bt.add_argument("--start", help="데이터 시작 YYYY-MM-DD")
     bt.add_argument("--end", help="데이터 끝 YYYY-MM-DD")
     bt.add_argument("--horizon", help="보유기간(년), 쉼표로 여러 개. 기본 2,5")
@@ -2292,6 +2503,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="정답 구간이 다음 분할을 침범하는 창을 뺀다 (embargo)")
     bt.add_argument("--max-windows", type=int, help="창 수 제한 (시험용)")
     bt.add_argument("--show-windows", action="store_true")
+    bt.add_argument("--weights", default="heuristic",
+                    choices=["heuristic", "backtested"],
+                    help="sanity 검사에 쓸 가중치 출처")
     bt.add_argument("--cash-hurdle", type=float,
                     help="세후 현금 수익률. §26 cash_accuracy 를 계산하려면 필요. "
                          "없으면 그 KPI 는 '확인 불가' 로 남는다")
@@ -2300,6 +2514,37 @@ def build_parser() -> argparse.ArgumentParser:
                          "모자라니 이걸 줄여서 VALIDATION 을 늘린다")
     bt.add_argument("--val-frac", type=float, default=0.20,
                     help="VALIDATION 비율 (기본 0.20)")
+
+    td = sub.add_parser("today",
+                        help="오늘 실행 가능한 후보 + Pre-Breakout Watch (§37)")
+    td.add_argument("--cash", help="가용 현금 (3 = 3억)")
+    td.add_argument("--horizon", type=int, default=5, help="투자기간(년)")
+    td.add_argument("--profile-name", help="저장된 사용자 프로필 이름")
+    td.add_argument("--income", help="연소득")
+    td.add_argument("--rate", type=float, help="대출금리")
+    td.add_argument("--band", help="전용면적 밴드 (기본 84)")
+    td.add_argument("--lawd", help="시군구 코드로 한정")
+    td.add_argument("--scan", type=int, default=2000)
+    td.add_argument("--limit", type=int, default=10)
+    td.add_argument("--as-of", help="데이터 컷오프 YYYY-MM-DD")
+    td.add_argument("--price-only", action="store_true",
+                    help="대출 규칙이 없을 때 매매가 기준으로 거른다")
+    td.add_argument("--weights", default="heuristic",
+                    choices=["heuristic", "backtested"])
+    td.add_argument("--verbose", action="store_true", help="1위 상세")
+    td.add_argument("--show-dropped", action="store_true", help="제외 사유")
+    td.add_argument("--frontier", action="store_true",
+                    help="§30 현금 버킷별 비교 (문턱이 어디인지)")
+    td.add_argument("--columns", action="store_true",
+                    help="§62 전체 컬럼 + 순위변화")
+    td.add_argument("--run-key", default="today",
+                    help="순위변화 비교에 쓸 실행 이름")
+
+    ld = sub.add_parser("leaders", help="Leader 망 생성·조회 (§11 Buyer Overlap 기준)")
+    ld.add_argument("action", help="build / status")
+    ld.add_argument("--as-of", help="기준일 YYYY-MM-DD")
+    ld.add_argument("--band", help="전용면적 밴드 (기본 84)")
+    ld.add_argument("--limit", type=int, help="단지 수 제한 (시험용)")
 
     sub.add_parser("validate", help="요구사항 26 검증 규칙 실행")
 
@@ -2320,7 +2565,7 @@ HANDLERS = {
     "ladder": cmd_ladder, "relative": cmd_relative,
     "transit": cmd_transit, "supply": cmd_supply, "geocode": cmd_geocode,
     "catalyst": cmd_catalyst, "redev": cmd_redev,
-    "backtest": cmd_backtest, "validate": cmd_validate, "report": cmd_report,
+    "today": cmd_today, "leaders": cmd_leaders, "backtest": cmd_backtest, "validate": cmd_validate, "report": cmd_report,
 }
 
 

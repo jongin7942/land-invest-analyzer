@@ -675,11 +675,43 @@ Feature 등록부 현황: 47개
    전세 승계와 주담대의 각각의 최대치를 더하고 있었다. 현실에 없는 조합이
    가장 매력적인 후보로 올라온다.
 
+### 2차 (같은 날 이어서) — §18~§21·§34·§35·§44 완료
+
+| § | 무엇 | 파일 |
+|---:|---|---|
+| 18 | Excess Reset Completion (7단계 순서) | `features/cycle.py` |
+| 19 | Path-Dependent Valuation | 〃 |
+| 20 | Proof–Price Tradeoff (RemainingAlpha) | `scoring/early_alpha.py` |
+| 21 | EarlyAlpha 핵심식 | 〃 |
+| 34 | NakedApartmentValue · 프리미엄 효율 · 전달경로 | `redev/naked.py` |
+| 35 | 30일 방향성 · Type 정규화 · 급매 흡수 | `price/normalize.py` |
+| 28·29·31 | 시점별 Sanity Test | `backtest/sanity.py` |
+| 37·46 | 파이프라인 조립 + `today` 명령 | `ranking/delta_pipeline.py` |
+| 44 | CORE 승격을 백테스트에 연결 | `backtest/usefulness.py` |
+
+**추가로 발견한 오류 3건**
+
+4. **`executable.split()` 이 기대수익 미상인 후보를 통과시켰다.**
+   `if better is None and returns:` 라 **아무 후보도 점수가 없으면 `returns` 가
+   비고, 그러면 검사 자체를 건너뛰어 전부 통과**했다. 합성 시장에서 Alpha 를
+   하나도 못 낸 채 5개가 EXECUTABLE 에 올라왔고 동시에 CASH 가 1위로 표시되는
+   모순이 났다. §46 은 "모르면 YES 가 아니다" 이므로 제외로 고쳤다.
+
+5. **Feature usefulness 의 IC 를 원시값으로 계산했다.**
+   `price_stretch` 처럼 낮을수록 좋은 Feature 는 원시 IC 가 음수여야 정상인데,
+   방향 보정 없이 판정해서 **낮을수록 좋은 Feature 12개가 통째로 HARMFUL** 로
+   나왔다. 그대로 두면 §44 CORE 승격이 정확히 반대로 돈다.
+   보정 후 가치 시장에서 cheapness 계열이 USEFUL, 모멘텀 계열이 HARMFUL 로
+   — 그 시장에서 나와야 할 정확히 그 결과가 나온다.
+
+6. **CORE 승격이 모델 이름을 보고 있었다.** 가중치는 모델(9종) 단위로 학습하고
+   CORE 티어는 Feature 단위인데, 등록부 키가 feature key 라 하나도 안 맞았다.
+   두 수준을 각각 재도록 분리했다.
+
 ### 다음 단계
 
-- §18 Excess Reset Completion · §19 Path-Dependent Valuation
-- §21 EarlyAlpha 식을 파이프라인에 연결 (가중치는 반드시 학습)
-- §34 NakedApartmentValue · ImpliedReconstructionPremium
-- §35 30일 방향성 · Type 정규화 · 급매 흡수
-- `rank` 를 새 층(Stage·CASH·Coverage)에 연결
-- 수집 완료 후: §28·§29·§31 회귀 테스트
+- §61 Rotation Engine · §62 TOP10 전체 컬럼 · §64 순위변경 설명
+- `buyer_pool` · `effective_supply_risk` · `replacement_availability` —
+  등록부에는 있는데 아직 생산되지 않는다 (EarlyAlpha 의 곱셈 항 하나가 빔)
+- Leader 망 자동 생성 (`leader_link` 를 채우는 수집·계산 경로)
+- 수집 완료 후: `backtest sanity` · `backtest run` · `today --weights backtested`

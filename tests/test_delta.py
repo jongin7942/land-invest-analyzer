@@ -1059,3 +1059,800 @@ class TestEarlyAlpha:
         early, _ = early_alpha.remaining_alpha(a, already_priced_in=0.1)
         late, _ = early_alpha.remaining_alpha(a, already_priced_in=0.8)
         assert late < early
+
+
+# ── §35 Normal Executable Price ──────────────────────────────────────
+
+class TestNormalExecutablePrice:
+    def test_보정할_수_없으면_보정했다고_하지_않는다(self):
+        from apt_engine.price import normalize as norm
+        r = norm.normal_executable_price(500_000_000)
+        assert r.price == 500_000_000
+        assert len(r.skipped) == 3
+        assert r.calc.grade == "ESTIMATED"
+
+    def test_한_달_표본으로_가격을_크게_흔들지_않는다(self):
+        """§35 — 3건짜리 최근 표본으로 10% 올리면 정규화가 아니라 노이즈다."""
+        from apt_engine.price import normalize as norm
+        a = norm.direction([200, 210, 205], [100, 100, 100, 100])
+        assert a.applied
+        assert a.factor <= 1 + norm.MAX_DIRECTION_ADJUST
+        assert "상한 적용" in a.why
+
+    def test_표본이_적으면_방향성을_안_본다(self):
+        from apt_engine.price import normalize as norm
+        a = norm.direction([200], [100, 100, 100])
+        assert not a.applied
+        assert "표본 부족" in a.why
+
+    def test_타입_격차를_모르면_0_으로_가정하지_않는다(self):
+        """0 으로 두면 A타입과 B타입이 한 가격으로 눌린다."""
+        from apt_engine.price import normalize as norm
+        assert not norm.type_normalize(None).applied
+
+    def test_급매가_많으면_그_가격에_살_수_있다고_본다(self):
+        """§35 urgent-sale absorption."""
+        from apt_engine.price import normalize as norm
+        absorbed = norm.urgent_absorption(4, 10)     # 40%
+        rare = norm.urgent_absorption(1, 100)        # 1%
+        assert absorbed.factor == 1.0
+        assert rare.factor > 1.0
+        assert "흡수하고 있어" in absorbed.why
+
+    def test_급매_건수를_모르면_보정하지_않는다(self):
+        from apt_engine.price import normalize as norm
+        assert not norm.urgent_absorption(None, 10).applied
+
+
+# ── §34 Naked Apartment Value ────────────────────────────────────────
+
+class TestNakedValue:
+    def _peers(self, n=4, redev=False):
+        from apt_engine.redev import naked
+        return [naked.Peer(i, 7_000_000, 1992, redev) for i in range(n)]
+
+    def test_비교단지가_모자라면_추정하지_않는다(self):
+        from apt_engine.redev import naked
+        v = naked.naked_value(area_m2=84, peers=self._peers(2), own_year=1990)
+        assert not v.known
+        assert "추정하지 않습니다" in v.reason
+
+    def test_재건축_기대가_있는_단지는_비교에_쓰지_않는다(self):
+        from apt_engine.redev import naked
+        v = naked.naked_value(area_m2=84, peers=self._peers(5, redev=True),
+                              own_year=1990)
+        assert not v.known
+
+    def test_연식이_너무_다르면_비교에서_뺀다(self):
+        from apt_engine.redev import naked
+        far = [naked.Peer(i, 7_000_000, 2020, False) for i in range(5)]
+        v = naked.naked_value(area_m2=84, peers=far, own_year=1985)
+        assert not v.known
+
+    def test_할인율을_모르면_현재가치로_환산하지_않는다(self):
+        """0% 로 두면 20년 뒤 5억이 지금 5억이 되어 모든 노후 단지가 좋아 보인다."""
+        from apt_engine.redev import naked
+        v = naked.naked_value(area_m2=84, peers=self._peers(), own_year=1990)
+        p = naked.premium_efficiency(
+            current_price=900_000_000, naked=v,
+            expected_gross_value=400_000_000, years_to_completion=15,
+            discount_rate=None)
+        assert not p.known
+        assert "모든 노후 단지가 좋아 보입니다" in p.reason
+
+    def test_프리미엄이_기대가치보다_크면_비싸다고_말한다(self):
+        from apt_engine.redev import naked
+        v = naked.naked_value(area_m2=84, peers=self._peers(), own_year=1990)
+        p = naked.premium_efficiency(
+            current_price=900_000_000, naked=v,
+            expected_gross_value=400_000_000, years_to_completion=15,
+            discount_rate=0.05)
+        assert p.efficiency < 1.0
+        assert "이미 비쌉니다" in p.verdict
+
+    def test_시간이_길수록_효율이_떨어진다(self):
+        from apt_engine.redev import naked
+        v = naked.naked_value(area_m2=84, peers=self._peers(), own_year=1990)
+        kw = dict(current_price=900_000_000, naked=v,
+                  expected_gross_value=600_000_000, discount_rate=0.05)
+        soon = naked.premium_efficiency(years_to_completion=5, **kw)
+        late = naked.premium_efficiency(years_to_completion=25, **kw)
+        assert soon.efficiency > late.efficiency
+
+    def test_서사에는_점수를_주지_않는다(self):
+        """§34·§49-9 — 재건축·GTX 이니까 좋다는 없다."""
+        from apt_engine.redev import naked
+        value, detail = naked.catalyst_paths({"BuyerPool": None,
+                                              "Accessibility": None})
+        assert value is None
+        assert "서사에는 점수를 주지 않습니다" in detail["사유"]
+
+    def test_경로가_설명되면_점수가_난다(self):
+        from apt_engine.redev import naked
+        value, detail = naked.catalyst_paths({"Accessibility": 0.8,
+                                              "BuyerPool": 0.6})
+        assert value is not None
+        assert len(detail["설명 안 된 경로"]) == 2
+
+    def test_경로가_적게_설명될수록_점수가_낮다(self):
+        from apt_engine.redev import naked
+        few, _ = naked.catalyst_paths({"Accessibility": 0.8})
+        many, _ = naked.catalyst_paths({k: 0.8
+                                        for k in naked.TRANSMISSION_PATHS})
+        assert few < many
+
+
+# ── §37·§46 DELTA 파이프라인 조립 ────────────────────────────────────
+
+class TestDeltaPipeline:
+    def _run(self, conn, **kw):
+        from apt_engine.blind import cutoff as cutoff_mod
+        from apt_engine.invest.budget import Profile
+        from apt_engine.ranking import delta_pipeline as delta
+        from apt_engine.ranking import pipeline as bp
+        profile = Profile(name="t", available_cash=900_000_000,
+                          cash_hurdle_rate=kw.pop("hurdle", 0.03))
+        profile.save(conn)
+        return delta.run(conn, as_of=cutoff_mod.AsOf("2024-06-01"),
+                         profile=profile, gate=bp.GATE_PRICE_ONLY, **kw)
+
+    def test_기대수익을_못_내면_EXECUTABLE_에_안_들어간다(self, db):
+        """§46 — 모르면 YES 가 아니다.
+
+        전에는 `returns` 가 비었을 때 검사를 건너뛰어서, 아무 후보도 점수가
+        없을 때 **전부 통과**했다. 동시에 CASH 가 1위로 표시되는 모순이 났다.
+        """
+        with get_conn(db) as conn:
+            synth_mod.build(conn, n_complexes=12, start_ym="201501",
+                            end_ym="202412", rule=synth_mod.MEAN_REVERT)
+            r = self._run(conn, limit=5)
+        scored = [c for c in r.candidates if c.alpha.known]
+        if not scored:
+            assert r.split.executable == [], (
+                "Alpha 를 하나도 못 냈는데 EXECUTABLE 에 후보가 있습니다")
+
+    def test_CASH_순위와_EXECUTABLE_이_모순되지_않는다(self, db):
+        with get_conn(db) as conn:
+            synth_mod.build(conn, n_complexes=12, start_ym="201501",
+                            end_ym="202412", rule=synth_mod.MEAN_REVERT)
+            r = self._run(conn, limit=5)
+        if r.split.cash_rank == 1:
+            assert r.split.executable == [], (
+                "CASH 가 1위인데 그 위에 후보가 있습니다")
+
+    def test_다_못_봤으면_제목이_PARTIAL_이다(self, db):
+        """§43·§49-13."""
+        with get_conn(db) as conn:
+            synth_mod.build(conn, n_complexes=30, start_ym="201501",
+                            end_ym="202412")
+            r = self._run(conn, scan_limit=5, limit=5)
+        assert "PARTIAL" in r.title
+
+    def test_가중치가_임시면_그_사실이_표시된다(self, db):
+        with get_conn(db) as conn:
+            synth_mod.build(conn, n_complexes=8, start_ym="201501",
+                            end_ym="202412")
+            r = self._run(conn, limit=5)
+        assert "가중치 임시" in r.summary
+
+    def test_CASH_기준선이_없으면_경고한다(self, db):
+        with get_conn(db) as conn:
+            synth_mod.build(conn, n_complexes=8, start_ym="201501",
+                            end_ym="202412")
+            r = self._run(conn, hurdle=None, limit=5)
+        assert any("CASH 기준선이 없어" in n for n in r.notes)
+
+    def test_정렬에_이름이_들어가지_않는다(self, db):
+        """§1·§33 — 동점도 id 로 깬다."""
+        import pathlib
+        from apt_engine.ranking import delta_pipeline as delta
+        src = pathlib.Path(delta.__file__).read_text(encoding="utf-8")
+        assert "c.name" not in src and '"name"' not in src
+
+    def test_상세에_핵심_지표가_전부_나온다(self, db):
+        """§48-J."""
+        from apt_engine.ranking import delta_pipeline as delta
+        with get_conn(db) as conn:
+            synth_mod.build(conn, n_complexes=8, start_ym="201501",
+                            end_ym="202412")
+            r = self._run(conn, limit=5)
+        assert r.candidates
+        text = delta.detail(r.candidates[0])
+        for label in ("Normal Executable Price", "매수가 구간", "Stage",
+                      "실투자금", "Price Stretch", "Money Arrival Depth",
+                      "Latent / Visible"):
+            assert label in text, f"상세에 '{label}' 이 없습니다"
+
+
+# ── §28·§29·§31 시점별 Sanity Test ───────────────────────────────────
+
+class TestSanity:
+    def test_실거래가_없으면_통과로_치지_않는다(self, db):
+        """후보 0개가 나오면 '보수적이라 통과' 로 읽힐 수 있다."""
+        from apt_engine.backtest import sanity
+        with get_conn(db) as conn:
+            ok, why = sanity.data_available(conn, "2021-01-01")
+        assert not ok
+        assert "실거래가 없습니다" in why
+
+    def test_그_시점_정책이_없으면_검사하지_않는다(self, db):
+        """정책이 없으면 실투자금이 확인 불가라 아무도 게이트를 못 통과한다."""
+        from apt_engine.backtest import sanity
+        with get_conn(db) as conn:
+            conn.execute(
+                "INSERT INTO trade (lawd_cd, apt_name, exclusive_area_m2, "
+                " area_band, deal_amount, deal_ymd) "
+                "VALUES ('11110','합성',84.0,'84',500000000,'20201201')")
+            ok, why = sanity.data_available(conn, "2021-01-01")
+        assert not ok
+        assert "대출 규칙이 없습니다" in why
+        assert "보수적이라 통과" in why
+
+    def test_후보가_0개면_판정_불가다(self, db):
+        from apt_engine.backtest import sanity
+        with get_conn(db) as conn:
+            c = sanity.check(conn, "2021-01-01", sanity.REVERSE,
+                             run_fn=lambda *_: (0, 0))
+        assert c.passed is None
+
+    def test_과열기에_BUY_가_많으면_실패다(self, db):
+        """§28 — MoneyArrival = BUY 로 단순 판단하지 않는지."""
+        from apt_engine.backtest import sanity
+        with get_conn(db) as conn:
+            conn.execute(
+                "INSERT INTO trade (lawd_cd, apt_name, exclusive_area_m2, "
+                " area_band, deal_amount, deal_ymd) "
+                "VALUES ('11110','합성',84.0,'84',500000000,'20201201')")
+            conn.execute(
+                "INSERT INTO loan_rule (rule_key, effective_from, "
+                " source_name, verification, rule_type, value) "
+                "VALUES ('t','2015-01-01','테스트','VERIFIED','LTV',0.4)")
+            greedy = sanity.check(conn, "2021-01-01", sanity.REVERSE,
+                                  run_fn=lambda *_: (8, 10))
+            careful = sanity.check(conn, "2021-01-01", sanity.REVERSE,
+                                   run_fn=lambda *_: (1, 10))
+        assert greedy.passed is False
+        assert "MoneyArrival 만 보고" in greedy.detail
+        assert careful.passed is True
+
+    def test_2021_만_통과하는_모델은_2019_에서_걸린다(self, db):
+        """§29 — 전부 CASH 라고 하면 2021 은 통과하지만 2019 에서 실패한다."""
+        from apt_engine.backtest import sanity
+        with get_conn(db) as conn:
+            conn.execute(
+                "INSERT INTO trade (lawd_cd, apt_name, exclusive_area_m2, "
+                " area_band, deal_amount, deal_ymd) "
+                "VALUES ('11110','합성',84.0,'84',500000000,'20161201')")
+            conn.execute(
+                "INSERT INTO loan_rule (rule_key, effective_from, "
+                " source_name, verification, rule_type, value) "
+                "VALUES ('t','2015-01-01','테스트','VERIFIED','LTV',0.4)")
+            never_buy = sanity.check(conn, "2017-01-01", sanity.OPPORTUNITY,
+                                     run_fn=lambda *_: (0, 10))
+        assert never_buy.passed is False
+        assert "좋은 기회까지 CASH 로 흘렸습니다" in never_buy.detail
+
+    def test_하나라도_판정불가면_전체가_판정불가다(self):
+        """통과한 것만 세면 '2021 은 통과했다' 로 읽히고 그건 반쪽이다."""
+        from apt_engine.backtest import sanity
+        r = sanity.SanityReport([
+            sanity.Check("2021-01-01", sanity.REVERSE, True, 0.1, 10, ""),
+            sanity.Check("2019-01-01", sanity.OPPORTUNITY, None, None, 0, "",
+                         "데이터 없음"),
+        ])
+        assert r.all_passed is None
+        assert "판정 불가" in r.summary
+
+    def test_시점별_가중치를_따로_만들지_않는다고_말한다(self):
+        """§29·§49-14."""
+        from apt_engine.backtest import sanity
+        r = sanity.SanityReport([
+            sanity.Check("2021-01-01", sanity.REVERSE, True, 0.1, 10, ""),
+            sanity.Check("2019-01-01", sanity.OPPORTUNITY, False, 0.02, 10, ""),
+        ])
+        assert r.all_passed is False
+        assert "시점별로 가중치를 따로 만들지 않습니다" in r.summary
+
+    def test_True_Blind_가_아니라고_항상_표시한다(self):
+        """§28."""
+        from apt_engine.backtest import sanity
+        r = sanity.SanityReport([])
+        assert "True Blind Test 가 아닙니다" in r.summary
+
+
+# ── §44 CORE 승격 ────────────────────────────────────────────────────
+
+class TestCorePromotion:
+    def test_낮을수록_좋은_Feature_의_IC_를_뒤집어_본다(self):
+        """§44 — 방향을 안 맞추면 CORE 승격이 정확히 반대로 돈다.
+
+        `price_stretch` 는 낮을수록 좋으므로 원시 IC 가 음수여야 정상이다.
+        보정 없이 보면 '낮을수록 좋은' Feature 12개가 통째로 HARMFUL 로 나온다.
+        """
+        from apt_engine.backtest import usefulness as u
+        assert u._orientation("price_stretch") == -1.0
+        assert u._orientation("band_shift_strength") == 1.0
+        assert u._orientation("모르는_피처") == 1.0
+
+    def test_한_분할에서만_좋으면_CORE_가_아니다(self, db):
+        """§44 — 한 시기에서만 잘 맞는 Feature 는 Diagnostic 에 둔다."""
+        from apt_engine.backtest import usefulness as u
+        from apt_engine.features import registry as reg
+        with get_conn(db) as conn:
+            reg.sync(conn)
+            promoted, _ = u.promote_core(
+                conn, run_key="t",
+                per_split={"TRAIN": [u.Usefulness("price_stretch", "TRAIN",
+                                                  0.3, 0.6, 10, u.USEFUL,
+                                                  effective_n=5)],
+                           "VALIDATION": []})
+        assert promoted == []
+
+    def test_두_분할을_살아남으면_CORE_로_올라간다(self, db):
+        from apt_engine.backtest import usefulness as u
+        from apt_engine.features import registry as reg
+        with get_conn(db) as conn:
+            reg.sync(conn)
+            promoted, _ = u.promote_core(
+                conn, run_key="t",
+                per_split={
+                    "TRAIN": [u.Usefulness("price_stretch", "TRAIN", 0.3, 0.6,
+                                           10, u.USEFUL, effective_n=5)],
+                    "VALIDATION": [u.Usefulness("price_stretch", "VALIDATION",
+                                                0.3, 0.6, 8, u.USEFUL,
+                                                effective_n=4)]})
+            assert promoted == ["price_stretch"]
+            assert reg.core_keys(conn) == ["price_stretch"]
+
+    def test_다음_실행에서_못_살아남으면_강등된다(self, db):
+        from apt_engine.backtest import usefulness as u
+        from apt_engine.features import registry as reg
+        good = {"TRAIN": [u.Usefulness("price_stretch", "TRAIN", 0.3, 0.6, 10,
+                                       u.USEFUL, effective_n=5)],
+                "VALIDATION": [u.Usefulness("price_stretch", "VALIDATION", 0.3,
+                                            0.6, 8, u.USEFUL, effective_n=4)]}
+        with get_conn(db) as conn:
+            reg.sync(conn)
+            u.promote_core(conn, run_key="t1", per_split=good)
+            _, demoted = u.promote_core(conn, run_key="t2",
+                                        per_split={"TRAIN": [], "VALIDATION": []})
+            assert demoted == ["price_stretch"]
+            assert reg.core_keys(conn) == []
+
+    def test_등록부에_없는_키는_승격_대상이_아니다(self, db):
+        from apt_engine.backtest import usefulness as u
+        from apt_engine.features import registry as reg
+        entry = u.Usefulness("모르는_피처", "TRAIN", 0.3, 0.6, 10, u.USEFUL,
+                             effective_n=5)
+        with get_conn(db) as conn:
+            reg.sync(conn)
+            promoted, _ = u.promote_core(
+                conn, run_key="t",
+                per_split={"TRAIN": [entry], "VALIDATION": [entry]})
+        assert promoted == []
+
+
+# ── §4-C·§33 수요 쪽 Feature ─────────────────────────────────────────
+
+class TestDemandFeatures:
+    def _market(self, n=10, price=500_000_000, households=500, sample=8):
+        from apt_engine.features import demand
+        return demand.Market([
+            demand.Cohort(i, int(price * (1 + (i - n / 2) * 0.02)),
+                          households, sample, "11110")
+            for i in range(1, n + 1)])
+
+    def test_동급이_모자라면_BuyerPool_을_만들지_않는다(self):
+        from apt_engine.features import demand
+        f = demand.buyer_pool(self._market(2), price=500_000_000,
+                              lawd_cd="11110", households=500, sample_n=8)
+        assert f.value is None
+        assert "표본이 없습니다" in f.detail["사유"]
+
+    def test_대리지표라고_말하고_신뢰도에_상한을_둔다(self):
+        from apt_engine.features import demand
+        f = demand.buyer_pool(self._market(), price=500_000_000,
+                              lawd_cd="11110", households=500, sample_n=8)
+        assert f.usable
+        assert f.confidence <= demand.PROXY_CONFIDENCE_CAP
+        assert "근사한 값" in f.detail["주의"]
+
+    def test_세대수를_모르면_거래건수만으로_안_센다(self):
+        """거래건수만 보면 큰 단지가 무조건 유리해진다."""
+        from apt_engine.features import demand
+        market = demand.Market([demand.Cohort(i, 500_000_000, None, 8, "11110")
+                                for i in range(1, 8)])
+        f = demand.buyer_pool(market, price=500_000_000, lawd_cd="11110",
+                              households=None, sample_n=8)
+        # 시장 형성 정도만으로는 계산되지만 활성도는 빠진다
+        assert "거래 활성도" not in f.detail.get("구성", {})
+
+    def test_공급을_하나도_모르면_0_으로_두지_않는다(self):
+        from apt_engine.features import demand
+        f = demand.effective_supply_risk({})
+        assert f.value is None
+        assert "0 으로 두지 않습니다" in f.detail["사유"]
+
+    def test_가까운_공급에_더_큰_무게를_준다(self):
+        from apt_engine.features import demand
+        near = demand.effective_supply_risk({"supply_ratio_1y": 0.08})
+        far = demand.effective_supply_risk({"supply_ratio_5y": 0.08})
+        assert near.value > far.value
+
+    def test_공급_절벽이면_위험을_낮춘다(self):
+        from apt_engine.features import demand
+        plain = demand.effective_supply_risk({"supply_ratio_2y": 0.08})
+        cliff = demand.effective_supply_risk({"supply_ratio_2y": 0.08},
+                                             cliff=0.8)
+        assert cliff.value < plain.value
+        assert "공급 절벽" in cliff.detail
+
+    def test_공급_감점이_한_곳으로만_나간다(self):
+        """§45 — 전에는 supply_ratio 가 ALPHA 모델과 Kill 양쪽에 있었다."""
+        from apt_engine.features import demand, registry as reg
+        f = demand.effective_supply_risk({"supply_ratio_1y": 0.05})
+        assert "§45 중복 금지" in f.detail["주의"]
+        for key in ("supply_ratio_1y", "supply_ratio_2y", "supply_ratio_3y",
+                    "supply_ratio_5y"):
+            assert reg.get(key).role == reg.ROLE_CONTEXT
+
+    def test_대체재가_많으면_감점이다(self):
+        from apt_engine.features import demand
+        many = demand.replacement_availability(
+            self._market(20), price=500_000_000, required_equity=None,
+            lawd_cd="11110")
+        few = demand.replacement_availability(
+            self._market(3), price=500_000_000, required_equity=None,
+            lawd_cd="11110")
+        assert many.value > few.value
+        assert "많을수록 감점" in many.detail["주의"]
+        assert registry.get("replacement_availability").higher_is_better is False
+
+
+# ── §11·§12 Leader 망 자동 생성 ──────────────────────────────────────
+
+class TestLeaderBuilder:
+    def _nodes(self):
+        from apt_engine.relative import leaders
+        return [
+            leaders.Node(1, 500_000_000, "11110", "강남권", "84", 10),
+            leaders.Node(2, 600_000_000, "11110", "강남권", "84", 20),
+            leaders.Node(3, 700_000_000, "11110", "강남권", "84", 5),
+            leaders.Node(4, 650_000_000, "41110", "경기권", "84", 30),
+            leaders.Node(5, 480_000_000, "11110", "강남권", "84", 8),
+        ]
+
+    def test_더_싼_단지는_Leader_가_아니다(self):
+        from apt_engine.relative import leaders
+        nodes = self._nodes()
+        links = leaders.pick_leaders(nodes[0], nodes)
+        assert all(l.leader_id != 5 for l in links)
+
+    def test_너무_비싸면_다른_시장이라_제외한다(self):
+        from apt_engine.relative import leaders
+        follower = leaders.Node(1, 100_000_000, "11110", "강남권", "84", 10)
+        huge = leaders.Node(9, 2_000_000_000, "11110", "강남권", "84", 10)
+        assert not leaders._in_lead_range(follower, huge)
+
+    def test_다섯_종류가_서로_다른_규칙이다(self):
+        """한 규칙으로 다섯 개를 만들면 이름만 다섯 개다."""
+        from apt_engine.relative import leaders
+        nodes = self._nodes()
+        links = leaders.pick_leaders(nodes[0], nodes)
+        kinds = {l.kind for l in links}
+        assert len(kinds) >= 3
+        by_kind = {l.kind: l.leader_id for l in links}
+        # 가장 가까이 위(PRICE)와 가장 비싼 곳(METRO)이 달라야 한다
+        if leaders.PRICE in by_kind and leaders.METRO in by_kind:
+            assert by_kind[leaders.PRICE] != by_kind[leaders.METRO]
+
+    def test_다른_생활권이면_겹침이_낮다(self):
+        from apt_engine.relative import leaders
+        nodes = self._nodes()
+        same, _ = leaders.buyer_overlap(nodes[0], nodes[1])
+        other, _ = leaders.buyer_overlap(nodes[0], nodes[3])
+        assert same > other
+
+    def test_면적이_다르면_겹치지_않는다(self):
+        from apt_engine.relative import leaders
+        a = leaders.Node(1, 500_000_000, "11110", "강남권", "84", 10)
+        b = leaders.Node(2, 600_000_000, "11110", "강남권", "59", 10)
+        overlap, _ = leaders.buyer_overlap(a, b)
+        same, _ = leaders.buyer_overlap(
+            a, leaders.Node(3, 600_000_000, "11110", "강남권", "84", 10))
+        assert overlap < same
+
+    def test_겹침은_대리지표라_상한이_있다(self):
+        from apt_engine.relative import leaders
+        a = leaders.Node(1, 500_000_000, "11110", "강남권", "84", 10)
+        b = leaders.Node(2, 550_000_000, "11110", "강남권", "84", 10)
+        overlap, _ = leaders.buyer_overlap(a, b)
+        assert overlap <= leaders.MAX_PROXY_OVERLAP
+
+    def test_저장한_링크를_같은_시점에_읽을_수_있다(self, db):
+        """as_of 를 요청일로 저장하면 컷오프 때문에 자기가 쓴 걸 못 읽는다.
+
+        실제로 링크 109개를 쓰고 하나도 못 읽었다.
+        """
+        from apt_engine.features import leader as leader_mod
+        from apt_engine.relative import leaders
+        with get_conn(db) as conn:
+            synth_mod.build(conn, n_complexes=12, start_ym="202001",
+                            end_ym="202412")
+            as_of = cutoff_mod.AsOf("2024-06-01")
+            result = leaders.build(conn, as_of=as_of, area_band="84")
+            assert result["링크"] > 0
+            # 링크가 붙은 팔로워를 골라 읽는다. 최상위 단지는 Leader 가
+            # 없는 것이 정상이라 그걸로 검사하면 의미가 없다.
+            follower = conn.execute(
+                "SELECT follower_id FROM leader_link LIMIT 1").fetchone()[0]
+            got = leader_mod.load_leaders(conn, follower, "84", as_of=as_of)
+        assert got, "방금 쓴 Leader 링크를 같은 시점에 못 읽습니다"
+
+    def test_Leader_가_없으면_세_Feature_가_확인_불가다(self, db):
+        """Leader 를 못 찾은 것과 안 따라온 것은 다른 상태다."""
+        from apt_engine.ranking import delta_pipeline as delta
+        with get_conn(db) as conn:
+            synth_mod.build(conn, n_complexes=3, start_ym="202001",
+                            end_ym="202412")
+            feats, leader_label = delta._leader_features(
+                conn, 1, "84", as_of=cutoff_mod.AsOf("2024-06-01"))
+        assert leader_label is None, "Leader 가 없는데 라벨이 붙었습니다"
+        keys = {f.key for f in feats}
+        assert keys == {"transmission_failure", "recoverable_discount_ratio",
+                        "next_node_score"}
+        for f in feats:
+            assert f.value is None
+            assert "다릅니다" in f.detail["사유"] or "사다리" in f.detail["사유"]
+
+
+# ── §61·§62·§64 회전 · 순위변경 설명 · 전체 컬럼 ─────────────────────
+
+class TestRankChange:
+    def test_점수는_그대로인데_밀렸으면_남이_움직인_것이다(self):
+        """§64 — 이 후보가 나빠진 것과 다른 후보가 좋아진 것은 다른 사건이다."""
+        from apt_engine.ranking import rotation
+        changes = rotation.explain(
+            previous={1: (3, 70.0, 60.0)},
+            current={1: (11, 69.5, 60.0)})
+        assert changes[0].cause == rotation.OTHERS_MOVED
+        assert "다른 후보들이 변한 것입니다" in changes[0].detail
+
+    def test_점수가_떨어졌으면_이_후보가_나빠진_것이다(self):
+        from apt_engine.ranking import rotation
+        changes = rotation.explain(
+            previous={1: (3, 70.0, 60.0)},
+            current={1: (11, 55.0, 60.0)})
+        assert changes[0].cause == rotation.SELF_WORSE
+
+    def test_신뢰도만_크게_바뀌었으면_우리가_더_알게_된_것이다(self):
+        """후보가 변한 게 아니라 우리가 변한 것이다."""
+        from apt_engine.ranking import rotation
+        changes = rotation.explain(
+            previous={1: (3, 70.0, 30.0)},
+            current={1: (12, 71.0, 75.0)})
+        assert changes[0].cause == rotation.MORE_KNOWN
+        assert "후보가 변한 게 아닙니다" in rotation.CAUSE_LABEL[changes[0].cause]
+
+    def test_한두_칸_흔들림은_변화로_보지_않는다(self):
+        from apt_engine.ranking import rotation
+        changes = rotation.explain(previous={1: (3, 70.0, 60.0)},
+                                   current={1: (4, 70.0, 60.0)})
+        assert changes[0].cause == rotation.UNCHANGED
+
+    def test_탈락한_후보의_사유가_남는다(self):
+        """§65."""
+        from apt_engine.ranking import rotation
+        changes = rotation.explain(
+            previous={1: (3, 70.0, 60.0)}, current={},
+            dropped_reasons={1: "공급충격 — 2년 입주물량 12%"})
+        assert changes[0].cause == rotation.DROPPED
+        assert "공급충격" in changes[0].label
+
+    def test_사유가_없으면_없다고_말한다(self):
+        from apt_engine.ranking import rotation
+        changes = rotation.explain(previous={1: (3, 70.0, None)}, current={})
+        assert "기록되지 않았습니다" in changes[0].detail
+
+
+class TestRotation:
+    def test_거래비용을_모르면_회전을_판정하지_않는다(self):
+        """§61 — 0 으로 두면 순위가 한 칸만 높아도 회전하라는 답이 나온다."""
+        from apt_engine.ranking import rotation
+        r = rotation.rotation(holding_id=1, holding_return=0.10,
+                              candidate_id=2, candidate_return=0.15,
+                              sell_cost_ratio=None, buy_cost_ratio=0.05)
+        assert r.worth_it is None
+        assert "매도비용" in r.reason
+        assert "한 칸만 높아도" in r.reason
+
+    def test_비용을_넘지_못하면_회전이_아니다(self):
+        from apt_engine.ranking import rotation
+        r = rotation.rotation(holding_id=1, holding_return=0.10,
+                              candidate_id=2, candidate_return=0.15,
+                              sell_cost_ratio=0.06, buy_cost_ratio=0.05)
+        assert r.worth_it is False
+        assert "그냥 순위 차이입니다" in r.label
+
+    def test_비용을_넘으면_회전할_만하다(self):
+        from apt_engine.ranking import rotation
+        r = rotation.rotation(holding_id=1, holding_return=0.10,
+                              candidate_id=2, candidate_return=0.40,
+                              sell_cost_ratio=0.06, buy_cost_ratio=0.05)
+        assert r.worth_it is True
+
+
+class TestTopColumns:
+    def test_지시서가_요구한_컬럼이_있다(self):
+        """§62 — TOP10 화면에 무엇이 나와야 하는가."""
+        from apt_engine.ranking import rotation
+        keys = {k for k, _ in rotation.COLUMNS}
+        for need in ("stage", "price", "strong_buy", "do_not_buy", "alpha",
+                     "risk", "confidence", "required_equity",
+                     "recoverable_gap", "price_stretch", "money_depth",
+                     "rank_change", "coverage"):
+            assert need in keys, f"§62 컬럼 '{need}' 이 없습니다"
+
+    def test_없는_값은_확인_불가로_나온다(self, db):
+        from apt_engine.ranking import delta_pipeline as delta
+        from apt_engine.ranking import rotation
+        from apt_engine.invest.budget import Profile
+        from apt_engine.ranking import pipeline as bp
+        with get_conn(db) as conn:
+            synth_mod.build(conn, n_complexes=8, start_ym="202001",
+                            end_ym="202412")
+            profile = Profile(name="t", available_cash=900_000_000)
+            profile.save(conn)
+            r = delta.run(conn, as_of=cutoff_mod.AsOf("2024-06-01"),
+                          profile=profile, gate=bp.GATE_PRICE_ONLY, limit=3)
+        assert r.candidates
+        row = rotation.row_of(r.candidates[0], rank=1)
+        assert row["rank"] == 1
+        # 데이터가 없는 항목은 반드시 '확인 불가' 이지 0 이 아니다
+        assert all(v != 0 for v in row.values())
+        assert "확인 불가" in row.values()
+
+
+# ── §51·§52·§53 순위 불확실성 ────────────────────────────────────────
+
+class TestUncertainty:
+    def test_신뢰도가_낮으면_구간이_넓다(self):
+        """§36·§52 — '점수는 높은데 근거가 약한' 후보의 구간이 넓어야 한다."""
+        from apt_engine.ranking import uncertainty as u
+        sim = u.rank_ranges({1: 80.0, 2: 80.0, 3: 50.0, 4: 20.0},
+                            {1: 95.0, 2: 20.0, 3: 95.0, 4: 95.0})
+        assert sim.ranges[2].spread > sim.ranges[1].spread
+
+    def test_구간이_넓으면_불안정하다고_말한다(self):
+        from apt_engine.ranking import uncertainty as u
+        sim = u.rank_ranges({i: 50.0 for i in range(1, 11)},
+                            {i: 5.0 for i in range(1, 11)})
+        assert sim.unstable
+        assert "우연에 가깝습니다" in sim.summary
+
+    def test_불확실성을_줄이는_게_아니라_드러낸다고_말한다(self):
+        from apt_engine.ranking import uncertainty as u
+        assert "드러내는" in u.NOTE
+
+    def test_후보가_하나면_구간을_만들지_않는다(self):
+        from apt_engine.ranking import uncertainty as u
+        assert u.rank_ranges({1: 50.0}, {1: 90.0}).ranges == {}
+
+    def test_직전_실행이_없으면_지속성을_내지_않는다(self):
+        """§51."""
+        from apt_engine.ranking import uncertainty as u
+        p = u.persistence([], [1, 2, 3])
+        assert not p.known
+        assert "직전 실행이 없습니다" in p.reason
+
+    def test_매번_크게_바뀌면_모델이_흔들리는_것이다(self):
+        from apt_engine.ranking import uncertainty as u
+        p = u.persistence([1, 2, 3, 4, 5], [6, 7, 8, 9, 10], k=5)
+        assert p.stable is False
+        assert "모델이 흔들리는" in p.label
+
+    def test_변동성을_모르면_시뮬레이션하지_않는다(self):
+        """§53 — 임의의 변동성을 넣으면 그 숫자가 결과를 지배한다."""
+        from apt_engine.ranking import uncertainty as u
+        assert u.monte_carlo(expected_return=0.3, volatility=None) is None
+        assert u.monte_carlo(expected_return=None, volatility=0.2) is None
+
+    def test_전세_방어력이_있으면_하방이_얕다(self):
+        from apt_engine.ranking import uncertainty as u
+        weak = u.monte_carlo(expected_return=0.0, volatility=0.3,
+                             downside_defense=0.0)
+        strong = u.monte_carlo(expected_return=0.0, volatility=0.3,
+                               downside_defense=0.9)
+        assert strong.p10 > weak.p10
+        assert strong.p90 == pytest.approx(weak.p90, rel=0.01), (
+            "전세는 하방만 받쳐야 합니다 — 상방을 올리면 §14 위반입니다")
+
+
+# ── §30·§31 Capital Frontier · 대안매수 ──────────────────────────────
+
+class _FakeAlpha:
+    def __init__(self, value):
+        self.alpha = value
+        self.known = value is not None
+
+
+class _FakeCand:
+    def __init__(self, cid, alpha, required):
+        self.complex_id = cid
+        self.alpha = _FakeAlpha(alpha)
+        self.required_equity = required
+
+
+class _FakeSplit:
+    def __init__(self, cands):
+        self.executable = cands
+
+
+class _FakeResult:
+    def __init__(self, cands):
+        self.split = _FakeSplit(cands)
+
+
+class TestFrontier:
+    def test_문턱을_찾아낸다(self):
+        """§30 — '얼마를 더 모아야 하는가' 에 답할 수 있어야 한다."""
+        from apt_engine.ranking import frontier as fr
+        results = {
+            200_000_000: _FakeResult([_FakeCand(1, 40.0, 200_000_000)]),
+            250_000_000: _FakeResult([_FakeCand(1, 40.5, 200_000_000)]),
+            300_000_000: _FakeResult([_FakeCand(9, 65.0, 300_000_000)]),
+        }
+        f = fr.build(results)
+        assert len(f.thresholds) == 1
+        assert f.thresholds[0].to.cash == 300_000_000
+        assert "문턱" in f.summary
+
+    def test_문턱이_없으면_없다고_말한다(self):
+        from apt_engine.ranking import frontier as fr
+        results = {c: _FakeResult([_FakeCand(1, 40.0, c)])
+                   for c in (200_000_000, 250_000_000, 300_000_000)}
+        assert fr.build(results).thresholds == []
+        assert "뚜렷한 문턱이 없습니다" in fr.build(results).summary
+
+    def test_후보가_없는_버킷을_0점으로_세지_않는다(self):
+        from apt_engine.ranking import frontier as fr
+        f = fr.build({200_000_000: _FakeResult([]),
+                      300_000_000: _FakeResult([_FakeCand(1, 60.0,
+                                                          300_000_000)])})
+        assert f.rungs[0].best_score is None
+        assert "확인 불가" in f.rungs[0].label
+
+    def test_금액이_아니라_자기자본_대비로_비교한다(self):
+        """§31 — 금액으로 비교하면 비싼 것이 항상 이긴다."""
+        from apt_engine.ranking import frontier as fr
+        cheap = _FakeCand(1, 60.0, 200_000_000)
+        pricey = _FakeCand(2, 62.0, 400_000_000)
+        better, why = fr.alternative_purchase(cheap, pricey,
+                                              cash=400_000_000)
+        # 자기자본 4억 기준: 싼 쪽 0.60×2/4=30%, 비싼 쪽 0.62×4/4=62%
+        assert better is True
+        # 자기자본이 2억이면 비싼 쪽은 애초에 못 산다 → 배치가 달라진다
+        assert "자기자본 대비" in why
+
+    def test_더_비싼_걸_사는_것과_더_나은_투자를_구분한다(self):
+        from apt_engine.ranking import frontier as fr
+        cheap = _FakeCand(1, 60.0, 300_000_000)
+        pricey = _FakeCand(2, 60.5, 300_000_000)
+        better, why = fr.alternative_purchase(cheap, pricey,
+                                              cash=300_000_000)
+        assert better is False
+        assert "더 나은 투자가 아닙니다" in why
+
+    def test_실투자금을_모르면_비교하지_않는다(self):
+        from apt_engine.ranking import frontier as fr
+        better, why = fr.alternative_purchase(
+            _FakeCand(1, 60.0, None), _FakeCand(2, 70.0, 300_000_000),
+            cash=300_000_000)
+        assert better is None
+        assert "비싼 것이 항상 이깁니다" in why
+
+    def test_현금_주변_버킷만_돌린다(self):
+        from apt_engine.ranking import frontier as fr
+        near = fr.default_buckets(300_000_000)
+        assert 1_000_000_000 not in near
+        assert 300_000_000 in near
