@@ -128,26 +128,50 @@ def collect_complexes(sido: str | None = None, *, with_basis: bool = True,
     return stats
 
 
+# 최근 이 개월수는 재실행 때 항상 다시 받는다(신고 지연 반영).
+REFETCH_MONTHS = 3
+
+
+def _completed_pairs(conn, source_key: str) -> set[tuple[str, str]]:
+    """이미 끝난 (시군구, 거래월). EMPTY 도 '받아봤더니 없었다' 라 끝난 것이다."""
+    return {(r["target"], r["period"]) for r in conn.execute(
+        "SELECT target, period FROM collection_log "
+        "WHERE source_key = ? AND status IN ('OK','EMPTY') "
+        "AND target IS NOT NULL AND period IS NOT NULL", (source_key,))}
+
+
 def _collect_deals(kind: str, months: int, sido: str | None,
-                   db_path: str | None, progress) -> dict:
-    """매매/전월세 공통. kind ∈ {'trade', 'rent'}"""
+                   db_path: str | None, progress, full: bool = False) -> dict:
+    """매매/전월세 공통. kind ∈ {'trade', 'rent'}
+
+    full=True 면 이미 받은 달도 전부 다시 받는다.
+    """
     if kind == "trade":
         mod, source_key, insert = apt_trade, apt_trade.SOURCE_KEY, repo.insert_trades
     else:
         mod, source_key, insert = apt_rent, apt_rent.SOURCE_KEY, repo.insert_jeonse
 
     yms = recent_yms(months)
-    stats = {"months": len(yms), "fetched": 0, "inserted": 0, "empty": 0, "failed": 0}
+    stats = {"months": len(yms), "fetched": 0, "inserted": 0, "empty": 0,
+             "failed": 0, "skipped": 0}
 
     with get_conn(db_path) as conn:
         repo.sync_regions(conn)
         src = repo.source_id(conn, source_key)
+        done = set() if full else _completed_pairs(conn, source_key)
+
+    # 최근 REFETCH_MONTHS 개월은 이미 받았어도 다시 받는다 — 실거래는 계약 후
+    # 30일 내 신고라, 한 번 OK 로 찍힌 달에도 나중에 신고분이 더 들어온다.
+    always = set(yms[-REFETCH_MONTHS:]) if yms else set()
 
     for ym in yms:
         # 그 달에 유효했던 코드로 요청한다. 구 개편 이전 거래는 옛 코드로만 나온다.
         codes = regions.codes_for_ym(ym, sido)
         month_rows = 0
         for code in codes:
+            if ym not in always and (code, ym) in done:
+                stats["skipped"] += 1
+                continue
             try:
                 rows = mod.fetch_month(code, ym)
             except molit.MolitAuthError as e:
@@ -171,18 +195,23 @@ def _collect_deals(kind: str, months: int, sido: str | None,
             stats["inserted"] += n
             stats["empty"] += 0 if rows else 1
             month_rows += len(rows)
-        progress(f"  {ym}  시군구 {len(codes)}개 · 조회 {month_rows}건")
+        note = ""
+        if stats["skipped"]:
+            note = f" · 누적 건너뜀 {stats['skipped']:,}"
+        progress(f"  {ym}  시군구 {len(codes)}개 · 조회 {month_rows}건{note}")
     return stats
 
 
 def collect_trades(months: int = 60, sido: str | None = None, *,
-                   db_path: str | None = None, progress=print) -> dict:
-    return _collect_deals("trade", months, sido, db_path, progress)
+                   db_path: str | None = None, progress=print,
+                   full: bool = False) -> dict:
+    return _collect_deals("trade", months, sido, db_path, progress, full=full)
 
 
 def collect_rents(months: int = 60, sido: str | None = None, *,
-                  db_path: str | None = None, progress=print) -> dict:
-    return _collect_deals("rent", months, sido, db_path, progress)
+                  db_path: str | None = None, progress=print,
+                  full: bool = False) -> dict:
+    return _collect_deals("rent", months, sido, db_path, progress, full=full)
 
 
 # ── 매칭 ──────────────────────────────────────────────────────────────
