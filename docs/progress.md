@@ -231,3 +231,144 @@ Jeonse Lead(§14) · Flow Stage(§15) · Transaction Quality(§16) · Catalyst A
 - Entry Price Engine(§7) · Catalyst Alpha(§17) 나머지 feature
 - Phase 7 랭킹 (Consensus Model 9종, heuristic 가중치, TOP100→30→10)
 - Phase 8 walk-forward 백테스트 하네스
+
+---
+
+## PHASE 7 — 랭킹 (Consensus · Kill · TOP10) · 2026-08-31
+
+### 구현 내용
+
+**§74 순서를 지켰다.** 점수부터 만들지 않았다. Phase 6 에서 Feature 를 먼저
+만들었고, 이번 Phase 는 그 Feature 를 "아직 백테스트되지 않은 임시 가중치"로
+합성하는 층이다. 그래서 모든 ranking_run 은 `weights_source='HEURISTIC'` 으로
+기록되고, 리포트 머리에 `가중치 임시(heuristic)` 이 항상 찍힌다.
+Phase 8 백테스트가 끝나야 `'BACKTESTED'` 로 바뀐다.
+
+#### 새 파일
+
+| 파일 | 역할 |
+|---|---|
+| `apt_engine/scoring/normalize.py` | 절대 임계값 대신 횡단면 percentile. 결측은 제외(0 아님) |
+| `apt_engine/scoring/weights.py` | HEURISTIC / BACKTESTED 두 출처, 국면별 가중치 조정 |
+| `apt_engine/scoring/models.py` | Consensus 9개 모델을 선언형 SPEC 으로 정의 |
+| `apt_engine/scoring/consensus.py` | 9모델 합성 + 요인 기여도(가법 분해) + A vs B 비교 |
+| `apt_engine/scoring/kill.py` | 위험 7종. 감점이 아니라 **제외** |
+| `apt_engine/scoring/thesis.py` | 논리 1개 무너뜨리고 재계산 (Thesis Survival) |
+| `apt_engine/scoring/regime_bridge.py` | 국면 정의와 가중치 표가 어긋나지 않게 강제 |
+| `apt_engine/ranking/pipeline.py` | Blind Universe → 자본 게이트 → Feature → Consensus → Kill → TOP10 |
+| `apt_engine/ranking/lists.py` | 절대/위험조정/비대칭 3개 리스트 + Highest Conviction |
+| `apt_engine/ranking/explain.py` | WHY BUY / WHY NOT / 시장이 이미 아는 것 / A가 B보다 나은 이유 |
+| `apt_engine/repo/ranking.py` | ranking_run · ranking_entry 저장, 이전 순위 조회, 탈락 목록 |
+| `apt_engine/cli.py` `rank` | CLI 진입점 |
+
+#### 설계 판단 (그리고 이유)
+
+1. **자본 게이트를 Feature 계산보다 먼저 돌린다.**
+   "3억으로 살 수 없는 20억 아파트가 1위" 는 §29 위반이다. 못 사는 물건은
+   점수 계산 자체를 하지 않는다. 계산 비용도 같이 줄었다.
+
+2. **Kill 은 TOP10 문턱에서만 돈다.**
+   전 후보에 대해 7종 위험을 다 조회하면 쿼리가 폭발한다. 순위가 밀려서
+   어차피 안 보일 후보의 위험은 계산할 이유가 없다.
+
+3. **Kill 은 감점이 아니라 제외다(§65).** 대신 탈락 사유를 버리지 않고
+   `dropped` 리스트에 남긴다. "왜 어제 있던 게 오늘 없나" 에 답해야 하기 때문.
+
+4. **확인 못 한 위험을 '위험 없음' 으로 쓰지 않는다.**
+   Kill Score 0.00 옆에 `(미확인 3개)` 가 같이 찍힌다. 데이터가 없어서 위험을
+   못 본 것과, 봤는데 위험이 없는 것은 다른 상태다.
+
+5. **하방 방어력을 모르면 0 이 아니라 0.5.**
+   `lists.py` 의 위험조정 정렬에서 전세비율 미확인 단지를 0 으로 두면
+   "모르는 것" 이 "최악" 으로 취급돼서 순위에서 부당하게 밀린다.
+
+6. **SHAP 대신 가법 분해.** 점수가 가중합이므로 각 모델의 기여도는
+   근사가 아니라 **정확히** 계산된다. 외부 의존성도 안 늘었다.
+
+7. **정렬 키에 이름이 절대 안 들어간다.** 동점 처리까지 `complex_id` 로 한다.
+   §1 blind ranking 을 정렬 단계에서도 깨지 않기 위해서다.
+
+8. **없는 모델은 가중치를 재정규화한다.** 입력이 없는 모델을 0점으로 두면
+   "데이터가 없다" 가 "나쁘다" 로 바뀐다. 대신 가능한 모델끼리 가중치 합이
+   1이 되게 다시 나누고, 커버리지를 신뢰도에 곱한다.
+
+#### 3개 리스트가 실제로 다르다
+
+같은 점수를 세 번 보여주는 게 아니라 정렬 기준이 다르다.
+
+- ABSOLUTE — 점수만 (최대 기대수익)
+- RISK_ADJUSTED — 점수 ÷ 하방위험 (전세방어력 반영)
+- ASYMMETRIC — 상방 대비 하방이 작은 순 (비대칭)
+
+세 리스트 모두 상위 5위 안에 드는 단지만 **Highest Conviction** 이 된다.
+
+### 테스트 결과
+
+852개 통과 (신규 32개). 확인한 것:
+
+| 테스트 | 지키는 원칙 |
+|---|---|
+| 단지명을 전부 바꿔도 점수 배열이 동일 (Placebo) | §1 |
+| watchlist 에 넣어도 순위가 안 변함 | §1 |
+| 결측 모델이 0점이 아니라 가중치 재정규화 | §67 |
+| Kill 이 감점이 아니라 제외 | §65 |
+| 탈락 단지의 사유가 보존됨 | §64 |
+| 3개 리스트의 정렬이 실제로 다름 | §60 |
+| 못 사는 물건이 순위에 안 들어옴 | §29 |
+| 국면 정의와 가중치 표가 1:1 대응 | §11 |
+| 28개 서브커맨드 전부 `--help` 가 죽지 않음 | 회귀 |
+| 같은 이름의 최상위 함수가 두 번 정의되지 않음 | 회귀 |
+
+### 발견한 오류
+
+1. **`_resolve_complex` 가 cli.py 안에 두 번 정의돼 있었다.**
+   뒤쪽 3인자 버전이 앞쪽 2인자 버전을 덮어써서
+   `cash` `loan` `regulation` `relative` `catalyst` 5개 명령이 런타임에
+   깨졌다. import 도 `--help` 도 통과하기 때문에 기존 테스트가 못 잡았다.
+   → 이름을 분리하고, **최상위 함수 중복 정의를 AST 로 검사하는 테스트**를 추가.
+
+2. **`--lender` 도움말에 `%` 리터럴이 들어가 argparse 가 죽었다.**
+   argparse 는 help 문자열을 `%` 포매팅한다. `analyze.py` 에서 한 번 겪은
+   것과 같은 버그가 재발했다. → `%%` 로 고치고,
+   **28개 서브커맨드 전부에 `format_help()` 를 호출하는 테스트**를 추가.
+
+3. **주담대가 매매가를 넘을 수 있었다.**
+   LTV 규칙이 없고 소득이 높으면 DSR 만 걸려서 4억짜리 집에 4.77억 대출이
+   나왔고 실투자금이 음수가 됐다. → `담보가액(LTV 100%)` 상한을 추가하되
+   **이미 알려진 정책 상한을 좁히기만** 하게 했다. 규칙이 하나도 없으면
+   답은 여전히 "확인 불가" 다 (없는 규제를 만들어내지 않는다).
+
+4. **`--holding-cost 150` 이 150억으로 파싱됐다.**
+   `parse_price` 는 1000 미만을 억으로 본다. 보유비용·월세·기타비용은
+   만원 단위가 자연스럽다. → `units.from_manwon` 으로 교체.
+   (이 버그로 Peak Equity 가 749억이 되고 IRR 이 전부 확인 불가였다)
+
+5. **`build_static.py` 가 `shutil.rmtree(docs/)` 를 하고 있었다.**
+   §77 이 요구하는 `docs/*.md` 를 통째로 지운다. 실제로 한 번 지웠고
+   `git checkout -- docs` 로 복구했다. → 생성물만 지우도록 바꾸고,
+   소스에 `rmtree(DOCS_DIR)` 가 다시 나타나면 실패하는 테스트를 추가.
+
+### 데이터 부족
+
+여전히 `trade` · `jeonse_contract` · `complex` 이 0행이다 (data.go.kr 이
+이 컨테이너에서 차단). 이번 Phase 의 전 구간을 12개 단지 합성 시장으로
+검증했다. 합성 데이터는 DB 에 남기지 않는다.
+
+그래서 **지금 나오는 점수는 순위의 근거가 아니라 배관 검증 결과다.**
+실제 수집이 돌기 전까지 TOP10 을 투자 판단에 쓰면 안 된다.
+리포트가 이것을 매번 명시한다.
+
+`models.SPEC` 이 참조하는 `redev_mispricing` · `relative_gap` 두 feature 는
+아직 생산되지 않는다. 해당 모델은 항상 None 을 내고 가중치에서 빠진다
+(0점 처리가 아니다).
+
+### 다음 단계
+
+- Phase 8 walk-forward 백테스트 하네스 (§55~§57)
+  - as-of 스냅샷 · 정답(1Y/3Y/5Y) 계산 · KPI (Winner Recall@K, Regret,
+    Ex-post Capital Rank, MDD, Recovery Time, Discovery Lag)
+  - 누수를 일부러 심고 잡히는지 확인하는 테스트
+  - 끝나면 `weights_source` 를 `'BACKTESTED'` 로 전환
+- §27 현금 버킷 · §30 Capital Frontier · §31 대안매수 테스트
+- §52 예상 순위 구간 (bootstrap) · §53 몬테카를로
+- §71 Ablation 러너 · §72 Train/Validation/Out-of-time 분할

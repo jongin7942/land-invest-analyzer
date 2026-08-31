@@ -1,0 +1,135 @@
+"""독립 모델 9종 (지시서 §49).
+
+> 하나의 거대한 scoring formula 에 모든 것을 넣지 않는다.
+
+이유는 셋이다.
+  1. 한 덩어리로 만들면 어느 항목이 결과를 만들었는지 알 수 없다(§75·§76)
+  2. Ablation(§71)으로 하나씩 빼서 검증할 수 없다
+  3. 모델끼리 의견이 갈리는지(Consensus) 볼 수 없다 — 다 같이 좋다고 하는 후보와
+     한 모델만 좋다고 하는 후보는 다르다
+
+각 모델은 **쓸 수 있는 feature 가 없으면 점수를 만들지 않는다**(None).
+빠진 자리를 0 이나 평균으로 채우지 않는다.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from apt_engine.features.base import FeatureSet
+from apt_engine.scoring import normalize
+
+# 모델 하나가 성립하려면 최소 이만큼의 입력이 있어야 한다.
+MIN_INPUTS = 1
+
+
+@dataclass(frozen=True)
+class ModelScore:
+    key: str
+    value: float | None            # 0~1
+    confidence: float
+    used: dict[str, float] = field(default_factory=dict)   # feature → 기여 위치
+    missing: list[str] = field(default_factory=list)
+    note: str = ""
+
+    @property
+    def known(self) -> bool:
+        return self.value is not None
+
+    @property
+    def label(self) -> str:
+        if not self.known:
+            return f"확인 불가 ({', '.join(self.missing[:3])})"
+        return f"{self.value:.2f}  (신뢰도 {self.confidence:.0%})"
+
+
+# 모델 → (feature key, 높을수록 좋은가) 목록.
+# **이 표가 곧 모델의 정의다.** 코드가 아니라 표라서 Ablation·설명이 쉽다.
+SPEC: dict[str, list[tuple[str, bool]]] = {
+    # 지금 싸게 사는가 (§7)
+    "value": [("entry_position", False)],
+    # 최근 흐름. discovery_lag 은 높을수록 나쁘다(§40)
+    "momentum": [("momentum_6m", True), ("price_acceleration", True),
+                 ("discovery_lag", False)],
+    # 공급이 적을수록 좋고, 절벽이면 그 뒤가 좋다(§13)
+    "supply": [("supply_ratio_3y", False), ("supply_cliff", True)],
+    # 아직 반영되지 않은 호재 (§17)
+    "catalyst": [("catalyst_alpha", True)],
+    # 재건축은 별도 엔진에서 온다 (§19~§22)
+    "redevelopment": [("redev_mispricing", True)],
+    # 비교단지 대비 위치 (§10)
+    "relative": [("relative_gap", True)],
+    # 전세는 하방 방어로만 쓴다 (§14)
+    "jeonse": [("downside_defense", True), ("jeonse_lead", True)],
+    # 위험이 적을수록 좋다
+    "risk": [("transaction_quality", True), ("supply_ratio_1y", False)],
+    # 같은 돈으로 더 큰 자산 (§28·§29)
+    "capital_efficiency": [("capital_efficiency", True)],
+}
+
+
+def build_ranks(feature_sets: dict[int, FeatureSet]) -> dict[str, normalize.Ranked]:
+    """후보 집단 전체에 대해 feature 별 상대 위치를 미리 계산한다.
+
+    후보 하나씩 점수를 매기면 절대 임계값이 필요해진다. 집단으로 계산하면
+    "이 후보군 안에서 몇 등인가" 만 보면 되고, 임계값을 지어낼 일이 없다.
+    """
+    keys: set[str] = set()
+    for fs in feature_sets.values():
+        keys |= set(fs.items)
+
+    out: dict[str, normalize.Ranked] = {}
+    for key in sorted(keys):
+        higher = _higher_is_better(key)
+        raw = {cid: (fs[key].value if fs[key].usable else None)
+               for cid, fs in feature_sets.items()}
+        clipped = normalize.winsorize(raw)
+        ranked = normalize.percentile_rank(clipped, higher_is_better=higher)
+        out[key] = normalize.Ranked(key, ranked.positions, ranked.missing, ranked.n)
+    return out
+
+
+def _higher_is_better(key: str) -> bool:
+    for spec in SPEC.values():
+        for name, higher in spec:
+            if name == key:
+                return higher
+    return True
+
+
+def score_one(model: str, complex_id: int, feature_set: FeatureSet,
+              ranks: dict[str, normalize.Ranked]) -> ModelScore:
+    """모델 하나. 입력이 하나도 없으면 점수를 만들지 않는다."""
+    spec = SPEC.get(model)
+    if spec is None:
+        raise ValueError(f"모르는 모델: {model} (가능: {', '.join(SPEC)})")
+
+    used: dict[str, float] = {}
+    missing: list[str] = []
+    confidences: list[float] = []
+
+    for key, _ in spec:
+        ranked = ranks.get(key)
+        position = ranked.get(complex_id) if ranked else None
+        if position is None:
+            missing.append(key)
+            continue
+        used[key] = position
+        confidences.append(feature_set[key].confidence)
+
+    if len(used) < MIN_INPUTS:
+        return ModelScore(model, None, 0.0, used, missing,
+                          "입력이 없어 점수를 만들지 않았습니다 — 0 으로 채우지 않습니다")
+
+    value = sum(used.values()) / len(used)
+    confidence = min(confidences) if confidences else 0.0
+    # 입력이 일부만 있으면 그만큼 덜 믿는다
+    coverage = len(used) / len(spec)
+    note = ("" if coverage == 1.0
+            else f"입력 {len(used)}/{len(spec)}개로 계산 (없는 것: "
+                 f"{', '.join(missing)})")
+    return ModelScore(model, value, confidence * coverage, used, missing, note)
+
+
+def score_all(complex_id: int, feature_set: FeatureSet,
+              ranks: dict[str, normalize.Ranked]) -> dict[str, ModelScore]:
+    return {m: score_one(m, complex_id, feature_set, ranks) for m in SPEC}

@@ -1669,6 +1669,121 @@ def cmd_resolve(args):
               "수익률이\n     전부 다른 단지 것이 됩니다.")
 
 
+def cmd_rank(args):
+    """수도권 전체에서 내 현금으로 살 수 있는 최적 후보 (지시서 §78).
+
+        rank --cash 3 --horizon 5 --profile balanced
+    """
+    from apt_engine import area as area_mod, units
+    from apt_engine.blind import cutoff as cutoff_mod
+    from apt_engine.invest.budget import Profile
+    from apt_engine.listing.provider import parse_price
+    from apt_engine.ranking import explain as explain_mod
+    from apt_engine.ranking import lists as lists_mod
+    from apt_engine.ranking import pipeline as pipeline_mod
+    from apt_engine.repo import ranking as rank_repo
+
+    as_of = cutoff_mod.AsOf(args.as_of or _today())
+
+    with get_conn(args.db) as conn:
+        profile = Profile.load(conn, args.profile_name) if args.profile_name else None
+        if profile is None:
+            profile = Profile(name=args.profile_name or args.profile)
+        from dataclasses import replace
+        if args.cash:
+            profile = replace(profile, available_cash=parse_price(args.cash))
+        if args.income:
+            profile = replace(profile, annual_income=parse_price(args.income))
+        if args.rate is not None:
+            profile = replace(profile, interest_rate=args.rate)
+        if not profile.available_cash:
+            sys.exit("--cash 를 주거나 `profile set` 으로 가용 현금을 등록하세요.")
+
+        try:
+            result = pipeline_mod.run(
+                conn, as_of=as_of, profile=profile, horizon_years=args.horizon,
+                area_band=args.band, lawd_cd=args.lawd, scan_limit=args.scan)
+        except ValueError as e:
+            sys.exit(str(e))
+
+        print(f"\n{result.summary}")
+        print(f"  시장국면 {result.regime or '확인 불가'} · "
+              f"가중치 {result.weights.label}")
+
+        if result.cash_recommended:
+            print(f"\n  ★ #1 CASH / WAIT")
+            print(f"    {result.cash_reason}")
+            print(f"    억지로 아파트를 추천하지 않습니다(§60).")
+
+        names = {}
+        if result.top10:
+            ids = [c.complex_id for c in result.top10]
+            rows = conn.execute(
+                f"SELECT id, name, lawd_cd FROM complex "
+                f"WHERE id IN ({','.join('?' * len(ids))})", ids).fetchall()
+            names = {r["id"]: (r["name"], r["lawd_cd"]) for r in rows}
+
+        all_lists = lists_mod.all_lists(result.top10, limit=args.limit)
+        conviction = set(lists_mod.highest_conviction(all_lists))
+
+        for kind, entries in all_lists.items():
+            print(f"\n  ── {kind.upper()} TOP{len(entries)} "
+                  f"({lists_mod.explain(kind)}) ──")
+            if not entries:
+                print("    후보 없음")
+                continue
+            print(f"  {'순위':>3} {'단지':<22} {'지역':<12} {'매수가':>8} "
+                  f"{'실투자금':>9} {'점수':>5} {'신뢰':>5} {'Kill':>5} 상태")
+            for e in entries:
+                c = e.candidate
+                name, lawd = names.get(c.complex_id, (f"#{c.complex_id}", ""))
+                mark = " ★" if c.complex_id in conviction else ""
+                print(f"  {e.rank:>3} {name[:22]:<22} "
+                      f"{regions.name_of(lawd)[:12]:<12} "
+                      f"{units.fmt_eok(c.price):>8} "
+                      f"{(units.fmt_eok(c.required_equity) if c.required_equity else '-'):>9} "
+                      f"{c.score:>5.0f} {c.confidence:>5.0f} {c.kill.value:>5.2f}{mark}")
+
+        if conviction:
+            print(f"\n  ★ Highest Conviction — 세 리스트 모두 상위: "
+                  f"{', '.join(names.get(i, (f'#{i}',''))[0] for i in conviction)}")
+
+        if args.verbose and result.top10:
+            top = result.top10[0]
+            name = names.get(top.complex_id, (f"#{top.complex_id}",))[0]
+            print(f"\n  ── {name} 상세 ──")
+            report = explain_mod.full_report(top)
+            for key in ("점수", "신뢰도", "모델 일치도", "Kill Score",
+                        "Thesis Survival", "실투자금", "데이터 커버리지"):
+                print(f"    {key:<14} {report[key]}")
+            print("    WHY BUY")
+            for r in report["WHY BUY"]:
+                print(f"      · {r['이유']} (기여 {r['기여']})")
+            print("    WHY NOT")
+            for r in report["WHY NOT"]:
+                print(f"      · {r['이유']} — {r['설명']}")
+            if len(result.top10) > 1:
+                pair = explain_mod.why_a_over_b(result.top10[0], result.top10[1])
+                print(f"    1위가 2위보다 높은 이유 ({pair['점수 차']:+}점)")
+                for line in pair["요약"]:
+                    print(f"      · {line}")
+
+        if args.show_dropped and result.dropped:
+            print(f"\n  ── 탈락 {len(result.dropped)}건 (상위 10개) ──")
+            for d in result.dropped[:10]:
+                print(f"    #{d.complex_id} [{d.stage}] {d.reason}")
+
+        if args.save:
+            for kind, entries in all_lists.items():
+                rank_repo.save_run(conn, run_key=args.run_key, result=result,
+                                   list_kind=kind, entries=entries)
+            print(f"\n  랭킹 3종을 저장했습니다 (run_key={args.run_key}, "
+                  f"as_of={result.as_of}). 과거 실행은 덮어쓰지 않습니다.")
+
+    print(f"\n  ※ 가중치 출처: {result.weights.source}. "
+          f"HEURISTIC 은 후보를 좁히는 용도이며, 백테스트가 학습값으로 교체합니다(§74).")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="python -m apt_engine.cli",
@@ -1967,6 +2082,24 @@ def build_parser() -> argparse.ArgumentParser:
     rs.add_argument("--keep", type=int, help="merge: 대표로 남길 단지")
     rs.add_argument("--drop", type=int, help="merge: 중복으로 표시할 단지")
 
+    rk = sub.add_parser("rank", help="내 현금으로 살 수 있는 최적 후보 TOP10 (3종)")
+    rk.add_argument("--cash", help="가용 현금 (3 = 3억)")
+    rk.add_argument("--horizon", type=int, default=5, help="투자기간(년): 2/5/10")
+    rk.add_argument("--profile", default="balanced",
+                    choices=["balanced", "aggressive", "defensive"])
+    rk.add_argument("--profile-name", help="저장된 사용자 프로필 이름")
+    rk.add_argument("--income", help="연소득")
+    rk.add_argument("--rate", type=float, help="대출금리")
+    rk.add_argument("--band", help="전용면적 밴드 (기본 84)")
+    rk.add_argument("--lawd", help="시군구 코드로 한정")
+    rk.add_argument("--scan", type=int, default=2000, help="검토할 후보 수")
+    rk.add_argument("--limit", type=int, default=10)
+    rk.add_argument("--as-of", help="데이터 컷오프 YYYY-MM-DD (백테스트용)")
+    rk.add_argument("--run-key", default="manual", help="저장 시 실행 이름")
+    rk.add_argument("--save", action="store_true")
+    rk.add_argument("--show-dropped", action="store_true", help="탈락 이유도 보기")
+    rk.add_argument("--verbose", action="store_true", help="1위 상세 설명")
+
     sub.add_parser("validate", help="요구사항 26 검증 규칙 실행")
 
     re_ = sub.add_parser("report", help="진단 리포트")
@@ -1982,7 +2115,7 @@ HANDLERS = {
     "listing": cmd_listing, "market": cmd_market,
     "rule": cmd_rule, "regulation": cmd_regulation, "loan": cmd_loan, "cash": cmd_cash,
     "profile": cmd_profile, "budget": cmd_budget, "cashflow": cmd_cashflow,
-    "lessons": cmd_lessons, "resolve": cmd_resolve,
+    "lessons": cmd_lessons, "resolve": cmd_resolve, "rank": cmd_rank,
     "ladder": cmd_ladder, "relative": cmd_relative,
     "transit": cmd_transit, "supply": cmd_supply, "geocode": cmd_geocode,
     "catalyst": cmd_catalyst, "redev": cmd_redev,
