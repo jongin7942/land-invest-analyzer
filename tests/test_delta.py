@@ -1430,3 +1430,176 @@ class TestCorePromotion:
                 conn, run_key="t",
                 per_split={"TRAIN": [entry], "VALIDATION": [entry]})
         assert promoted == []
+
+
+# ── §4-C·§33 수요 쪽 Feature ─────────────────────────────────────────
+
+class TestDemandFeatures:
+    def _market(self, n=10, price=500_000_000, households=500, sample=8):
+        from apt_engine.features import demand
+        return demand.Market([
+            demand.Cohort(i, int(price * (1 + (i - n / 2) * 0.02)),
+                          households, sample, "11110")
+            for i in range(1, n + 1)])
+
+    def test_동급이_모자라면_BuyerPool_을_만들지_않는다(self):
+        from apt_engine.features import demand
+        f = demand.buyer_pool(self._market(2), price=500_000_000,
+                              lawd_cd="11110", households=500, sample_n=8)
+        assert f.value is None
+        assert "표본이 없습니다" in f.detail["사유"]
+
+    def test_대리지표라고_말하고_신뢰도에_상한을_둔다(self):
+        from apt_engine.features import demand
+        f = demand.buyer_pool(self._market(), price=500_000_000,
+                              lawd_cd="11110", households=500, sample_n=8)
+        assert f.usable
+        assert f.confidence <= demand.PROXY_CONFIDENCE_CAP
+        assert "근사한 값" in f.detail["주의"]
+
+    def test_세대수를_모르면_거래건수만으로_안_센다(self):
+        """거래건수만 보면 큰 단지가 무조건 유리해진다."""
+        from apt_engine.features import demand
+        market = demand.Market([demand.Cohort(i, 500_000_000, None, 8, "11110")
+                                for i in range(1, 8)])
+        f = demand.buyer_pool(market, price=500_000_000, lawd_cd="11110",
+                              households=None, sample_n=8)
+        # 시장 형성 정도만으로는 계산되지만 활성도는 빠진다
+        assert "거래 활성도" not in f.detail.get("구성", {})
+
+    def test_공급을_하나도_모르면_0_으로_두지_않는다(self):
+        from apt_engine.features import demand
+        f = demand.effective_supply_risk({})
+        assert f.value is None
+        assert "0 으로 두지 않습니다" in f.detail["사유"]
+
+    def test_가까운_공급에_더_큰_무게를_준다(self):
+        from apt_engine.features import demand
+        near = demand.effective_supply_risk({"supply_ratio_1y": 0.08})
+        far = demand.effective_supply_risk({"supply_ratio_5y": 0.08})
+        assert near.value > far.value
+
+    def test_공급_절벽이면_위험을_낮춘다(self):
+        from apt_engine.features import demand
+        plain = demand.effective_supply_risk({"supply_ratio_2y": 0.08})
+        cliff = demand.effective_supply_risk({"supply_ratio_2y": 0.08},
+                                             cliff=0.8)
+        assert cliff.value < plain.value
+        assert "공급 절벽" in cliff.detail
+
+    def test_공급_감점이_한_곳으로만_나간다(self):
+        """§45 — 전에는 supply_ratio 가 ALPHA 모델과 Kill 양쪽에 있었다."""
+        from apt_engine.features import demand, registry as reg
+        f = demand.effective_supply_risk({"supply_ratio_1y": 0.05})
+        assert "§45 중복 금지" in f.detail["주의"]
+        for key in ("supply_ratio_1y", "supply_ratio_2y", "supply_ratio_3y",
+                    "supply_ratio_5y"):
+            assert reg.get(key).role == reg.ROLE_CONTEXT
+
+    def test_대체재가_많으면_감점이다(self):
+        from apt_engine.features import demand
+        many = demand.replacement_availability(
+            self._market(20), price=500_000_000, required_equity=None,
+            lawd_cd="11110")
+        few = demand.replacement_availability(
+            self._market(3), price=500_000_000, required_equity=None,
+            lawd_cd="11110")
+        assert many.value > few.value
+        assert "많을수록 감점" in many.detail["주의"]
+        assert registry.get("replacement_availability").higher_is_better is False
+
+
+# ── §11·§12 Leader 망 자동 생성 ──────────────────────────────────────
+
+class TestLeaderBuilder:
+    def _nodes(self):
+        from apt_engine.relative import leaders
+        return [
+            leaders.Node(1, 500_000_000, "11110", "강남권", "84", 10),
+            leaders.Node(2, 600_000_000, "11110", "강남권", "84", 20),
+            leaders.Node(3, 700_000_000, "11110", "강남권", "84", 5),
+            leaders.Node(4, 650_000_000, "41110", "경기권", "84", 30),
+            leaders.Node(5, 480_000_000, "11110", "강남권", "84", 8),
+        ]
+
+    def test_더_싼_단지는_Leader_가_아니다(self):
+        from apt_engine.relative import leaders
+        nodes = self._nodes()
+        links = leaders.pick_leaders(nodes[0], nodes)
+        assert all(l.leader_id != 5 for l in links)
+
+    def test_너무_비싸면_다른_시장이라_제외한다(self):
+        from apt_engine.relative import leaders
+        follower = leaders.Node(1, 100_000_000, "11110", "강남권", "84", 10)
+        huge = leaders.Node(9, 2_000_000_000, "11110", "강남권", "84", 10)
+        assert not leaders._in_lead_range(follower, huge)
+
+    def test_다섯_종류가_서로_다른_규칙이다(self):
+        """한 규칙으로 다섯 개를 만들면 이름만 다섯 개다."""
+        from apt_engine.relative import leaders
+        nodes = self._nodes()
+        links = leaders.pick_leaders(nodes[0], nodes)
+        kinds = {l.kind for l in links}
+        assert len(kinds) >= 3
+        by_kind = {l.kind: l.leader_id for l in links}
+        # 가장 가까이 위(PRICE)와 가장 비싼 곳(METRO)이 달라야 한다
+        if leaders.PRICE in by_kind and leaders.METRO in by_kind:
+            assert by_kind[leaders.PRICE] != by_kind[leaders.METRO]
+
+    def test_다른_생활권이면_겹침이_낮다(self):
+        from apt_engine.relative import leaders
+        nodes = self._nodes()
+        same, _ = leaders.buyer_overlap(nodes[0], nodes[1])
+        other, _ = leaders.buyer_overlap(nodes[0], nodes[3])
+        assert same > other
+
+    def test_면적이_다르면_겹치지_않는다(self):
+        from apt_engine.relative import leaders
+        a = leaders.Node(1, 500_000_000, "11110", "강남권", "84", 10)
+        b = leaders.Node(2, 600_000_000, "11110", "강남권", "59", 10)
+        overlap, _ = leaders.buyer_overlap(a, b)
+        same, _ = leaders.buyer_overlap(
+            a, leaders.Node(3, 600_000_000, "11110", "강남권", "84", 10))
+        assert overlap < same
+
+    def test_겹침은_대리지표라_상한이_있다(self):
+        from apt_engine.relative import leaders
+        a = leaders.Node(1, 500_000_000, "11110", "강남권", "84", 10)
+        b = leaders.Node(2, 550_000_000, "11110", "강남권", "84", 10)
+        overlap, _ = leaders.buyer_overlap(a, b)
+        assert overlap <= leaders.MAX_PROXY_OVERLAP
+
+    def test_저장한_링크를_같은_시점에_읽을_수_있다(self, db):
+        """as_of 를 요청일로 저장하면 컷오프 때문에 자기가 쓴 걸 못 읽는다.
+
+        실제로 링크 109개를 쓰고 하나도 못 읽었다.
+        """
+        from apt_engine.features import leader as leader_mod
+        from apt_engine.relative import leaders
+        with get_conn(db) as conn:
+            synth_mod.build(conn, n_complexes=12, start_ym="202001",
+                            end_ym="202412")
+            as_of = cutoff_mod.AsOf("2024-06-01")
+            result = leaders.build(conn, as_of=as_of, area_band="84")
+            assert result["링크"] > 0
+            # 링크가 붙은 팔로워를 골라 읽는다. 최상위 단지는 Leader 가
+            # 없는 것이 정상이라 그걸로 검사하면 의미가 없다.
+            follower = conn.execute(
+                "SELECT follower_id FROM leader_link LIMIT 1").fetchone()[0]
+            got = leader_mod.load_leaders(conn, follower, "84", as_of=as_of)
+        assert got, "방금 쓴 Leader 링크를 같은 시점에 못 읽습니다"
+
+    def test_Leader_가_없으면_세_Feature_가_확인_불가다(self, db):
+        """Leader 를 못 찾은 것과 안 따라온 것은 다른 상태다."""
+        from apt_engine.ranking import delta_pipeline as delta
+        with get_conn(db) as conn:
+            synth_mod.build(conn, n_complexes=3, start_ym="202001",
+                            end_ym="202412")
+            feats = delta._leader_features(
+                conn, 1, "84", as_of=cutoff_mod.AsOf("2024-06-01"))
+        keys = {f.key for f in feats}
+        assert keys == {"transmission_failure", "recoverable_discount_ratio",
+                        "next_node_score"}
+        for f in feats:
+            assert f.value is None
+            assert "다릅니다" in f.detail["사유"] or "사다리" in f.detail["사유"]

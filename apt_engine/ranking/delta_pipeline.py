@@ -25,6 +25,9 @@ from dataclasses import dataclass, field
 from apt_engine import area as area_mod, units
 from apt_engine.blind import cutoff as cutoff_mod
 from apt_engine.features import assemble as features_mod
+from apt_engine.features import bands as bands_mod
+from apt_engine.features import demand as demand_mod
+from apt_engine.features import leader as leader_mod
 from apt_engine.features import stage as stage_mod
 from apt_engine.features.base import FeatureSet
 from apt_engine.invest import cash_candidate as cash_mod
@@ -142,10 +145,46 @@ def run(conn: sqlite3.Connection, *, as_of: cutoff_mod.AsOf, profile: Profile,
                          capital=profile.available_cash or 0,
                          horizon_years=horizon_years)
 
+    # ③-2 수요 쪽 세 Feature 는 **후보군이 있어야** 계산된다(§4-C·§33).
+    # buyer_pool · effective_supply_risk · replacement_availability 가
+    # EarlyAlpha 의 곱셈 항이라, 이게 없으면 점수가 아예 안 나온다.
+    #
+    # 단지 속성은 **한 번에** 읽는다. 후보마다 조회하면 2000개 후보에
+    # 4000번 쿼리가 나간다.
+    meta = _complex_meta(conn, [c.complex_id for c in base.feasible])
+    market = demand_mod.Market(
+        [demand_mod.Cohort(c.complex_id, c.price,
+                           meta.get(c.complex_id, (None, ""))[0],
+                           _sample_of(c.features),
+                           meta.get(c.complex_id, (None, ""))[1])
+         for c in base.feasible],
+        as_of.day)
+
     # ③④⑤
     candidates: list[DeltaCandidate] = []
     stages: dict[int, stage_mod.Verdict] = {}
     for c in base.feasible:
+        supply_values = {
+            k: (c.features.items[k].value
+                if k in c.features.items and c.features.items[k].usable
+                else None)
+            for k in ("supply_ratio_1y", "supply_ratio_2y",
+                      "supply_ratio_3y", "supply_ratio_5y")}
+        cliff = (c.features.items["supply_cliff"].value
+                 if ("supply_cliff" in c.features.items
+                     and c.features.items["supply_cliff"].usable) else None)
+        households, region = meta.get(c.complex_id, (None, ""))
+        features = c.features
+        for f in _leader_features(conn, c.complex_id, band, as_of=as_of):
+            features = features.add(f)
+        for f in demand_mod.all_features(
+                market, price=c.price, lawd_cd=region or None,
+                households=households, sample_n=_sample_of(c.features),
+                required_equity=c.required_equity,
+                supply_values=supply_values, cliff=cliff):
+            features = features.add(f)
+        c = _with_features(c, features)
+
         verdict = stage_mod.classify(c.features)
         stages[c.complex_id] = verdict
         alpha = alpha_mod.compute(c.complex_id, c.features, weights=weights,
@@ -202,6 +241,89 @@ def run(conn: sqlite3.Connection, *, as_of: cutoff_mod.AsOf, profile: Profile,
     return DeltaResult(as_of.day, profile.available_cash or 0, horizon_years,
                        band, base.universe_size, len(base.feasible),
                        ordered, split, coverage, cash, weights_source, notes)
+
+
+def _leader_features(conn, complex_id: int, band: str, *,
+                     as_of: cutoff_mod.AsOf) -> list:
+    """Leader 망 → 전달 실패 → 회복가능 할인 (§11·§12·§13).
+
+    Leader 가 없으면 **세 Feature 모두 '확인 불가'** 다. 0 이 아니다 —
+    Leader 를 못 찾은 것과 Leader 가 있는데 안 따라온 것은 다른 상태다.
+    """
+    leaders = leader_mod.load_leaders(conn, complex_id, band, as_of=as_of)
+    relevant = leader_mod.relevant_leaders(leaders)
+    if not relevant:
+        why = (f"겹침이 확인된 Leader 가 없습니다 "
+               f"(후보 {len(leaders)}개 중 0개). "
+               f"Leader 를 못 찾은 것과 안 따라온 것은 다릅니다")
+        from apt_engine.features.base import Feature
+        return [Feature.missing("transmission_failure", why),
+                Feature.missing("recoverable_discount_ratio", why),
+                Feature.missing("next_node_score", why)]
+
+    # 겹침이 가장 큰 Leader 하나로 본다. 여러 Leader 를 평균하면
+    # "누구를 따라가야 하는지" 가 흐려진다.
+    best = max(relevant, key=lambda l: l.buyer_overlap or 0.0)
+    follower_series = bands_mod.load_bands(conn, complex_id, band, as_of=as_of)
+    leader_series = bands_mod.load_bands(conn, best.leader_id, band,
+                                         as_of=as_of)
+
+    t = leader_mod.transmission(follower_series, leader_series,
+                                buyer_overlap=best.buyer_overlap)
+    discount = _observed_discount(follower_series, leader_series)
+    d = leader_mod.decompose(discount, transmission_failure=t.failure)
+
+    from apt_engine.features.base import Feature
+    return [leader_mod.transmission_feature(t),
+            leader_mod.recoverable_feature(d),
+            Feature.missing("next_node_score",
+                            "생활권 가격 사다리가 아직 입력되지 않았습니다 "
+                            "(`ladder import`)")]
+
+
+def _observed_discount(follower, leader) -> float | None:
+    """Leader 대비 관측 할인. 둘 중 하나라도 없으면 만들지 않는다."""
+    f, l = follower.latest, leader.latest
+    if f is None or l is None or not f.p50 or not l.p50 or l.p50 <= 0:
+        return None
+    return max(0.0, (l.p50 - f.p50) / l.p50)
+
+
+def _complex_meta(conn, ids: list[int]) -> dict[int, tuple[int | None, str]]:
+    """단지 → (세대수, 시군구). 한 번에 읽는다.
+
+    **이름은 읽지 않는다**(§1). 여기서 name 을 가져오면 그 순간부터 이름이
+    스코어링 경로 안에 있게 된다.
+    """
+    if not ids:
+        return {}
+    out: dict[int, tuple[int | None, str]] = {}
+    chunk = 500
+    for i in range(0, len(ids), chunk):
+        part = ids[i:i + chunk]
+        marks = ",".join("?" * len(part))
+        for r in conn.execute(
+                f"SELECT id, apt_households, lawd_cd FROM complex "
+                f" WHERE id IN ({marks})", part):
+            out[int(r["id"])] = (r["apt_households"], r["lawd_cd"] or "")
+    return out
+
+
+def _with_features(candidate, features):
+    from dataclasses import replace
+    return replace(candidate, features=features)
+
+
+def _sample_of(features) -> int:
+    """대표가격 표본 수. Feature 에 실려 있으면 쓰고, 없으면 0."""
+    for key in ("transaction_quality", "investigation_priority"):
+        item = features.items.get(key)
+        if item is not None and item.detail.get("표본"):
+            try:
+                return int(str(item.detail["표본"]).split("건")[0])
+            except (ValueError, IndexError):
+                continue
+    return 0
 
 
 def detail(c: DeltaCandidate) -> str:

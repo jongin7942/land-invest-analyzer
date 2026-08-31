@@ -58,6 +58,7 @@
 from __future__ import annotations
 
 import argparse
+import sqlite3
 import sys
 
 import config
@@ -1879,6 +1880,10 @@ def cmd_today(args):
                 weights=learned, weights_source=source, limit=args.limit)
         except ValueError as e:
             sys.exit(str(e))
+        except sqlite3.OperationalError as e:
+            if _needs_migration(e):
+                sys.exit(f"{e}\n\n{MIGRATION_HINT}")
+            raise
 
         print()
         print(result.report)
@@ -1896,6 +1901,63 @@ def cmd_today(args):
             print("\n  ── 제외된 후보 ──")
             for cid, why in result.split.excluded[:20]:
                 print(f"    #{cid}: {why}")
+
+
+MIGRATION_HINT = (
+    "이 명령은 마이그레이션 016 이후의 표를 씁니다. `python -m apt_engine.cli init` "
+    "으로 적용하세요.\n"
+    "  ⚠ **수집이 도는 중이면 지금 돌리지 마세요.** 마이그레이션은 쓰기라서 "
+    "락 충돌로 수집이 죽습니다. 수집이 끝난 뒤에 하세요.")
+
+
+def _needs_migration(exc: Exception) -> bool:
+    return isinstance(exc, sqlite3.OperationalError) and "no such table" in str(exc)
+
+
+def cmd_leaders(args):
+    """Leader 망 생성 (§11) — 겹침 기준으로 선도단지를 붙인다.
+
+        leaders build --as-of 2024-06-01 --band 84
+    """
+    from apt_engine.blind import cutoff as cutoff_mod
+    from apt_engine.relative import leaders as leader_build
+
+    as_of = cutoff_mod.AsOf(args.as_of or _today())
+    try:
+        _leaders_body(args, as_of, leader_build)
+    except Exception as exc:                       # noqa: BLE001
+        if _needs_migration(exc):
+            sys.exit(f"{exc}\n\n{MIGRATION_HINT}")
+        raise
+
+
+def _leaders_body(args, as_of, leader_build):
+    with get_conn(args.db) as conn:
+        if args.action == "build":
+            result = leader_build.build(conn, as_of=as_of,
+                                        area_band=args.band or "84",
+                                        limit=args.limit)
+            if result.get("사유"):
+                print(result["사유"])
+                return
+            print(f"Leader 망 · {result['as_of']} 기준 (신고지연 반영)")
+            print(f"  단지 {result['단지']}개 → 링크 {result['링크']}개")
+            print(f"  종류 {', '.join(result['종류'])}")
+            print(f"  ⚠ {result['주의']}")
+            return
+
+        rows = conn.execute(
+            "SELECT leader_kind, COUNT(*) n, AVG(buyer_overlap) o "
+            "  FROM leader_link WHERE area_band = ? "
+            " GROUP BY leader_kind ORDER BY leader_kind",
+            (args.band or "84",)).fetchall()
+        if not rows:
+            print("Leader 망이 없습니다. `leaders build` 를 먼저 돌리세요.")
+            return
+        print(f"Leader 망 현황 ({args.band or '84'}㎡)")
+        for r in rows:
+            print(f"  {r['leader_kind']:<16} {r['n']:>6}개 · "
+                  f"평균 겹침 {r['o']:.2f}")
 
 
 def cmd_rank(args):
@@ -2398,6 +2460,12 @@ def build_parser() -> argparse.ArgumentParser:
     td.add_argument("--verbose", action="store_true", help="1위 상세")
     td.add_argument("--show-dropped", action="store_true", help="제외 사유")
 
+    ld = sub.add_parser("leaders", help="Leader 망 생성·조회 (§11 Buyer Overlap 기준)")
+    ld.add_argument("action", help="build / status")
+    ld.add_argument("--as-of", help="기준일 YYYY-MM-DD")
+    ld.add_argument("--band", help="전용면적 밴드 (기본 84)")
+    ld.add_argument("--limit", type=int, help="단지 수 제한 (시험용)")
+
     sub.add_parser("validate", help="요구사항 26 검증 규칙 실행")
 
     re_ = sub.add_parser("report", help="진단 리포트")
@@ -2417,7 +2485,7 @@ HANDLERS = {
     "ladder": cmd_ladder, "relative": cmd_relative,
     "transit": cmd_transit, "supply": cmd_supply, "geocode": cmd_geocode,
     "catalyst": cmd_catalyst, "redev": cmd_redev,
-    "today": cmd_today, "backtest": cmd_backtest, "validate": cmd_validate, "report": cmd_report,
+    "today": cmd_today, "leaders": cmd_leaders, "backtest": cmd_backtest, "validate": cmd_validate, "report": cmd_report,
 }
 
 
