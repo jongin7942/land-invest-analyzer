@@ -13,6 +13,7 @@ from typing import Callable, Iterable
 
 from apt_engine.blind import cutoff as cutoff_mod
 from apt_engine.features import bands
+from apt_engine.features import cycle
 from apt_engine.features import stretch as stretch_mod
 from apt_engine.features import (catalyst, entry, flow, jeonse, momentum,
                                  regime, supply)
@@ -31,6 +32,7 @@ GROUPS: dict[str, str] = {
     # DELTA UPGRADE — 4 State 의 CORE 후보. 기존 7그룹을 대체하지 않고 위에 얹는다.
     "bands": "가격대 이동 P25/중앙값/P75 · Latent/Visible · 기울기 지속 (§7·§8·§9)",
     "stretch": "장기 정상가 대비 이탈 · 상승폭 · 가속 구간 (§4-D·§5·§6)",
+    "cycle": "과열→회복 사이클 단계 · 가격 도달 경로 (§18·§19)",
 }
 
 
@@ -82,7 +84,7 @@ def build(conn: sqlite3.Connection, complex_id: int, area_band: str, *,
                                     supply_ratio=ratio):
             out = out.add(f)
 
-    if "bands" in wanted or "stretch" in wanted:
+    if "bands" in wanted or "stretch" in wanted or "cycle" in wanted:
         # 두 그룹이 같은 시계열을 쓴다. 한 번만 읽는다.
         series = bands.load_bands(conn, complex_id, area_band, as_of=as_of)
         slopes = bands.slopes(series)
@@ -111,6 +113,14 @@ def build(conn: sqlite3.Connection, complex_id: int, area_band: str, *,
             out = out.add(f)
         out = out.add(stretch_mod.acceleration_zone(series, slopes))
         out = out.add(stretch_mod.price_percentile(series))
+
+    if "cycle" in wanted:
+        held = None
+        if "downside_defense" in out and out["downside_defense"].usable:
+            held = (out["downside_defense"].value or 0) >= 0.5
+        out = out.add(cycle.reset_feature(
+            cycle.excess_reset(series, jeonse_held=held)))
+        out = out.add(cycle.path_feature(cycle.price_path(series)))
 
     if "catalyst" in wanted:
         price = None
@@ -143,6 +153,7 @@ def group_of(feature_key: str) -> str | None:
                   "slope_persistence"),
         "stretch": ("price_stretch", "runup_", "acceleration_zone",
                     "price_percentile"),
+        "cycle": ("reset_completion", "path_quality"),
     }
     for group, keys in prefixes.items():
         if any(feature_key.startswith(k) for k in keys):

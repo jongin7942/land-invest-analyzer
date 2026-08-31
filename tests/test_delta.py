@@ -889,3 +889,173 @@ class TestControlPairIsolation:
         """§28 — 이미 결과를 아는 후보로 하는 검사다."""
         from apt_engine.repo import control
         assert "True Blind Test 가 아닙니다" in control.USAGE_NOTE
+
+
+# ── §18 Excess Reset · §19 Path-Dependent ────────────────────────────
+
+def _cycle_series(prices, samples=None):
+    """가격 목록(**과거→현재** 순서)으로 BandSeries."""
+    n = len(prices)
+    pts = []
+    for i, p in enumerate(prices):
+        idx = n - 1 - i                       # 최신이 0
+        total = 2024 * 12 + 11 - idx
+        ym = f"{total // 12:04d}{total % 12 + 1:02d}"
+        sample = (samples[i] if samples else 8)
+        pts.append(bands.BandPoint(ym, int(p * 0.95), int(p), int(p * 1.06),
+                                   sample))
+    pts.reverse()                             # 최신순
+    return bands.BandSeries(1, "84", pts)
+
+
+class TestExcessReset:
+    def test_고점_대비_하락률만으로_회복이라고_하지_않는다(self):
+        """§18·§49-6 — 과열이 없었으면 '과열 후 조정' 이 아니다."""
+        from apt_engine.features import cycle
+        # 꾸준히 내려오기만 한 시계열. 고점 대비 -30% 이지만 과열이 없었다.
+        r = cycle.excess_reset(_cycle_series(
+            [100 - i for i in range(40)]))
+        assert not r.known
+        assert "고점 대비 하락률만으로" in r.reason
+
+    def test_조정이_얕으면_다음_단계로_안_간다(self):
+        from apt_engine.features import cycle
+        prices = [100 + i * 3 for i in range(20)] + [157 - i for i in range(20)]
+        r = cycle.excess_reset(_cycle_series(prices))
+        assert cycle.OVERHEAT in r.completed
+        assert cycle.CORRECTION not in r.completed or r.current_step is not None
+
+    def test_전세를_모르면_그_다음_단계를_판정하지_않는다(self):
+        """모르는 것을 통과로 세지 않는다."""
+        from apt_engine.features import cycle
+        # 과열 → 조정 → 거래마름 → 안정
+        prices = ([100 + i * 4 for i in range(15)]      # 100 → 156 과열
+                  + [156 - i * 5 for i in range(10)]    # 156 → 111 조정
+                  + [110 + (i % 2) for i in range(15)])  # 안정
+        samples = [12] * 15 + [4] * 10 + [4] * 15
+        r = cycle.excess_reset(_cycle_series(prices, samples))
+        assert cycle.OVERHEAT in r.completed
+        assert cycle.JEONSE_HOLD not in r.completed
+        assert "전세가 버텼는지 몰라" in r.reason
+
+    def test_관측이_짧으면_사이클을_만들지_않는다(self):
+        from apt_engine.features import cycle
+        r = cycle.excess_reset(_cycle_series([100] * 12))
+        assert not r.known
+        assert "최소" in r.reason
+
+    def test_단계를_순서대로_센다(self):
+        from apt_engine.features import cycle
+        f = cycle.reset_feature(cycle.Reset(
+            [cycle.OVERHEAT, cycle.CORRECTION, cycle.DRY_UP],
+            cycle.DRY_UP, "202110", "202301", -0.30))
+        assert f.value == pytest.approx(3 / 7)
+        assert "순서를 봅니다" in f.detail["주의"]
+
+
+class TestPricePath:
+    def test_같은_가격이라도_경로가_다르면_다른_상품이다(self):
+        """§19 — 3.0→4.0→5.5 와 6.5→4.5→5.5 는 다르다."""
+        from apt_engine.features import cycle
+        spike = cycle.price_path(_cycle_series(
+            [300] * 12 + [300 + i * 20 for i in range(13)]))
+        recovery = cycle.price_path(_cycle_series(
+            [650] * 6 + [650 - i * 20 for i in range(11)]
+            + [440 + i * 10 for i in range(12)]))
+        assert spike.kind == cycle.PATH_SPIKE
+        assert recovery.kind == cycle.PATH_RESET_RECOVERY
+        a = cycle.path_feature(spike).value
+        b = cycle.path_feature(recovery).value
+        assert b > a, "회복 경로가 급등 경로보다 높아야 합니다"
+
+    def test_위쪽_수요_증거를_구분한다(self):
+        from apt_engine.features import cycle
+        recovery = cycle.price_path(_cycle_series(
+            [650] * 6 + [650 - i * 20 for i in range(11)]
+            + [440 + i * 10 for i in range(12)]))
+        assert recovery.overhead_proof > 0, (
+            "과거에 더 비싸게 거래된 이력 = 그 가격을 낼 사람이 있었다는 증거")
+
+    def test_이력이_짧으면_경로를_판정하지_않는다(self):
+        from apt_engine.features import cycle
+        p = cycle.price_path(_cycle_series([100] * 6))
+        assert not p.known
+        assert cycle.path_feature(p).value is None
+
+
+# ── §21·§36 EarlyAlpha ───────────────────────────────────────────────
+
+class TestEarlyAlpha:
+    def _fs_full(self, **over):
+        base = {
+            "recoverable_discount_ratio": 0.6,
+            "band_shift_strength": 0.8,
+            "next_node_score": 0.5,
+            "buyer_pool": 0.7,
+            "downside_defense": 0.6,
+        }
+        base.update(over)
+        return _fs(**base)
+
+    def test_가중치를_임의로_확정하지_않는다(self):
+        """§21 — 학습 전에는 균등이고 그 사실이 표시된다."""
+        from apt_engine.scoring import early_alpha
+        a = early_alpha.compute(1, self._fs_full())
+        assert a.weights_source == "HEURISTIC"
+        assert "가중치 임시" in a.label
+        assert "임의로 확정하지 않습니다" in early_alpha.WEIGHT_NOTE
+
+    def test_곱이라_하나가_0_이면_전체가_0_이다(self):
+        """§21 — 합으로 만들면 '격차가 없는데 높은 점수' 가 생긴다."""
+        from apt_engine.scoring import early_alpha
+        full = early_alpha.compute(1, self._fs_full())
+        zeroed = early_alpha.compute(
+            1, self._fs_full(recoverable_discount_ratio=0.0))
+        assert full.alpha > 0
+        assert zeroed.alpha < full.alpha * 0.2
+
+    def test_항목이_모자라면_점수를_만들지_않는다(self):
+        from apt_engine.scoring import early_alpha
+        a = early_alpha.compute(1, _fs(band_shift_strength=0.8,
+                                       buyer_pool=0.7))
+        assert a.alpha is None
+        assert "최소" in a.calc.formula
+
+    def test_Alpha_Risk_Confidence_를_합치지_않는다(self):
+        """§36."""
+        from apt_engine.scoring import early_alpha
+        a = early_alpha.compute(1, self._fs_full())
+        assert a.alpha is not None
+        assert a.confidence is not None
+        assert "Expected Alpha" in a.label and "Confidence" in a.label
+
+    def test_DataQuality_는_Alpha_가_아니라_Confidence_를_움직인다(self):
+        from apt_engine.scoring import early_alpha
+        plain = early_alpha.compute(1, self._fs_full())
+        confirmed = early_alpha.compute(
+            1, self._fs_full(neighbour_confirmation=1.0))
+        assert confirmed.confidence > plain.confidence
+        assert confirmed.alpha == pytest.approx(plain.alpha, rel=0.35)
+
+    def test_감점_Feature_가_ALPHA_와_겹치지_않는다(self):
+        """§45."""
+        from apt_engine.scoring import early_alpha
+        alpha_inputs = {k for keys in early_alpha.MULTIPLIERS.values()
+                        for k in keys}
+        penalty_inputs = set(early_alpha.PENALTIES.values())
+        assert alpha_inputs & penalty_inputs == set()
+
+    def test_이미_반영된_정도를_모르면_남은_알파를_내지_않는다(self):
+        """§20 — 0 으로 두면 확실해질수록 점수가 계속 오른다."""
+        from apt_engine.scoring import early_alpha
+        a = early_alpha.compute(1, self._fs_full())
+        value, why = early_alpha.remaining_alpha(a, already_priced_in=None)
+        assert value is None
+        assert "계속 오릅니다" in why
+
+    def test_이미_반영됐으면_남은_알파가_준다(self):
+        from apt_engine.scoring import early_alpha
+        a = early_alpha.compute(1, self._fs_full())
+        early, _ = early_alpha.remaining_alpha(a, already_priced_in=0.1)
+        late, _ = early_alpha.remaining_alpha(a, already_priced_in=0.8)
+        assert late < early

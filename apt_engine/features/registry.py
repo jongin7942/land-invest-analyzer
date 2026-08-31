@@ -149,6 +149,12 @@ REGISTRY: dict[str, Entry] = {e.feature_key: e for e in (
        "실질 경쟁 공급(§13). 공급 관련 감점은 여기 하나로 모은다"),
     _e("replacement_availability", SUSTAINABILITY, ROLE_ALPHA, False,
        "같은 돈으로 대체할 물건이 얼마나 있나. 많으면 가격이 안 오른다"),
+    _e("reset_completion", SUSTAINABILITY, ROLE_CONFIDENCE, True,
+       "과열→조정→…→거래회복 중 어디까지 왔나(§18). "
+       "고점 대비 하락률이 아니라 순서를 본다"),
+
+    _e("path_quality", CHEAPNESS, ROLE_CONFIDENCE, True,
+       "같은 가격이라도 어떻게 왔는가(§19). 위쪽 수요·아래쪽 지지선 확인 여부"),
 
     # ── STRETCH (§4-D) — 높을수록 감점 ──────────────────────────────
     _e("runup_1y", STRETCH, ROLE_RISK, False, "1년 상승폭(§4-D)"),
