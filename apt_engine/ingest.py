@@ -153,7 +153,7 @@ def _collect_deals(kind: str, months: int, sido: str | None,
 
     yms = recent_yms(months)
     stats = {"months": len(yms), "fetched": 0, "inserted": 0, "empty": 0,
-             "failed": 0, "skipped": 0}
+             "failed": 0, "skipped": 0, "quota_exhausted": False}
 
     with get_conn(db_path) as conn:
         repo.sync_regions(conn)
@@ -174,6 +174,14 @@ def _collect_deals(kind: str, months: int, sido: str | None,
                 continue
             try:
                 rows = mod.fetch_month(code, ym)
+            except molit.MolitQuotaError as e:
+                # 한도 소진. 계속 두드려봐야 전부 거부된다 — 여기까지 받고 멈춘다.
+                # 실패로 남기지 않는다. 안 받은 것이지 실패한 것이 아니고,
+                # 실패로 쌓으면 다음 날 재시도 목록만 지저분해진다.
+                progress(f"\n  {ym} {code} 에서 일일 한도 소진 — 여기까지 받고 멈춥니다.")
+                progress(f"  {e}")
+                stats["quota_exhausted"] = True
+                return stats
             except molit.MolitAuthError as e:
                 # 인증 문제는 계속 돌려도 소용없다 — 즉시 중단하고 알린다.
                 with get_conn(db_path) as conn:
