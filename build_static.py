@@ -38,10 +38,16 @@ def build():
     rows = [dict(r) for r in rows]
     print(f"대상 {len(rows)}건")
 
+    # docs/ 는 GitHub Pages 산출물이면서 **엔지니어링 문서(docs/*.md)도 들어 있다.**
+    # 예전에는 통째로 rmtree 해서, 여기 있던 문서가 빌드 한 번에 사라졌다(실제로 겪음).
+    # 그래서 이 스크립트가 만드는 것만 지운다.
+    GENERATED = {"index.html", "robots.txt", ".nojekyll"}
     if DOCS_DIR.exists():
-        shutil.rmtree(DOCS_DIR)
-    DOCS_DIR.mkdir(parents=True)
-    (DOCS_DIR / "candidate").mkdir()
+        shutil.rmtree(DOCS_DIR / "candidate", ignore_errors=True)
+        for name in GENERATED:
+            (DOCS_DIR / name).unlink(missing_ok=True)
+    DOCS_DIR.mkdir(parents=True, exist_ok=True)
+    (DOCS_DIR / "candidate").mkdir(exist_ok=True)
 
     # robots.txt — 검색엔진 수집 차단(링크를 아는 사람만 접근 가능하게)
     (DOCS_DIR / "robots.txt").write_text("User-agent: *\nDisallow: /\n", encoding="utf-8")

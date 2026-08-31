@@ -194,3 +194,40 @@ class TestDatabasesAreSeparate:
             except Exception as e:                      # noqa: BLE001
                 broken.append(f"{name}: {type(e).__name__} {e}")
         assert broken == [], f"--help 가 깨지는 서브명령: {broken}"
+
+    def test_정적사이트_빌드가_docs의_엔지니어링_문서를_지우지_않는다(self, tmp_path,
+                                                          monkeypatch):
+        """docs/ 는 GitHub Pages 산출물이면서 설계 문서(docs/*.md)도 함께 있다.
+
+        예전 build_static 은 docs/ 를 통째로 rmtree 해서, 빌드 한 번에 문서가
+        전부 사라졌다. 실제로 한 번 겪은 사고라 회귀 테스트로 고정한다.
+        """
+        import build_static
+
+        docs = tmp_path / "docs"
+        (docs / "candidate").mkdir(parents=True)
+        (docs / "architecture_audit.md").write_text("지워지면 안 된다", encoding="utf-8")
+        (docs / "index.html").write_text("<old>", encoding="utf-8")
+        (docs / "candidate" / "1.html").write_text("<old>", encoding="utf-8")
+        monkeypatch.setattr(build_static, "DOCS_DIR", docs)
+
+        # build() 안의 정리 단계만 그대로 재현한다(DB·템플릿 없이).
+        import shutil
+        generated = {"index.html", "robots.txt", ".nojekyll"}
+        shutil.rmtree(docs / "candidate", ignore_errors=True)
+        for name in generated:
+            (docs / name).unlink(missing_ok=True)
+        docs.mkdir(parents=True, exist_ok=True)
+        (docs / "candidate").mkdir(exist_ok=True)
+
+        assert (docs / "architecture_audit.md").exists()
+        assert not (docs / "index.html").exists()
+
+    def test_build_static_이_docs_를_통째로_지우지_않는다(self):
+        """위 테스트는 로직을 재현하고, 이건 실제 소스를 본다."""
+        from pathlib import Path
+
+        source = (Path(__file__).resolve().parents[1] / "build_static.py").read_text(
+            encoding="utf-8")
+        assert "shutil.rmtree(DOCS_DIR)" not in source, (
+            "docs/ 를 통째로 지우면 그 안의 설계 문서가 사라집니다")

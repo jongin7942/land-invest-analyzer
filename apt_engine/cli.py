@@ -1568,6 +1568,55 @@ def cmd_cashflow(args):
                 print(f"    {line}")
 
 
+def cmd_lessons(args):
+    """Investment Lessons DB (지시서 §58·§59).
+
+    백테스트에서 얻은 규칙을 코드에 하드코딩하지 않기 위한 그릇이다.
+    """
+    from apt_engine.repo import lessons as lesson_repo
+
+    with get_conn(args.db) as conn:
+        if args.action == "seed":
+            n = lesson_repo.seed(conn)
+            print(f"가설 {n}개를 넣었습니다 (전부 HYPOTHESIS — 검증 전에는 계산에 쓰지 않습니다).")
+            return
+
+        if args.action == "promote":
+            if not args.key or not args.status:
+                sys.exit("사용법: lessons promote --key <lesson_key> --status <상태>")
+            try:
+                lesson_repo.promote(
+                    conn, args.key, status=args.status, evidence=args.evidence,
+                    sample_size=args.sample, tested_regions=args.regions,
+                    tested_regimes=args.regimes, result=args.result,
+                    modified_rule=args.rule)
+            except lesson_repo.LessonError as e:
+                sys.exit(str(e))
+            print(f"{args.key} → {args.status}")
+            return
+
+        rows = lesson_repo.by_status(conn, args.status)
+
+    if not rows:
+        print("lesson 이 없습니다. `lessons seed` 로 시작하세요.")
+        return
+    counts = {}
+    for r in rows:
+        counts[r["status"]] = counts.get(r["status"], 0) + 1
+    print("  ".join(f"{k} {v}" for k, v in sorted(counts.items())) + "\n")
+    for r in rows:
+        mark = {"HYPOTHESIS": "?", "PROVISIONAL": "~", "CONFIRMED": "O",
+                "REJECTED": "X"}.get(r["status"], " ")
+        print(f"  {mark} [{r['status']:<11}] {r['lesson_key']}")
+        print(f"      {r['original_hypothesis']}")
+        if r["sample_size"] or r["tested_regimes"]:
+            print(f"      표본 {r['sample_size'] or '-'} · "
+                  f"국면 {r['tested_regimes'] or '-'}")
+        if r["modified_rule"]:
+            print(f"      → {r['modified_rule']}")
+    print("\n  CONFIRMED 만 계산에 쓰입니다. HYPOTHESIS·PROVISIONAL 은 참고용입니다.")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="python -m apt_engine.cli",
@@ -1833,6 +1882,19 @@ def build_parser() -> argparse.ArgumentParser:
     cf.add_argument("--allow-unverified", action="store_true")
     cf.add_argument("--verbose", action="store_true")
 
+    ls = sub.add_parser("lessons", help="Investment Lessons DB (가설 → 검증 → 규칙)")
+    ls.add_argument("action", nargs="?", default="list",
+                    choices=["list", "seed", "promote"])
+    ls.add_argument("--key", help="promote: lesson_key")
+    ls.add_argument("--status", choices=["HYPOTHESIS", "PROVISIONAL", "CONFIRMED",
+                                         "REJECTED"])
+    ls.add_argument("--evidence", help="promote: 근거")
+    ls.add_argument("--sample", type=int, help="promote: 표본수")
+    ls.add_argument("--regions", help="promote: 검증한 지역 (쉼표 구분)")
+    ls.add_argument("--regimes", help="promote: 검증한 시장국면 (쉼표 구분)")
+    ls.add_argument("--result", help="promote: 결과 요약")
+    ls.add_argument("--rule", help="promote: 바뀐 규칙")
+
     sub.add_parser("validate", help="요구사항 26 검증 규칙 실행")
 
     re_ = sub.add_parser("report", help="진단 리포트")
@@ -1848,6 +1910,7 @@ HANDLERS = {
     "listing": cmd_listing, "market": cmd_market,
     "rule": cmd_rule, "regulation": cmd_regulation, "loan": cmd_loan, "cash": cmd_cash,
     "profile": cmd_profile, "budget": cmd_budget, "cashflow": cmd_cashflow,
+    "lessons": cmd_lessons,
     "ladder": cmd_ladder, "relative": cmd_relative,
     "transit": cmd_transit, "supply": cmd_supply, "geocode": cmd_geocode,
     "catalyst": cmd_catalyst, "redev": cmd_redev,
