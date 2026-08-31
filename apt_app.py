@@ -145,12 +145,48 @@ def home():
     form = {"cash": cash_in, "house_count": house_count,
             "horizon": horizon, "limit": limit}
 
-    if not cash_in:
-        return render_template("apt_home.html", form=form, result=None)
-
+    override = request.args.get("unlock") == "1"
     with ro_conn() as conn:
-        view = _rank_view(conn, cash_in, house_count, horizon, limit)
-    return render_template("apt_home.html", form=form, result=view)
+        lock = _lock_state(conn)
+        if lock and not override:
+            return render_template("apt_home.html", form=form, result=None,
+                                   lock=lock)
+        view = _rank_view(conn, cash_in, house_count, horizon, limit) \
+            if cash_in else None
+    return render_template("apt_home.html", form=form, result=view,
+                           lock=None, unlocked=lock if override else None)
+
+
+def _lock_state(conn) -> dict | None:
+    """순위 화면 잠금.
+
+    백테스트로 학습한 가중치가 없으면 순위는 **배관이 도는지 확인한 결과**일 뿐이다.
+    임시(heuristic) 가중치로 만든 1위를 화면에 띄우면, 아무리 경고를 붙여도
+    사람은 순위를 먼저 읽는다. 그래서 아예 잠근다 — 학습 가중치가 생기면 저절로 풀린다.
+    """
+    from apt_engine.backtest import usefulness as useful_mod
+
+    try:
+        learned = useful_mod.load_weights(conn, market_source="REAL")
+    except Exception:                          # 백테스트 테이블이 아직 없을 수 있다
+        learned = None
+    if learned is not None:
+        return None
+
+    q = lambda s: conn.execute(s).fetchone()
+    span = q("SELECT MIN(deal_ymd), MAX(deal_ymd) FROM trade") or (None, None)
+    months = _month_span(span[0], span[1])
+    sido = {r[0]: r[1] for r in conn.execute(
+        "SELECT substr(lawd_cd,1,2), COUNT(*) FROM trade GROUP BY 1")}
+    return {
+        "months": months,
+        "need_months": 240,
+        "trades": q("SELECT COUNT(*) FROM trade")[0],
+        "by_sido": [{"sido": SIDO_OF_PREFIX.get(k, k), "n": v}
+                    for k, v in sorted(sido.items())],
+        "missing_sido": [s for k, s in sorted(SIDO_OF_PREFIX.items())
+                         if k not in sido],
+    }
 
 
 def _rank_view(conn, cash_in, house_count, horizon, limit):
