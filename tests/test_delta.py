@@ -563,3 +563,173 @@ class TestExecutableSplit:
             c = ex.measure(conn, as_of="2023-06-01", area_band="84",
                            scanned_ids=set())
         assert c.verdict == "PARTIAL_VERIFIED_UNIVERSE"
+
+
+# ── §10~§16 Leader 망 · 전달 실패 · 회복가능 할인 ────────────────────
+
+def _bs(prices, start_ym=202401):
+    """가격 목록(최신순)으로 BandSeries."""
+    pts = []
+    y, m = start_ym // 100, start_ym % 100
+    for p in prices:
+        pts.append(bands.BandPoint(f"{y:04d}{m:02d}", int(p * 0.95), int(p),
+                                   int(p * 1.06), 8))
+        m -= 1
+        if m == 0:
+            y, m = y - 1, 12
+    return bands.BandSeries(1, "84", pts)
+
+
+class TestLeaderNetwork:
+    def test_겹침을_모르면_Leader_로_인정하지_않는다(self):
+        """§11 — 가까운 아파트를 무조건 Leader 로 지정하지 않는다."""
+        from apt_engine.features import leader
+        near = leader.Leader(2, leader.LOCAL, None, "거리 300m")
+        overlapped = leader.Leader(3, leader.LOCAL, 0.6, "같은 학군·가격대")
+        assert not near.relevant
+        assert overlapped.relevant
+        assert leader.relevant_leaders([near, overlapped]) == [overlapped]
+
+    def test_겹침을_모르면_전달실패를_판정하지_않는다(self):
+        """겹침 없이 '안 따라왔다' 는 의미가 없다."""
+        from apt_engine.features import leader
+        t = leader.transmission(_bs([100] * 24), _bs([130] * 12 + [100] * 12),
+                                buyer_overlap=None)
+        assert not t.known
+        assert "겹침 없이" in t.reason
+
+    def test_Leader_가_올랐는데_무반응이면_전달실패(self):
+        from apt_engine.features import leader
+        follower = _bs([100] * 24)
+        lead = _bs([130] * 12 + [100] * 12)
+        t = leader.transmission(follower, lead, buyer_overlap=0.7)
+        assert t.known and t.failure > 0
+
+    def test_Follower_가_따라오면_전달실패가_아니다(self):
+        from apt_engine.features import leader
+        follower = _bs([125] * 12 + [100] * 12)
+        lead = _bs([130] * 12 + [100] * 12)
+        t = leader.transmission(follower, lead, buyer_overlap=0.7)
+        assert t.failure == 0.0
+
+    def test_Leader_가_안_올랐으면_전달을_논하지_않는다(self):
+        from apt_engine.features import leader
+        t = leader.transmission(_bs([100] * 24), _bs([101] * 24),
+                                buyer_overlap=0.7)
+        assert t.failure == 0.0
+        assert "논할 상황이 아닙니다" in t.reason
+
+
+class TestRecoverableDiscount:
+    def test_전달실패를_모르면_분해하지_않는다(self):
+        """§12·§13 — 분해 없이 전부 회복가능으로 보면 'Spread 가 크다 =
+        기회가 크다' 라는 금지된 결론이 나온다."""
+        from apt_engine.features import leader
+        d = leader.decompose(0.40, transmission_failure=None)
+        assert not d.known
+        assert "Spread 가 크다" in d.reason
+
+    def test_전달실패가_클수록_회복가능분이_준다(self):
+        from apt_engine.features import leader
+        low = leader.decompose(0.40, transmission_failure=0.1)
+        high = leader.decompose(0.40, transmission_failure=0.9)
+        assert low.recoverable > high.recoverable
+        assert low.ratio > high.ratio
+
+    def test_구조적_이유가_확인되면_구조적_할인으로_옮긴다(self):
+        """§14 Why Not Yet."""
+        from apt_engine.features import leader
+        plain = leader.decompose(0.40, transmission_failure=0.2)
+        explained = leader.decompose(0.40, transmission_failure=0.2,
+                                     why_not_yet=["교통", "학군", "공급"])
+        assert explained.structural > plain.structural
+        assert explained.ratio < plain.ratio
+
+    def test_이웃이_함께_움직이면_회복쪽에_무게를_준다(self):
+        from apt_engine.features import leader
+        alone = leader.decompose(0.40, transmission_failure=0.5)
+        together = leader.decompose(0.40, transmission_failure=0.5,
+                                    neighbour_confirmation=1.0)
+        assert together.recoverable > alone.recoverable
+
+    def test_Alpha_에는_회복가능분만_쓴다고_말한다(self):
+        from apt_engine.features import leader
+        f = leader.recoverable_feature(
+            leader.decompose(0.40, transmission_failure=0.3))
+        assert "회복가능 부분만" in f.detail["주의"]
+
+
+class TestPersistentCheapness:
+    def test_오래_싼_것_자체는_저평가_증거가_아니다(self):
+        """§14."""
+        from apt_engine.features import leader
+        short = leader.persistent_cheapness(months_cheap=12, gap_closed=None)
+        long = leader.persistent_cheapness(months_cheap=48, gap_closed=None)
+        assert short.value == 0.0
+        assert long.value > 0.5
+
+    def test_격차가_닫히는_중이면_감점을_줄인다(self):
+        from apt_engine.features import leader
+        stuck = leader.persistent_cheapness(months_cheap=48, gap_closed=0.0)
+        closing = leader.persistent_cheapness(months_cheap=48, gap_closed=0.10)
+        assert closing.value < stuck.value
+
+    def test_기간을_모르면_판정하지_않는다(self):
+        from apt_engine.features import leader
+        f = leader.persistent_cheapness(months_cheap=None, gap_closed=None)
+        assert f.value is None
+
+
+class TestNeighbourConfirmation:
+    def test_Alpha_가_아니라_신뢰도라고_말한다(self):
+        """§10 — 이 값을 직접 Alpha 로 크게 가산하지 않는다."""
+        from apt_engine.features import leader
+        f = leader.neighbour_confirmation(moving=3, valid=5)
+        assert f.value == pytest.approx(0.6)
+        assert "Alpha 가 아니라" in f.detail["주의"]
+        assert registry.get("neighbour_confirmation").role == registry.ROLE_CONFIDENCE
+
+    def test_비교단지가_없으면_1_0_으로_치지_않는다(self):
+        from apt_engine.features import leader
+        f = leader.neighbour_confirmation(moving=0, valid=0)
+        assert f.value is None
+
+
+class TestMoneyArrivalAndNextNode:
+    def test_꼬리까지_왔으면_Chase_경고(self):
+        """§15 — Depth 4 이후는 Chase Risk."""
+        from apt_engine.features import leader
+        ladder = leader.Ladder([(1, 11, 0.20), (2, 12, 0.15), (3, 13, 0.10),
+                                (4, 14, 0.08)])
+        f = leader.money_arrival_depth(ladder, self_rank=4)
+        assert f.value == 4.0
+        assert "경고" in f.detail
+
+    def test_구성요소가_없으면_NextNode_점수를_만들지_않는다(self):
+        """§16·§49-8 — 싸다는 것만으로 Next Node 로 보지 않는다."""
+        from apt_engine.features import leader
+        ladder = leader.Ladder([(1, 11, 0.20), (2, 12, 0.01)])
+        f = leader.next_node(ladder, self_rank=2, buyer_overlap=None,
+                             remaining_gap=0.4, early_band_migration=0.5,
+                             transmission_probability=0.6)
+        assert f.value is None
+        assert "싸다는 것만으로" in f.detail["사유"]
+
+    def test_바로_아래_칸이_아니면_점수가_낮다(self):
+        from apt_engine.features import leader
+        ladder = leader.Ladder([(1, 11, 0.20), (2, 12, 0.0), (3, 13, 0.0),
+                                (4, 14, 0.0)])
+        kw = dict(buyer_overlap=0.8, remaining_gap=0.4,
+                  early_band_migration=0.7, transmission_probability=0.7)
+        adjacent = leader.next_node(ladder, self_rank=2, **kw)
+        far = leader.next_node(ladder, self_rank=4, **kw)
+        assert adjacent.value > far.value
+        assert far.value == 0.0, "두 칸 넘게 아래면 아직 순서가 아닙니다"
+
+    def test_위_칸이_안_움직였으면_NextNode_가_아니다(self):
+        from apt_engine.features import leader
+        ladder = leader.Ladder([(1, 11, 0.0), (2, 12, 0.0)])
+        f = leader.next_node(ladder, self_rank=2, buyer_overlap=0.8,
+                             remaining_gap=0.4, early_band_migration=0.7,
+                             transmission_probability=0.7)
+        assert f.value == 0.0
