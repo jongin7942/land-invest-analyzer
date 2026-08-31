@@ -1697,6 +1697,10 @@ def cmd_backtest(args):
     action = args.action
     horizons = tuple(int(h) for h in (args.horizon or "2,5").split(","))
 
+    if action == "sanity":
+        _backtest_sanity(args)
+        return
+
     if action == "plan":
         ws = win_mod.generate(args.start, args.end, horizons=horizons,
                               step_months=args.step,
@@ -1747,6 +1751,21 @@ def cmd_backtest(args):
         print(f"  {kpi_mod.KPI_LABEL['winner_recall_at_k']} 등 KPI 는 "
               f"backtest_kpi 에 저장됩니다. `backtest weights --run-key "
               f"{args.run_key}` 로 가중치 학습을 이어가세요")
+
+
+def _backtest_sanity(args):
+    """§28·§29·§31 — 2017/2019/2021/2023 을 **같은 가중치로** 검사한다."""
+    from apt_engine.backtest import sanity
+    from apt_engine.ranking import pipeline as pipeline_mod
+
+    gate = (pipeline_mod.GATE_PRICE_ONLY if args.price_only
+            else pipeline_mod.GATE_STRICT)
+    with get_conn(args.db) as conn:
+        report = sanity.run_all(
+            conn, run_fn=sanity.buy_counter(gate=gate, limit=args.top),
+            weights_source=("BACKTESTED" if args.weights == "backtested"
+                            else "HEURISTIC"))
+    print(report.summary)
 
 
 def _backtest_profile(args, Profile, parse_price):
@@ -2328,7 +2347,7 @@ def build_parser() -> argparse.ArgumentParser:
                          "학습된 게 없으면 heuristic 으로 돌아가고 그 사실을 표시한다")
 
     bt = sub.add_parser("backtest", help="walk-forward 백테스트 (§55) · 가중치 학습 (§74)")
-    bt.add_argument("action", help="plan / run / weights")
+    bt.add_argument("action", help="plan / run / weights / sanity")
     bt.add_argument("--start", help="데이터 시작 YYYY-MM-DD")
     bt.add_argument("--end", help="데이터 끝 YYYY-MM-DD")
     bt.add_argument("--horizon", help="보유기간(년), 쉼표로 여러 개. 기본 2,5")
@@ -2348,6 +2367,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="정답 구간이 다음 분할을 침범하는 창을 뺀다 (embargo)")
     bt.add_argument("--max-windows", type=int, help="창 수 제한 (시험용)")
     bt.add_argument("--show-windows", action="store_true")
+    bt.add_argument("--weights", default="heuristic",
+                    choices=["heuristic", "backtested"],
+                    help="sanity 검사에 쓸 가중치 출처")
     bt.add_argument("--cash-hurdle", type=float,
                     help="세후 현금 수익률. §26 cash_accuracy 를 계산하려면 필요. "
                          "없으면 그 KPI 는 '확인 불가' 로 남는다")

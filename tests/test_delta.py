@@ -1262,3 +1262,99 @@ class TestDeltaPipeline:
                       "실투자금", "Price Stretch", "Money Arrival Depth",
                       "Latent / Visible"):
             assert label in text, f"상세에 '{label}' 이 없습니다"
+
+
+# ── §28·§29·§31 시점별 Sanity Test ───────────────────────────────────
+
+class TestSanity:
+    def test_실거래가_없으면_통과로_치지_않는다(self, db):
+        """후보 0개가 나오면 '보수적이라 통과' 로 읽힐 수 있다."""
+        from apt_engine.backtest import sanity
+        with get_conn(db) as conn:
+            ok, why = sanity.data_available(conn, "2021-01-01")
+        assert not ok
+        assert "실거래가 없습니다" in why
+
+    def test_그_시점_정책이_없으면_검사하지_않는다(self, db):
+        """정책이 없으면 실투자금이 확인 불가라 아무도 게이트를 못 통과한다."""
+        from apt_engine.backtest import sanity
+        with get_conn(db) as conn:
+            conn.execute(
+                "INSERT INTO trade (lawd_cd, apt_name, exclusive_area_m2, "
+                " area_band, deal_amount, deal_ymd) "
+                "VALUES ('11110','합성',84.0,'84',500000000,'20201201')")
+            ok, why = sanity.data_available(conn, "2021-01-01")
+        assert not ok
+        assert "대출 규칙이 없습니다" in why
+        assert "보수적이라 통과" in why
+
+    def test_후보가_0개면_판정_불가다(self, db):
+        from apt_engine.backtest import sanity
+        with get_conn(db) as conn:
+            c = sanity.check(conn, "2021-01-01", sanity.REVERSE,
+                             run_fn=lambda *_: (0, 0))
+        assert c.passed is None
+
+    def test_과열기에_BUY_가_많으면_실패다(self, db):
+        """§28 — MoneyArrival = BUY 로 단순 판단하지 않는지."""
+        from apt_engine.backtest import sanity
+        with get_conn(db) as conn:
+            conn.execute(
+                "INSERT INTO trade (lawd_cd, apt_name, exclusive_area_m2, "
+                " area_band, deal_amount, deal_ymd) "
+                "VALUES ('11110','합성',84.0,'84',500000000,'20201201')")
+            conn.execute(
+                "INSERT INTO loan_rule (rule_key, effective_from, "
+                " source_name, verification, rule_type, value) "
+                "VALUES ('t','2015-01-01','테스트','VERIFIED','LTV',0.4)")
+            greedy = sanity.check(conn, "2021-01-01", sanity.REVERSE,
+                                  run_fn=lambda *_: (8, 10))
+            careful = sanity.check(conn, "2021-01-01", sanity.REVERSE,
+                                   run_fn=lambda *_: (1, 10))
+        assert greedy.passed is False
+        assert "MoneyArrival 만 보고" in greedy.detail
+        assert careful.passed is True
+
+    def test_2021_만_통과하는_모델은_2019_에서_걸린다(self, db):
+        """§29 — 전부 CASH 라고 하면 2021 은 통과하지만 2019 에서 실패한다."""
+        from apt_engine.backtest import sanity
+        with get_conn(db) as conn:
+            conn.execute(
+                "INSERT INTO trade (lawd_cd, apt_name, exclusive_area_m2, "
+                " area_band, deal_amount, deal_ymd) "
+                "VALUES ('11110','합성',84.0,'84',500000000,'20161201')")
+            conn.execute(
+                "INSERT INTO loan_rule (rule_key, effective_from, "
+                " source_name, verification, rule_type, value) "
+                "VALUES ('t','2015-01-01','테스트','VERIFIED','LTV',0.4)")
+            never_buy = sanity.check(conn, "2017-01-01", sanity.OPPORTUNITY,
+                                     run_fn=lambda *_: (0, 10))
+        assert never_buy.passed is False
+        assert "좋은 기회까지 CASH 로 흘렸습니다" in never_buy.detail
+
+    def test_하나라도_판정불가면_전체가_판정불가다(self):
+        """통과한 것만 세면 '2021 은 통과했다' 로 읽히고 그건 반쪽이다."""
+        from apt_engine.backtest import sanity
+        r = sanity.SanityReport([
+            sanity.Check("2021-01-01", sanity.REVERSE, True, 0.1, 10, ""),
+            sanity.Check("2019-01-01", sanity.OPPORTUNITY, None, None, 0, "",
+                         "데이터 없음"),
+        ])
+        assert r.all_passed is None
+        assert "판정 불가" in r.summary
+
+    def test_시점별_가중치를_따로_만들지_않는다고_말한다(self):
+        """§29·§49-14."""
+        from apt_engine.backtest import sanity
+        r = sanity.SanityReport([
+            sanity.Check("2021-01-01", sanity.REVERSE, True, 0.1, 10, ""),
+            sanity.Check("2019-01-01", sanity.OPPORTUNITY, False, 0.02, 10, ""),
+        ])
+        assert r.all_passed is False
+        assert "시점별로 가중치를 따로 만들지 않습니다" in r.summary
+
+    def test_True_Blind_가_아니라고_항상_표시한다(self):
+        """§28."""
+        from apt_engine.backtest import sanity
+        r = sanity.SanityReport([])
+        assert "True Blind Test 가 아닙니다" in r.summary
