@@ -525,3 +525,161 @@ Phase 8 백테스트가 끝나야 `'BACKTESTED'` 로 바뀐다.
 - `redev_mispricing` · `relative_gap` feature — `models.SPEC` 이 참조하는데
   아직 생산되지 않아 해당 모델이 항상 None 이다
 - §77 나머지 문서 8종
+
+---
+
+## PHASE 9 — DELTA UPGRADE (신규 지시서 §1~§49) · 2026-08-31
+
+### §48 보고서
+
+#### A. 기존에 이미 구현되어 있던 것
+
+새 지시서 46개 항목 중 3개는 손댈 필요가 없었다.
+
+| § | 내용 | 어디에 |
+|---:|---|---|
+| 32 | 사용자 관심 편향 금지 | `blind/universe.py` 가 `watchlist` 를 import 조차 안 함 + Placebo 테스트 |
+| 33 | 지역명 자체에 Alpha 금지 | 정렬 키가 `(-score, complex_id)` — 이름이 한 번도 안 들어감 |
+| 41 | 연구 후보를 Regression 전용으로 | 기존 §73 규칙이 이미 고정 |
+
+그리고 부분적으로 이미 있던 것들:
+Capital Gate 순서(§2), MNTP 90일 정규화(§35), Score/Confidence 분리(§36),
+매수가 구간 strong/fair/wait(§39), walk-forward + Catalyst Vintage(§30),
+`feature_usefulness` 생존 기록(§44).
+
+#### B. 이번에 새로 구현한 것
+
+| 파일 | § | 무엇 |
+|---|---|---|
+| `db/migrations/016_delta_upgrade.sql` | 1·4·11·12·27·38·43·44 | 7개 테이블 + 랭킹 확장 |
+| `features/registry.py` | 4·44·45 | Feature 등록부 — State·role·tier |
+| `features/bands.py` | 7·8·9 | P25/중앙값/P75 이동 · Latent/Visible · 기울기 지속 |
+| `features/stretch.py` | 5·6 | 장기정상가 대비 이탈 · 역U 가속도 · 상승폭 |
+| `features/stage.py` | 17·22·23·38 | 8단계 Stage · 4분면 · Quiet Compounder |
+| `features/leader.py` | 10~16 | Leader 5종 · 전달실패 · 회복가능할인 · Next Node |
+| `invest/cash_candidate.py` | 2·3·24·46 | CASH 후보 · 남는현금 수익 · 총자본수익률 |
+| `invest/buckets.py` | 27·30 | 현금 버킷 9종 (Phase 8 에서 만듦) |
+| `ranking/executable.py` | 37·39·40·43 | 실행/Watch 분리 · Competitive Buy Price · 시장온도 · Coverage |
+| `repo/control.py` + `rules/*.csv` | 27·28·41 | Control Pair · 연구셋 |
+| `backtest/kpi.py` 확장 | 25·26 | KPI 14 → 19종 · 성공 3단계 |
+
+Feature 등록부 현황: 47개
+(CHEAPNESS 4 · MOVEMENT 15 · SUSTAINABILITY 7 · STRETCH 12 · GATE 2 · CONTEXT 7)
+역할별: ALPHA 18 · RISK 12 · GATE 2 · CONFIDENCE 1 · CONTEXT 14
+**CORE 0개** — 백테스트 전이라 비어 있는 것이 정상이다(§44).
+
+#### C. 기존 로직을 수정한 것
+
+| 수정 전 | 수정 후 | 이유 |
+|---|---|---|
+| `models.SPEC` 에 `("price_acceleration", True)` — 가속도가 높을수록 가점 | `acceleration_zone` 역U. Emerging 최고, Extreme 은 감점 | §6. 선형 가산은 상투를 잡는다. §49-5 와도 어긋났다 |
+| 저평가 판단에 자기 과거 평균 사용 | 장기 **추세선**의 현재 위치 | §5. 우상향한 단지는 과거 평균 대비 항상 '고평가' 로 나온다 |
+| `entry_position`·`discovery_lag`·`supply_ratio_2y`·`downside_defense`·`transaction_quality` 가 ALPHA 모델과 `kill.RULES` 양쪽에 | Feature 하나가 role 하나만 | §45. Kill 이 배제라 산술적 이중가산은 아니었지만 같은 신호가 순위와 생존을 두 번 움직였다 |
+| 전세 승계 + 주담대를 각각의 최대치로 **더함** | 조합 자체를 엔진이 거부 | 5억짜리에 주담대 3억 + 보증금 3억이 잡혀 실투자금이 **음수**로 나왔다. UI 에서만 막으면 `rank`·`backtest` 로 샌다 |
+| CASH 가 boolean 플래그 | 순위표의 **행** | §3. 행이 아니면 "3위보다 낫고 2위보다 못하다" 를 말할 수 없고 `cash_accuracy` 를 채점할 수 없다 |
+| 연구후보 단지명이 `repo/control.py` 모듈 상수 | `rules/*.csv` | §73. 이름이 코드에 박히면 언젠가 그 이름을 참조하는 분기가 생긴다 |
+
+#### D. 삭제/비활성화한 Feature
+
+**없다.** 기존 19개와 7그룹을 하나도 지우지 않았다.
+§4 가 요구한 4 State 는 그 위에 얹었고, 기존 7그룹은 §44 의 `DIAGNOSTIC` 으로
+내렸다. 삭제 대신 강등이다 — `models.SPEC`·`group_of`·`kill.RULES` 가 전부
+7그룹을 참조 중이라 지우면 랭킹이 통째로 멈춘다.
+
+#### E. 데이터 부족으로 아직 구현하지 못한 것
+
+| § | 무엇 | 필요한 것 |
+|---:|---|---|
+| 12·13 | 전달 실패 **실측** | 계산기는 있음. Leader 12개월 시계열 필요 |
+| 16 | Next Node **실행** | 생활권 사다리 + 각 칸의 상승률 |
+| 19 | Path-Dependent Valuation | 도달 경로 전체 |
+| 27 | Control Pair 채점 | 2019 시점 실거래 |
+| 28 | 2021 CASH Reverse Sanity | 2021 실거래 + **그 시점 LTV·DSR** |
+| 29 | 2017/2019 Opportunity | 〃 |
+| 31 | 2023 Recovery | 〃 |
+
+수집은 종인님 PC 에서 진행 중이다(매매 585,294건 · 27/240개월).
+**과거 정책 행이 없으면 실거래가 다 와도 §28·§29·§31 은 못 돈다** —
+그 시점 실투자금이 "확인 불가" 가 되어 Capital Gate 를 아무도 통과하지 못한다.
+
+#### F. 백테스트가 필요한 가설
+
+이번에 넣은 숫자 중 **관측이 아니라 판정 기준**인 것들. 전부 코드에
+`THRESHOLD_NOTE` 로 표시했고, §21 이 요구한 대로 학습이 대체한다.
+
+- 가속 구간별 남은 알파 (Dormant 0.35 / Emerging 1.00 / Confirmation 0.70 / Overheated 0.10)
+- 밴드 상승 판정선 1% · Spike 판정 3M 10% vs 장기 2%
+- Stage 경계 (Cheap ≤ −3% · Expensive ≥ +10% · Moving ≥ 0.5)
+- Latent HIGH 0.6 · Visible EARLY 0.45 / CLEAR 0.70
+- 전달 실패 (Leader +8% · Follower +2% · 12개월)
+- Persistent Cheapness 시작점 24개월
+- 시장온도 경계 (20% / 8% / 2%)
+
+그리고 §7 이 준 핵심 가설: **LatentMovement HIGH + VisibleMovement EARLY 가
+가장 좋다** — 이건 결론이 아니라 검증 대상이다.
+
+#### G. Regression Test 결과 (2017 / 2019 / 2021 / 2023)
+
+**아직 낼 수 없다.** 실거래 수집이 27/240개월(11%)이고, 받은 구간이
+200609부터라 2017 이후가 비어 있다. 없는 데이터로 회귀 결과를 만들지 않는다.
+
+대신 **하네스와 판정 로직은 완성했고 합성 시장으로 검증했다.**
+`repo/control.py` 의 `discriminates()` 가 "점수가 없으면 실패가 아니라 모름"
+으로 구분하는 것까지 테스트로 고정했다.
+
+#### H. Universe Coverage
+
+**측정할 모수가 아직 확정되지 않았다.** `ranking/executable.py` 의
+`measure()` 가 단지수·세대수·시군구 커버리지를 계산하고, 80% 미만이면 화면
+제목이 자동으로 `PARTIAL VERIFIED UNIVERSE` 로 바뀐다(§43·§49-13).
+모수를 못 구하면 1.0 으로 가정하지 않고 PARTIAL 로 떨어진다.
+
+#### I·J. 투자금별 Ranking · TOP 후보 상세
+
+**낼 수 없다.** G 와 같은 이유다. 코드 경로는 전부 연결돼 있어서
+수집이 끝나면 명령 한 줄로 나온다.
+
+### 테스트 결과
+
+998개 통과 (신규 34개). 이 중 절반이 **금지 규칙**이다.
+
+| 테스트 | 지키는 금지 |
+|---|---|
+| 싸고 안 움직이면 PRE_BREAKOUT 이 아니다 | §49-8 |
+| 전고점 대비가 아니라 추세 대비다 | §49-6 |
+| 가속도가 선형이 아니다 | §49-5 |
+| 한 Feature 가 ALPHA·RISK 양쪽에 없다 | §45 |
+| 연구후보 이름이 결정 경로 코드에 없다 | §49-2 |
+| 전세승계+주담대 조합을 거부한다 | §2 |
+| 현금수익률을 모르면 0 으로 가정하지 않는다 | §3 |
+| 겹침을 모르면 Leader 로 인정하지 않는다 | §11 |
+| 전달실패를 모르면 할인을 분해하지 않는다 | §12 |
+| 다섯 구성요소 없이 Next Node 점수를 만들지 않는다 | §16 |
+| 다 못 봤으면 '전체' 라고 쓰지 않는다 | §49-13 |
+| 근거 없이 CORE 로 못 올린다 (스키마) | §44 |
+
+### 발견한 오류
+
+1. **`repo/control.py` 에 연구후보 단지명을 모듈 상수로 박았다.**
+   기존 `test_엔진_코드에_특정_단지명이_하드코딩돼_있지_않다` 가 즉시 잡았다.
+   §73 이 금지한 바로 그 형태였다. → CSV 로 옮겼다.
+   **테스트가 깨진 채로 한 번 푸시했다.** 커밋 전 전체 스위트를 돌리지 않고
+   해당 파일만 돌린 탓이다.
+
+2. **`price_acceleration` 이 선형 가산이었다.**
+   `models.SPEC` 에 `(key, True)` 라 "많이 오를수록 좋다" 였고, 이는 §49-5
+   (거래량·상승 증가만으로 가산점 금지)와도 어긋났다. 급등 후 매수를 가산하는
+   방향이라 상투를 잡는 구조였다.
+
+3. **실투자금이 음수가 될 수 있었다.** (수집 세션 메모에서 넘어옴)
+   전세 승계와 주담대의 각각의 최대치를 더하고 있었다. 현실에 없는 조합이
+   가장 매력적인 후보로 올라온다.
+
+### 다음 단계
+
+- §18 Excess Reset Completion · §19 Path-Dependent Valuation
+- §21 EarlyAlpha 식을 파이프라인에 연결 (가중치는 반드시 학습)
+- §34 NakedApartmentValue · ImpliedReconstructionPremium
+- §35 30일 방향성 · Type 정규화 · 급매 흡수
+- `rank` 를 새 층(Stage·CASH·Coverage)에 연결
+- 수집 완료 후: §28·§29·§31 회귀 테스트
