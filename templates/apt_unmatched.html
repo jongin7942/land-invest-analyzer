@@ -1,0 +1,48 @@
+{% extends "apt_base.html" %}
+{% block title %}미매칭 · 아파트 투자분석{% endblock %}
+{% block body %}
+
+<h1>미매칭 실거래</h1>
+<p class="sub">
+  실거래에는 있는데 K-apt 단지에 못 붙인 이름들입니다. 억지로 붙이면 다른 단지
+  가격이 섞이므로, 근거가 없으면 붙이지 않고 여기에 남깁니다.
+</p>
+
+<div class="card">
+  <div class="k">미매칭</div>
+  <p class="stat">
+    {{ "{:,}".format(total) }}<small>건 / 전체 {{ "{:,}".format(alln) }}건</small>
+  </p>
+  {% if alln %}
+    <div class="bar"><i style="width:{{ (100 - total / alln * 100) | round(1) }}%"></i></div>
+    <div class="note" style="margin-top:8px">매칭률 {{ (100 - total / alln * 100) | round(1) }}%</div>
+  {% endif %}
+</div>
+
+<div class="card scroll">
+  <table>
+    <thead><tr>
+      <th class="num">건수</th><th>시군구</th><th>법정동</th>
+      <th class="num">건축</th><th>실거래 단지명</th>
+    </tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td class="num">{{ "{:,}".format(r.cnt) }}</td>
+        <td class="note">{{ r.lawd_cd | sgg }}</td>
+        <td class="note">{{ r.emd_name or "–" }}</td>
+        <td class="num note">{{ r.build_year or "–" }}</td>
+        <td>{{ r.apt_name }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<p class="note">
+  {% for n in [50, 100, 300] %}
+    <a href="/unmatched?limit={{ n }}">상위 {{ n }}개</a>{% if not loop.last %} · {% endif %}
+  {% endfor %}
+</p>
+
+{% endblock %}
