@@ -128,6 +128,63 @@ def collect_complexes(sido: str | None = None, *, with_basis: bool = True,
     return stats
 
 
+def _collect_deals(kind: str, months: int, sido: str | None,
+                   db_path: str | None, progress) -> dict:
+    """매매/전월세 공통. kind ∈ {'trade', 'rent'}"""
+    if kind == "trade":
+        mod, source_key, insert = apt_trade, apt_trade.SOURCE_KEY, repo.insert_trades
+    else:
+        mod, source_key, insert = apt_rent, apt_rent.SOURCE_KEY, repo.insert_jeonse
+
+    yms = recent_yms(months)
+    stats = {"months": len(yms), "fetched": 0, "inserted": 0, "empty": 0, "failed": 0}
+
+    with get_conn(db_path) as conn:
+        repo.sync_regions(conn)
+        src = repo.source_id(conn, source_key)
+
+    for ym in yms:
+        # 그 달에 유효했던 코드로 요청한다. 구 개편 이전 거래는 옛 코드로만 나온다.
+        codes = regions.codes_for_ym(ym, sido)
+        month_rows = 0
+        for code in codes:
+            try:
+                rows = mod.fetch_month(code, ym)
+            except molit.MolitAuthError as e:
+                # 인증 문제는 계속 돌려도 소용없다 — 즉시 중단하고 알린다.
+                with get_conn(db_path) as conn:
+                    repo.log_collection(conn, source_key, target=code, period=ym,
+                                        status="FAILED", error=str(e)[:500])
+                raise
+            except molit.MolitError as e:
+                stats["failed"] += 1
+                with get_conn(db_path) as conn:
+                    repo.log_collection(conn, source_key, target=code, period=ym,
+                                        status="FAILED", error=str(e)[:500])
+                continue
+
+            with get_conn(db_path) as conn:
+                n = insert(conn, rows, src_id=src)
+                repo.log_collection(conn, source_key, target=code, period=ym,
+                                    status="OK" if rows else "EMPTY", row_count=len(rows))
+            stats["fetched"] += len(rows)
+            stats["inserted"] += n
+            stats["empty"] += 0 if rows else 1
+            month_rows += len(rows)
+        progress(f"  {ym}  시군구 {len(codes)}개 · 조회 {month_rows}건")
+    return stats
+
+
+def collect_trades(months: int = 60, sido: str | None = None, *,
+                   db_path: str | None = None, progress=print) -> dict:
+    return _collect_deals("trade", months, sido, db_path, progress)
+
+
+def collect_rents(months: int = 60, sido: str | None = None, *,
+                  db_path: str | None = None, progress=print) -> dict:
+    return _collect_deals("rent", months, sido, db_path, progress)
+
+
 # ── 매칭 ──────────────────────────────────────────────────────────────
 
 def run_matching(*, rebuild: bool = False, db_path: str | None = None,
