@@ -1,0 +1,52 @@
+{% extends "apt_base.html" %}
+{% block title %}단지 검색 · 아파트 투자분석{% endblock %}
+{% block body %}
+
+<h1>단지 검색</h1>
+<p class="sub">K-apt 에 등록된 단지만 나옵니다. 실거래에만 있고 K-apt 에 없는
+  이름은 <a href="/unmatched">미매칭</a> 쪽입니다.</p>
+
+<form class="inline card" action="/search" method="get">
+  <div style="flex:1;min-width:240px">
+    <label for="q">단지명</label>
+    <input type="text" id="q" name="q" value="{{ q }}" placeholder="예: 동아1단지"
+           style="width:100%" autofocus>
+  </div>
+  <button type="submit">찾기</button>
+</form>
+
+{% if error %}<div class="banner">{{ error }}</div>{% endif %}
+
+{% if q %}
+  {% if rows %}
+    <p class="sub">{{ rows | length }}개 찾았습니다{% if rows | length == 50 %} (상위 50개){% endif %}.</p>
+    <div class="card scroll">
+      <table>
+        <thead><tr>
+          <th>단지</th><th>지역</th><th class="num">세대수</th>
+          <th class="num">준공</th>
+        </tr></thead>
+        <tbody>
+        {% for r in rows %}
+          <tr>
+            <td><a href="/complex/{{ r.id }}">{{ r.name }}</a></td>
+            <td class="note">{{ r.lawd_cd | sgg }} {{ r.emd_name or "" }}</td>
+            <td class="num">
+              {% if r.apt_households %}{{ "{:,}".format(r.apt_households) }}
+              {% else %}<span class="unknown">확인 불가</span>{% endif %}
+            </td>
+            <td class="num">{{ r.approval_year or "–" }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="banner">
+      <b>'{{ q }}' 로 찾은 단지가 없습니다.</b>
+      아직 그 지역을 수집하지 않았을 수 있습니다 — 대시보드에서 시도별 단지 수를 확인하세요.
+    </div>
+  {% endif %}
+{% endif %}
+
+{% endblock %}

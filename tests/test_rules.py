@@ -612,3 +612,40 @@ class TestPermitCoverageBySido:
                                      scope=zone_mod.FOREIGN)
             assert st.designated is True
             assert st.can_use_jeonse is False
+
+
+class TestRegulationSummary:
+    """zone.summarize() 와 `cli regulation` 사이의 키 계약.
+
+    summarize() 를 부르는 곳이 cli 한 군데뿐이라 키 이름이 어긋나도 테스트가
+    안 잡았고, 실제로 `cli regulation` 이 KeyError 로 죽어 있었다.
+    cli 가 읽는 키를 여기서 고정한다.
+    """
+
+    CLI_KEYS = ("전세 활용 가능",)          # cli.cmd_regulation 이 직접 인덱싱하는 키
+
+    def _summary(self, conn, lawd="28237"):
+        z = zone_mod.zone_at(conn, lawd, as_of="2026-08-01")
+        p = zone_mod.permit_zone_at(conn, lawd, as_of="2026-08-01",
+                                    scope=zone_mod.DOMESTIC)
+        return zone_mod.summarize(z, p)
+
+    def test_데이터가_없을_때도_키가_있다(self, db):
+        with get_conn(db) as conn:
+            inter = self._summary(conn).intermediates
+            for k in self.CLI_KEYS:
+                assert k in inter, f"cli regulation 이 읽는 키가 없다: {k}"
+            assert inter["전세 활용 가능"] == "확인 불가"
+            assert "주의" in inter        # 미입력 안내
+
+    def test_토허_자료가_있으면_판정이_나온다(self, db):
+        with get_conn(db) as conn:
+            conn.execute(
+                "INSERT INTO land_permit_zone (lawd_cd, designator, target_scope,"
+                " effective_from, effective_to, jeonse_succession_allowed,"
+                " source_name, last_verified) "
+                "VALUES ('28237','인천광역시장','외국인','2025-08-26','2026-08-25',0,"
+                "'테스트','2026-08-31')")
+            inter = self._summary(conn).intermediates
+            # 외국인 지정은 내국인 매수에 안 걸린다 → 전세 활용 가능
+            assert inter["전세 활용 가능"] == "가능"

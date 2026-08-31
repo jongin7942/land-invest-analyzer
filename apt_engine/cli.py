@@ -214,11 +214,13 @@ def cmd_collect(args):
               f"기본정보 {s['basis']}개 · 실패 {s['failed']}건")
     elif args.what == "trades":
         print(f"매매 실거래 수집 (최근 {args.months}개월, {args.sido or '수도권 전체'})...")
-        s = ingest.collect_trades(args.months, args.sido, db_path=args.db)
+        s = ingest.collect_trades(args.months, args.sido, db_path=args.db,
+                                  full=args.full)
         _print_deal_stats(s)
     elif args.what == "rents":
         print(f"전월세 실거래 수집 (최근 {args.months}개월, {args.sido or '수도권 전체'})...")
-        s = ingest.collect_rents(args.months, args.sido, db_path=args.db)
+        s = ingest.collect_rents(args.months, args.sido, db_path=args.db,
+                                 full=args.full)
         _print_deal_stats(s)
 
 
@@ -575,7 +577,7 @@ def cmd_regulation(args):
     print(f"\n  기준일 {day} · 대상 {args.scope}")
     print(f"    규제지역          {z.label}")
     print(f"    토지거래허가구역   {p.label}")
-    print(f"    전세 활용         {calc.intermediates['전세 활용']}")
+    print(f"    전세 활용         {calc.intermediates['전세 활용 가능']}")
     if "주의" in calc.intermediates:
         print(f"\n    ⚠ {calc.intermediates['주의']}")
 
@@ -1949,6 +1951,9 @@ def build_parser() -> argparse.ArgumentParser:
     co.add_argument("--months", type=int, default=60, help="최근 N개월 (기본 60 = 5년)")
     co.add_argument("--no-basis", action="store_true",
                     help="complexes: 단지 목록만 받고 기본정보는 건너뜀(빠름)")
+    co.add_argument("--full", action="store_true",
+                    help="trades/rents: 이미 받은 달도 전부 다시 받는다 "
+                         "(기본은 collection_log 를 보고 건너뜀)")
 
     ma = sub.add_parser("match", help="실거래를 단지에 붙인다")
     ma.add_argument("--rebuild", action="store_true", help="기존 매칭을 지우고 전부 다시")

@@ -1,0 +1,179 @@
+{% extends "apt_base.html" %}
+{% block title %}{{ c.name }} · 아파트 투자분석{% endblock %}
+{% block body %}
+
+<h1>{{ c.name }}</h1>
+<p class="sub">
+  {{ c.lawd_cd | sgg }} {{ c.emd_name or "" }} ·
+  {% if c.apt_households %}{{ "{:,}".format(c.apt_households) }}세대
+  {% else %}<span class="unknown">세대수 확인 불가</span>{% endif %} ·
+  {% if c.approval_year %}{{ c.approval_year }}년 사용승인
+  {% else %}<span class="unknown">준공 확인 불가</span>{% endif %}
+</p>
+
+<h2>대표가격</h2>
+{% if not prices %}
+  <div class="banner">
+    <b>이 단지에 매칭된 실거래가 없습니다.</b> 대표가격을 낼 수 없습니다.
+    수집이 안 됐거나, 실거래의 단지명이 K-apt 이름과 달라 안 붙은 경우입니다.
+  </div>
+{% else %}
+<div class="card scroll">
+  <table>
+    <thead><tr>
+      <th>전용면적</th>
+      <th class="num">매매 대표가격</th><th>신뢰도</th>
+      <th class="num">전세 대표가격</th><th class="num">전세가율</th>
+      <th class="num">표본</th>
+    </tr></thead>
+    <tbody>
+    {% for p in prices %}
+      <tr>
+        <td>{{ p.band | band }}</td>
+        <td class="num">
+          {% if p.price %}<b>{{ p.price.representative_price | eok }}</b>
+          {% else %}<span class="unknown">확인 불가</span>{% endif %}
+        </td>
+        <td>
+          {% if p.price %}
+            <span class="tag {% if p.price.confidence == 'LOW' %}warn{% endif %}">{{ p.price.confidence }}</span>
+          {% else %}<span class="note">스냅샷 없음</span>{% endif %}
+        </td>
+        <td class="num">
+          {% if p.jeonse %}{{ p.jeonse.representative_deposit | eok }}
+          {% else %}<span class="unknown">확인 불가</span>{% endif %}
+        </td>
+        <td class="num">
+          {% if p.jeonse and p.jeonse.jeonse_ratio is not none %}{{ p.jeonse.jeonse_ratio | pct }}
+          {% else %}<span class="unknown">확인 불가</span>{% endif %}
+        </td>
+        <td class="num note">
+          {% if p.price %}매매 {{ p.price.sample_n }}건
+            {%- if p.price.excluded_n %} · 제외 {{ p.price.excluded_n }}{% endif %}<br>
+          {% endif %}
+          {% if p.jeonse %}전세 {{ p.jeonse.sample_n }}건{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="note" style="margin:12px 0 0">
+    신뢰도 <b>LOW</b> 는 표본이 적다는 뜻입니다. 대표가격을 그대로 믿지 말고
+    분포와 표본 수를 같이 보세요.
+  </p>
+</div>
+{% endif %}
+
+<h2>실투자금</h2>
+<form class="inline card" method="get">
+  <div>
+    <label for="price">매수가 (억)</label>
+    <input type="text" id="price" name="price" value="{{ form.price }}" placeholder="6.2">
+  </div>
+  <div>
+    <label for="house_count">취득 후 주택수</label>
+    <input type="number" id="house_count" name="house_count" value="{{ form.house_count }}" min="1" max="5">
+  </div>
+  <div>
+    <label for="income">연소득 (억, 선택)</label>
+    <input type="text" id="income" name="income" value="{{ form.income }}" placeholder="0.8">
+  </div>
+  <div class="check">
+    <input type="checkbox" id="jeonse" name="jeonse" {% if form.jeonse %}checked{% endif %}>
+    <label for="jeonse" style="margin:0">전세 승계(갭투자)</label>
+  </div>
+  <div class="check">
+    <input type="checkbox" id="loan" name="loan" {% if form.loan %}checked{% endif %}>
+    <label for="loan" style="margin:0">주담대 사용</label>
+  </div>
+  <button type="submit">계산</button>
+</form>
+<p class="note" style="margin:-6px 0 16px">
+  전세 승계와 주담대는 보통 같이 안 됩니다 — 전세 낀 집은 담보 여력이 남지 않습니다.
+  둘 다 켜면 엔진이 각각의 최대치를 더해버려서 실투자금이 실제보다 훨씬 작게(때로는
+  음수로) 나옵니다.
+</p>
+
+{% if cap_error %}
+  <div class="banner"><b>계산하지 못했습니다.</b><br>{{ cap_error }}</div>
+{% elif capital %}
+<div class="card scroll">
+  <table>
+    <thead><tr>
+      <th>항목</th><th class="num">금액</th><th>확인</th><th>근거</th>
+    </tr></thead>
+    <tbody>
+      {% for it in capital.cost_items %}
+        <tr>
+          <td>{{ it.name }}</td>
+          <td class="num">
+            {% if it.amount is none %}<span class="unknown">확인 불가</span>
+            {% else %}{{ it.label }}{% endif %}
+          </td>
+          <td>
+            <span class="tag {% if it.verification not in ('VERIFIED',) %}unknown{% endif %}">{{ it.verification }}</span>
+          </td>
+          <td class="note">{{ it.formula or "" }}</td>
+        </tr>
+      {% endfor %}
+      <tr>
+        <td><b>총취득비용</b></td>
+        <td class="num"><b>{{ capital.total_purchase_cost | won }}{% if capital.unknown %} 이상{% endif %}</b></td>
+        <td></td><td class="note"></td>
+      </tr>
+      <tr>
+        <td>− 승계 전세보증금</td>
+        <td class="num">
+          {% if capital.assumable_deposit is none %}<span class="unknown">확인 불가</span>
+          {% else %}{{ capital.assumable_deposit | won }}{% endif %}
+        </td>
+        <td></td>
+        <td class="note">토허 판정이 없으면 빼지 않습니다</td>
+      </tr>
+      <tr>
+        <td>− 주택담보대출</td>
+        <td class="num">
+          {% if capital.available_mortgage is none %}<span class="unknown">확인 불가</span>
+          {% else %}{{ capital.available_mortgage | won }}{% endif %}
+        </td>
+        <td></td>
+        <td class="note">LTV 한도와 DSR 한도 중 작은 쪽</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p style="font-size:20px;margin:18px 0 4px">
+    {% if capital.confirmed %}실투자금{% else %}<span class="unknown">예상</span> 실투자금{% endif %}
+    <b>{% if capital.required is none %}<span class="unknown">확인 불가</span>
+       {% else %}{{ capital.required | won }}{% if capital.unknown %} 이상{% endif %}{% endif %}</b>
+  </p>
+
+  {% if capital.required is not none and capital.required < 0 %}
+    <div class="banner">
+      <b>실투자금이 음수로 나왔습니다 — 그대로 믿으면 안 됩니다.</b>
+      승계 전세보증금과 주택담보대출의 <b>각각의 최대치를 동시에</b> 가정해서
+      조달액이 총취득비용을 넘은 것입니다. 실제로는 전세를 끼면 담보 여력이
+      거의 없습니다. 위 체크박스에서 둘 중 하나만 켜고 다시 계산하세요.
+    </div>
+  {% endif %}
+
+  {% if capital.unknown %}
+    <div class="banner">
+      <b>확인 불가 항목 {{ capital.unknown | length }}개를 0원으로 세지 않았습니다.</b>
+      실제로 필요한 현금은 위 금액보다 <b>큽니다</b>.<br>
+      <span class="note">{{ capital.unknown | join(" · ") }}</span>
+    </div>
+  {% endif %}
+
+  {% if capital.pending_policies %}
+    <p class="note">시행 전 정책: {{ capital.pending_policies | join(" · ") }}</p>
+  {% endif %}
+  {% for n in capital.notes %}<p class="note">※ {{ n }}</p>{% endfor %}
+</div>
+{% else %}
+  <p class="note">매수가를 넣으면 취득세·중개보수·대출까지 반영한 실투자금을 계산합니다.</p>
+{% endif %}
+
+<p style="margin-top:28px"><a href="/search">← 다른 단지 찾기</a></p>
+
+{% endblock %}
