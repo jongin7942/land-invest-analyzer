@@ -258,6 +258,28 @@ TEMPLATES = {
 }
 
 
+def blanks(root: str | Path = "rules") -> dict[str, list[tuple[int, str]]]:
+    """규칙 CSV 안의 '채워야 할 주석 행' 을 모은다.
+
+    각 CSV 는 아직 값을 못 받은 규칙을 `#` 로 주석 처리한 채 자리만 만들어 둔다.
+    (`<세율>` 처럼 꺾쇠로 감싼 자리표시자가 들어 있다.) 파일을 하나씩 열어보지
+    않아도 "지금 뭐가 비어 있나" 를 한 번에 보려고 만든 함수다.
+    """
+    out: dict[str, list[tuple[int, str]]] = {}
+    folder = Path(root)
+    if not folder.exists():
+        return out
+    for path in sorted(folder.glob("*.csv")):
+        found = []
+        for n, line in enumerate(path.read_text(encoding="utf-8-sig").splitlines(), 1):
+            text = line.lstrip()
+            if text.startswith("#") and "<" in text and ">" in text:
+                found.append((n, text.lstrip("#").strip()))
+        if found:
+            out[path.name] = found
+    return out
+
+
 def write_template(kind: str, path: str | Path) -> Path:
     if kind not in TEMPLATES:
         raise RuleImportError(f"알 수 없는 규칙 종류: {kind} (가능: {', '.join(TEMPLATES)})")

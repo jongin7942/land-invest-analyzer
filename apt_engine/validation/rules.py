@@ -355,6 +355,46 @@ def stage_has_date(conn):
     return ([f"단계일자 없는 정비사업 {n}건"] if n else [])
 
 
+# ── PHASE 7 · 현금흐름 ─────────────────────────────────────────────────
+
+@rule("30/31", "수익률은 시나리오 등급으로만 저장돼 있다")
+def cashflow_grade_only(conn):
+    if not _has_table(conn, "cashflow_snapshot"):
+        return []
+    n = conn.execute(
+        "SELECT COUNT(*) FROM cashflow_snapshot "
+        " WHERE data_grade != 'SCENARIO' OR calc_trace IS NULL "
+        "    OR trim(calc_trace) = ''").fetchone()[0]
+    return ([f"cashflow_snapshot 에 확정 등급이거나 근거 없는 행 {n}건 — "
+             f"세후 IRR 을 확정 수익률처럼 저장할 수 없습니다"] if n else [])
+
+
+@rule("30", "Peak Equity 가 Initial Equity 보다 작지 않다")
+def peak_not_below_initial(conn):
+    if not _has_table(conn, "cashflow_snapshot"):
+        return []
+    rows = conn.execute(
+        "SELECT id, complex_id, scenario_key, initial_equity, peak_equity "
+        "  FROM cashflow_snapshot "
+        " WHERE initial_equity IS NOT NULL AND peak_equity IS NOT NULL "
+        "   AND peak_equity < initial_equity").fetchall()
+    return [f"cashflow_snapshot#{r['id']} ({r['scenario_key']}): "
+            f"Peak {r['peak_equity']:,} < Initial {r['initial_equity']:,} — "
+            f"보유 중 묶인 돈이 처음보다 적을 수는 없습니다" for r in rows[:20]]
+
+
+@rule("31", "한 단지의 수익률이 구간(여러 시나리오)으로 저장돼 있다", severity="WARN")
+def cashflow_is_a_band(conn):
+    if not _has_table(conn, "cashflow_snapshot"):
+        return []
+    rows = conn.execute(
+        "SELECT complex_id, as_of, holding_years, COUNT(*) AS n "
+        "  FROM cashflow_snapshot GROUP BY 1,2,3 HAVING n < 2").fetchall()
+    return [f"단지 {r['complex_id']}({r['as_of']}·{r['holding_years']}년): "
+            f"시나리오가 {r['n']}개뿐입니다 — 수익률은 하나의 숫자로 말하지 않습니다"
+            for r in rows[:20]]
+
+
 def _has_table(conn, name: str) -> bool:
     return conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone() is not None

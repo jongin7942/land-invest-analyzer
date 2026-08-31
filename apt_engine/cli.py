@@ -509,6 +509,24 @@ def cmd_rule(args):
         print(f"{n}건 확인 표시" if n else "해당 규칙을 찾지 못했습니다.")
         return
 
+    if args.action == "blanks":
+        found = rule_repo.blanks(args.path or "rules")
+        if not found:
+            print("채워야 할 자리표시자가 없습니다.")
+            return
+        total = sum(len(v) for v in found.values())
+        print(f"아직 값을 못 받아 주석으로 남겨둔 규칙 {total}건\n")
+        for name, lines in found.items():
+            print(f"■ rules/{name}")
+            for n, text in lines:
+                head = text.split(",")[0]
+                print(f"   {n:>4}행  {head}")
+            print()
+        print("각 줄의 맨 앞 '#' 을 지우고 <> 부분을 채운 뒤 다시 넣으세요:")
+        print("  python -m apt_engine.cli rule import <종류> rules/<파일>")
+        print("\n무엇을 어디서 확인해야 하는지: docs_dev/03-종인님-할일-정리.md")
+        return
+
     if args.action == "status":
         with get_conn(args.db) as conn:
             cov = rule_repo.coverage(conn)
@@ -1435,6 +1453,121 @@ def cmd_redev(args):
             print(band_result.calc.explain())
 
 
+def cmd_cashflow(args):
+    """보유기간 현금흐름 · Peak Equity · 세후 IRR · Stress Test (PHASE 7)."""
+    from apt_engine import area as area_mod, units
+    from apt_engine.cash import self_capital as capital_mod
+    from apt_engine.cashflow import scenario as scen_mod
+    from apt_engine.listing.provider import parse_price
+    from apt_engine.repo import cashflow as cf_repo
+
+    as_of = args.as_of or _today()
+    band = args.band or area_mod.DEFAULT_BAND
+
+    with get_conn(args.db) as conn:
+        row = _resolve_complex(conn, args)
+        if row is None:
+            return
+        _print_complex_header(row)
+
+        price = parse_price(args.price) if args.price else None
+        if price is None:
+            snap = repo.latest_price_snapshot(conn, row["id"], band)
+            if snap is None or not snap["representative_price"]:
+                print("\n  대표가격이 없습니다. --price 를 주거나 `snapshot` 을 먼저 하세요.")
+                return
+            price = int(snap["representative_price"])
+
+        jeonse = None
+        if args.occupancy == "전세승계":
+            js = repo.latest_jeonse_snapshot(conn, row["id"], band)
+            jeonse = js["representative_deposit"] if js else None
+
+        capital = capital_mod.compute(
+            conn, price=price, as_of=as_of, lawd_cd=row["lawd_cd"],
+            emd_name=row["emd_name"], current_home_count=args.home_count,
+            exclusive_area_m2=args.area or (float(band) if band.isdigit() else None),
+            annual_income=parse_price(args.income) if args.income else None,
+            interest_rate=args.rate, mortgage_term_years=args.years,
+            repayment_type=args.repayment, lender_type=args.lender,
+            use_mortgage=not args.no_loan,
+            jeonse_deposit=jeonse, assume_jeonse=args.occupancy == "전세승계",
+            allow_unverified=args.allow_unverified)
+
+        common = dict(
+            occupancy=args.occupancy,
+            # 월세·보유비용은 '억' 이 아니라 '만원' 으로 받는다. parse_price 는
+            # 1000 미만을 억으로 해석하므로 여기 쓰면 150 이 150억이 된다.
+            monthly_rent=int(units.from_manwon(args.rent)) if args.rent else 0,
+            imputed_rent=(int(units.from_manwon(args.imputed_rent))
+                          if args.imputed_rent else 0),
+            annual_other_cost=(int(units.from_manwon(args.other_cost))
+                               if args.other_cost else 0),
+            official_price=parse_price(args.official_price) if args.official_price else None,
+            holding_cost_override=(int(units.from_manwon(args.holding_cost))
+                                   if args.holding_cost else None),
+            interest_rate=args.rate, mortgage_term_years=args.years,
+            repayment_type=args.repayment,
+            house_count=args.home_count + 1, resided_years=args.resided,
+            region=regions.sido_of(row["lawd_cd"]), lawd_cd=row["lawd_cd"],
+            allow_unverified=args.allow_unverified)
+
+        sale = parse_price(args.sale) if args.sale else None
+        result = scen_mod.band(conn, capital=capital, as_of=as_of,
+                               holding_years=args.holding, base_sale_price=sale,
+                               **common)
+
+        print(f"\n  ── 실투자금 ──")
+        print(f"    {capital.title}  {capital.label}")
+
+        print(f"\n  ── 보유기간 {args.holding}년 · {args.occupancy} ──")
+        base = result.results["Base"]
+        for flow in base.years:
+            print(f"    {flow.year}년차  {flow.label:>16s}"
+                  + (f"   (임대 {units.fmt_won(flow.rental_income)} "
+                     f"− 보유세 {units.fmt_won(flow.holding_tax)} "
+                     f"− 원리금 {units.fmt_won(flow.loan_payment)})"
+                     if flow.holding_tax is not None else ""))
+        print(f"    Initial Equity  {base.calc.intermediates['Initial Equity']}")
+        print(f"    Peak Equity     {base.calc.intermediates['Peak Equity']}"
+              "   ← 보유 중 가장 많이 묶인 내 돈")
+
+        print(f"\n  ── 시나리오 ──")
+        print(f"    {result.label}")
+        for key, detail in result.calc.intermediates["시나리오별"].items():
+            print(f"      {key:<5} 매도 {detail['매도가']:>7s} → "
+                  f"IRR {detail['세후 IRR']:>8s} · 순이익 {detail['순이익']:>9s}")
+        print(f"      위험조정 기대수익  {result.calc.intermediates['위험조정 기대수익']}")
+        print(f"      ※ {scen_mod.ADJUST_NOTE}")
+
+        if base.unknown:
+            print(f"\n    ⚠ 확인 불가: {', '.join(base.unknown[:6])}")
+            for note in base.notes:
+                print(f"      · {note}")
+
+        if args.stress:
+            shocks, calc = scen_mod.stress(
+                conn, capital=capital, as_of=as_of, holding_years=args.holding,
+                sale_price=sale, **common)
+            print(f"\n  ── Stress Test (한 번에 하나씩) ──")
+            for s in shocks:
+                print(f"    {s.label}")
+            print(f"    가장 아픈 충격: {calc.intermediates['가장 아픈 충격']}")
+            print(f"    ※ {scen_mod.SHOCK_NOTE}")
+
+        if args.save:
+            for key, timeline in result.results.items():
+                cf_repo.save(conn, complex_id=row["id"], area_band=band, as_of=as_of,
+                             scenario_key=key, timeline=timeline)
+            print(f"\n  시나리오 {len(result.results)}건 저장 "
+                  f"(등급 SCENARIO — 확정 수익률이 아닙니다).")
+
+        if args.verbose:
+            print("\n  ── 계산 근거 ──")
+            for line in base.calc.explain().splitlines():
+                print(f"    {line}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="python -m apt_engine.cli",
@@ -1499,7 +1632,8 @@ def build_parser() -> argparse.ArgumentParser:
     mk.add_argument("--verbose", action="store_true")
 
     ru = sub.add_parser("rule", help="세법·규제·토허·대출 규칙 수기 입력")
-    ru.add_argument("action", choices=["template", "import", "list", "verify", "status"])
+    ru.add_argument("action",
+                    choices=["template", "import", "list", "verify", "status", "blanks"])
     ru.add_argument("kind", nargs="?",
                     choices=["regulation", "permit", "tax", "loan", "cost"])
     ru.add_argument("path", nargs="?", help="CSV 파일 경로")
@@ -1667,6 +1801,38 @@ def build_parser() -> argparse.ArgumentParser:
                     help="미검증 규칙도 사용(결과에 표시됨)")
     rd.add_argument("--verbose", action="store_true")
 
+    cf = sub.add_parser("cashflow",
+                        help="보유기간 현금흐름 · Peak Equity · 세후 IRR · Stress Test")
+    cf.add_argument("query", help="단지명 일부")
+    cf.add_argument("--complex-id", type=int)
+    cf.add_argument("--price", help="매수가 (미지정시 대표가격)")
+    cf.add_argument("--sale", help="예상 매도가 — 없으면 IRR 을 계산하지 않는다")
+    cf.add_argument("--holding", type=int, default=5, help="보유기간(년, 기본 5)")
+    cf.add_argument("--occupancy", default="실거주",
+                    choices=["실거주", "임대", "전세승계"])
+    cf.add_argument("--rent", help="월세 (만원 단위, 예: 80)")
+    cf.add_argument("--imputed-rent", help="실거주 시 아끼는 연간 주거비 (만원)")
+    cf.add_argument("--official-price", help="공시가격 (억) — 보유세 계산에 필요")
+    cf.add_argument("--holding-cost",
+                    help="연간 보유비용 직접 입력 (만원). 보유세 규칙 대신 쓴다")
+    cf.add_argument("--other-cost", help="연간 관리비·수선 등 (만원)")
+    cf.add_argument("--band", help="전용면적 밴드 (기본 84)")
+    cf.add_argument("--area", type=float, help="전용면적 ㎡")
+    cf.add_argument("--home-count", type=int, default=0, help="현재 보유 주택 수")
+    cf.add_argument("--resided", type=int, help="거주기간(년) — 1세대1주택 비과세 판정")
+    cf.add_argument("--income", help="연소득 (DSR 한도)")
+    cf.add_argument("--rate", type=float, help="대출금리 (예: 0.045)")
+    cf.add_argument("--years", type=int, default=30, help="대출기간(년)")
+    cf.add_argument("--repayment", default="원리금균등",
+                    choices=["원리금균등", "원금균등", "만기일시"])
+    cf.add_argument("--lender", default="은행", choices=["은행", "비은행"])
+    cf.add_argument("--no-loan", action="store_true")
+    cf.add_argument("--as-of", help="기준일 YYYY-MM-DD (기본 오늘)")
+    cf.add_argument("--stress", action="store_true", help="Stress Test 도 함께")
+    cf.add_argument("--save", action="store_true")
+    cf.add_argument("--allow-unverified", action="store_true")
+    cf.add_argument("--verbose", action="store_true")
+
     sub.add_parser("validate", help="요구사항 26 검증 규칙 실행")
 
     re_ = sub.add_parser("report", help="진단 리포트")
@@ -1681,7 +1847,7 @@ HANDLERS = {
     "snapshot": cmd_snapshot, "price": cmd_price,
     "listing": cmd_listing, "market": cmd_market,
     "rule": cmd_rule, "regulation": cmd_regulation, "loan": cmd_loan, "cash": cmd_cash,
-    "profile": cmd_profile, "budget": cmd_budget,
+    "profile": cmd_profile, "budget": cmd_budget, "cashflow": cmd_cashflow,
     "ladder": cmd_ladder, "relative": cmd_relative,
     "transit": cmd_transit, "supply": cmd_supply, "geocode": cmd_geocode,
     "catalyst": cmd_catalyst, "redev": cmd_redev,
