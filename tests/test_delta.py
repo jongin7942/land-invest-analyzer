@@ -1059,3 +1059,124 @@ class TestEarlyAlpha:
         early, _ = early_alpha.remaining_alpha(a, already_priced_in=0.1)
         late, _ = early_alpha.remaining_alpha(a, already_priced_in=0.8)
         assert late < early
+
+
+# ── §35 Normal Executable Price ──────────────────────────────────────
+
+class TestNormalExecutablePrice:
+    def test_보정할_수_없으면_보정했다고_하지_않는다(self):
+        from apt_engine.price import normalize as norm
+        r = norm.normal_executable_price(500_000_000)
+        assert r.price == 500_000_000
+        assert len(r.skipped) == 3
+        assert r.calc.grade == "ESTIMATED"
+
+    def test_한_달_표본으로_가격을_크게_흔들지_않는다(self):
+        """§35 — 3건짜리 최근 표본으로 10% 올리면 정규화가 아니라 노이즈다."""
+        from apt_engine.price import normalize as norm
+        a = norm.direction([200, 210, 205], [100, 100, 100, 100])
+        assert a.applied
+        assert a.factor <= 1 + norm.MAX_DIRECTION_ADJUST
+        assert "상한 적용" in a.why
+
+    def test_표본이_적으면_방향성을_안_본다(self):
+        from apt_engine.price import normalize as norm
+        a = norm.direction([200], [100, 100, 100])
+        assert not a.applied
+        assert "표본 부족" in a.why
+
+    def test_타입_격차를_모르면_0_으로_가정하지_않는다(self):
+        """0 으로 두면 A타입과 B타입이 한 가격으로 눌린다."""
+        from apt_engine.price import normalize as norm
+        assert not norm.type_normalize(None).applied
+
+    def test_급매가_많으면_그_가격에_살_수_있다고_본다(self):
+        """§35 urgent-sale absorption."""
+        from apt_engine.price import normalize as norm
+        absorbed = norm.urgent_absorption(4, 10)     # 40%
+        rare = norm.urgent_absorption(1, 100)        # 1%
+        assert absorbed.factor == 1.0
+        assert rare.factor > 1.0
+        assert "흡수하고 있어" in absorbed.why
+
+    def test_급매_건수를_모르면_보정하지_않는다(self):
+        from apt_engine.price import normalize as norm
+        assert not norm.urgent_absorption(None, 10).applied
+
+
+# ── §34 Naked Apartment Value ────────────────────────────────────────
+
+class TestNakedValue:
+    def _peers(self, n=4, redev=False):
+        from apt_engine.redev import naked
+        return [naked.Peer(i, 7_000_000, 1992, redev) for i in range(n)]
+
+    def test_비교단지가_모자라면_추정하지_않는다(self):
+        from apt_engine.redev import naked
+        v = naked.naked_value(area_m2=84, peers=self._peers(2), own_year=1990)
+        assert not v.known
+        assert "추정하지 않습니다" in v.reason
+
+    def test_재건축_기대가_있는_단지는_비교에_쓰지_않는다(self):
+        from apt_engine.redev import naked
+        v = naked.naked_value(area_m2=84, peers=self._peers(5, redev=True),
+                              own_year=1990)
+        assert not v.known
+
+    def test_연식이_너무_다르면_비교에서_뺀다(self):
+        from apt_engine.redev import naked
+        far = [naked.Peer(i, 7_000_000, 2020, False) for i in range(5)]
+        v = naked.naked_value(area_m2=84, peers=far, own_year=1985)
+        assert not v.known
+
+    def test_할인율을_모르면_현재가치로_환산하지_않는다(self):
+        """0% 로 두면 20년 뒤 5억이 지금 5억이 되어 모든 노후 단지가 좋아 보인다."""
+        from apt_engine.redev import naked
+        v = naked.naked_value(area_m2=84, peers=self._peers(), own_year=1990)
+        p = naked.premium_efficiency(
+            current_price=900_000_000, naked=v,
+            expected_gross_value=400_000_000, years_to_completion=15,
+            discount_rate=None)
+        assert not p.known
+        assert "모든 노후 단지가 좋아 보입니다" in p.reason
+
+    def test_프리미엄이_기대가치보다_크면_비싸다고_말한다(self):
+        from apt_engine.redev import naked
+        v = naked.naked_value(area_m2=84, peers=self._peers(), own_year=1990)
+        p = naked.premium_efficiency(
+            current_price=900_000_000, naked=v,
+            expected_gross_value=400_000_000, years_to_completion=15,
+            discount_rate=0.05)
+        assert p.efficiency < 1.0
+        assert "이미 비쌉니다" in p.verdict
+
+    def test_시간이_길수록_효율이_떨어진다(self):
+        from apt_engine.redev import naked
+        v = naked.naked_value(area_m2=84, peers=self._peers(), own_year=1990)
+        kw = dict(current_price=900_000_000, naked=v,
+                  expected_gross_value=600_000_000, discount_rate=0.05)
+        soon = naked.premium_efficiency(years_to_completion=5, **kw)
+        late = naked.premium_efficiency(years_to_completion=25, **kw)
+        assert soon.efficiency > late.efficiency
+
+    def test_서사에는_점수를_주지_않는다(self):
+        """§34·§49-9 — 재건축·GTX 이니까 좋다는 없다."""
+        from apt_engine.redev import naked
+        value, detail = naked.catalyst_paths({"BuyerPool": None,
+                                              "Accessibility": None})
+        assert value is None
+        assert "서사에는 점수를 주지 않습니다" in detail["사유"]
+
+    def test_경로가_설명되면_점수가_난다(self):
+        from apt_engine.redev import naked
+        value, detail = naked.catalyst_paths({"Accessibility": 0.8,
+                                              "BuyerPool": 0.6})
+        assert value is not None
+        assert len(detail["설명 안 된 경로"]) == 2
+
+    def test_경로가_적게_설명될수록_점수가_낮다(self):
+        from apt_engine.redev import naked
+        few, _ = naked.catalyst_paths({"Accessibility": 0.8})
+        many, _ = naked.catalyst_paths({k: 0.8
+                                        for k in naked.TRANSMISSION_PATHS})
+        assert few < many
