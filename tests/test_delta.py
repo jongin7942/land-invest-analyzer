@@ -1603,3 +1603,110 @@ class TestLeaderBuilder:
         for f in feats:
             assert f.value is None
             assert "다릅니다" in f.detail["사유"] or "사다리" in f.detail["사유"]
+
+
+# ── §61·§62·§64 회전 · 순위변경 설명 · 전체 컬럼 ─────────────────────
+
+class TestRankChange:
+    def test_점수는_그대로인데_밀렸으면_남이_움직인_것이다(self):
+        """§64 — 이 후보가 나빠진 것과 다른 후보가 좋아진 것은 다른 사건이다."""
+        from apt_engine.ranking import rotation
+        changes = rotation.explain(
+            previous={1: (3, 70.0, 60.0)},
+            current={1: (11, 69.5, 60.0)})
+        assert changes[0].cause == rotation.OTHERS_MOVED
+        assert "다른 후보들이 변한 것입니다" in changes[0].detail
+
+    def test_점수가_떨어졌으면_이_후보가_나빠진_것이다(self):
+        from apt_engine.ranking import rotation
+        changes = rotation.explain(
+            previous={1: (3, 70.0, 60.0)},
+            current={1: (11, 55.0, 60.0)})
+        assert changes[0].cause == rotation.SELF_WORSE
+
+    def test_신뢰도만_크게_바뀌었으면_우리가_더_알게_된_것이다(self):
+        """후보가 변한 게 아니라 우리가 변한 것이다."""
+        from apt_engine.ranking import rotation
+        changes = rotation.explain(
+            previous={1: (3, 70.0, 30.0)},
+            current={1: (12, 71.0, 75.0)})
+        assert changes[0].cause == rotation.MORE_KNOWN
+        assert "후보가 변한 게 아닙니다" in rotation.CAUSE_LABEL[changes[0].cause]
+
+    def test_한두_칸_흔들림은_변화로_보지_않는다(self):
+        from apt_engine.ranking import rotation
+        changes = rotation.explain(previous={1: (3, 70.0, 60.0)},
+                                   current={1: (4, 70.0, 60.0)})
+        assert changes[0].cause == rotation.UNCHANGED
+
+    def test_탈락한_후보의_사유가_남는다(self):
+        """§65."""
+        from apt_engine.ranking import rotation
+        changes = rotation.explain(
+            previous={1: (3, 70.0, 60.0)}, current={},
+            dropped_reasons={1: "공급충격 — 2년 입주물량 12%"})
+        assert changes[0].cause == rotation.DROPPED
+        assert "공급충격" in changes[0].label
+
+    def test_사유가_없으면_없다고_말한다(self):
+        from apt_engine.ranking import rotation
+        changes = rotation.explain(previous={1: (3, 70.0, None)}, current={})
+        assert "기록되지 않았습니다" in changes[0].detail
+
+
+class TestRotation:
+    def test_거래비용을_모르면_회전을_판정하지_않는다(self):
+        """§61 — 0 으로 두면 순위가 한 칸만 높아도 회전하라는 답이 나온다."""
+        from apt_engine.ranking import rotation
+        r = rotation.rotation(holding_id=1, holding_return=0.10,
+                              candidate_id=2, candidate_return=0.15,
+                              sell_cost_ratio=None, buy_cost_ratio=0.05)
+        assert r.worth_it is None
+        assert "매도비용" in r.reason
+        assert "한 칸만 높아도" in r.reason
+
+    def test_비용을_넘지_못하면_회전이_아니다(self):
+        from apt_engine.ranking import rotation
+        r = rotation.rotation(holding_id=1, holding_return=0.10,
+                              candidate_id=2, candidate_return=0.15,
+                              sell_cost_ratio=0.06, buy_cost_ratio=0.05)
+        assert r.worth_it is False
+        assert "그냥 순위 차이입니다" in r.label
+
+    def test_비용을_넘으면_회전할_만하다(self):
+        from apt_engine.ranking import rotation
+        r = rotation.rotation(holding_id=1, holding_return=0.10,
+                              candidate_id=2, candidate_return=0.40,
+                              sell_cost_ratio=0.06, buy_cost_ratio=0.05)
+        assert r.worth_it is True
+
+
+class TestTopColumns:
+    def test_지시서가_요구한_컬럼이_있다(self):
+        """§62 — TOP10 화면에 무엇이 나와야 하는가."""
+        from apt_engine.ranking import rotation
+        keys = {k for k, _ in rotation.COLUMNS}
+        for need in ("stage", "price", "strong_buy", "do_not_buy", "alpha",
+                     "risk", "confidence", "required_equity",
+                     "recoverable_gap", "price_stretch", "money_depth",
+                     "rank_change", "coverage"):
+            assert need in keys, f"§62 컬럼 '{need}' 이 없습니다"
+
+    def test_없는_값은_확인_불가로_나온다(self, db):
+        from apt_engine.ranking import delta_pipeline as delta
+        from apt_engine.ranking import rotation
+        from apt_engine.invest.budget import Profile
+        from apt_engine.ranking import pipeline as bp
+        with get_conn(db) as conn:
+            synth_mod.build(conn, n_complexes=8, start_ym="202001",
+                            end_ym="202412")
+            profile = Profile(name="t", available_cash=900_000_000)
+            profile.save(conn)
+            r = delta.run(conn, as_of=cutoff_mod.AsOf("2024-06-01"),
+                          profile=profile, gate=bp.GATE_PRICE_ONLY, limit=3)
+        assert r.candidates
+        row = rotation.row_of(r.candidates[0], rank=1)
+        assert row["rank"] == 1
+        # 데이터가 없는 항목은 반드시 '확인 불가' 이지 0 이 아니다
+        assert all(v != 0 for v in row.values())
+        assert "확인 불가" in row.values()
