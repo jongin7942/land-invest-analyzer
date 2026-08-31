@@ -178,7 +178,7 @@ def _collect_deals(kind: str, months: int, sido: str | None,
                 # 한도 소진. 계속 두드려봐야 전부 거부된다 — 여기까지 받고 멈춘다.
                 # 실패로 남기지 않는다. 안 받은 것이지 실패한 것이 아니고,
                 # 실패로 쌓으면 다음 날 재시도 목록만 지저분해진다.
-                progress(f"\n  {ym} {code} 에서 일일 한도 소진 — 여기까지 받고 멈춥니다.")
+                progress(f"\n  {ym} {code} 에서 일일 한도 소진. 여기까지 받고 멈춥니다.")
                 progress(f"  {e}")
                 stats["quota_exhausted"] = True
                 return stats

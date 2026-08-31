@@ -153,7 +153,7 @@ def request(url: str, params: dict, *, timeout: int = 25, retries: int = 3) -> s
             if r.status_code == 429 or "LIMITED_NUMBER_OF_SERVICE_REQUESTS" in r.text:
                 raise MolitQuotaError(
                     f"일일 트래픽 한도를 다 썼습니다 (HTTP {r.status_code}). "
-                    f"자정에 리셋되면 다시 돌리세요 — 이미 받은 달은 건너뜁니다."
+                    f"자정에 리셋되면 다시 돌리세요. 이미 받은 달은 건너뜁니다."
                 ) from e
             if r.status_code < 500:  # 4xx 는 재시도해도 같다
                 raise MolitError(f"HTTP {r.status_code}: {r.text[:200]}") from e
