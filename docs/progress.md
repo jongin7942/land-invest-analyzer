@@ -86,3 +86,63 @@ Phase 2 (Canonical Data Model) — `complex` 에 §2 가 요구하는 컬럼
 (행정동·역거리·업무지 접근성·학군·생활권) 추가와 PropertyResolver.
 그다음 Phase 3~7 을 heuristic 가중치(`weights_source='HEURISTIC'`)로 올리고,
 데이터가 들어오면 Phase 8 백테스트가 그 가중치를 대체한다.
+
+---
+
+## Phase 2 — Canonical Data Model + PropertyResolver (2026-08-31) · 완료
+
+### 구현 내용
+
+**마이그레이션 013**
+- `complex` 확장: `admin_dong` `life_zone` `nearest_station_id/m` `canonical_id`
+- `complex_alias` — 이름 변경·별칭. **근거(reason)와 등록자가 NOT NULL**,
+  `valid_from/to` 로 그 이름이 언제 유효했는지를 남긴다
+- `complex_attribute` — **값마다 출처가 붙는 속성 테이블**.
+  학군·생활권·업무지 접근성처럼 공식 API 가 없어 사람이 넣는 값들.
+  컬럼으로 만들지 않은 이유: 값마다 출처·시점·신뢰도가 따로 붙어야 하고(§3),
+  항목이 계속 늘어난다
+- `job_center` + `complex_job_access` — 업무지 접근성. **직선거리로 대체하지 않는다**
+  (통근은 직선거리가 아니라 환승·배차가 정한다). `method` 로 무엇으로 쟀는지 남긴다
+- `life_zone` + `life_zone_adjacency` — 생활권. 행정구역이 아니라 실제 대체관계.
+  `zone_a < zone_b` CHECK 로 같은 관계가 두 번 저장되는 걸 막는다
+
+**`apt_engine/resolver.py` (PropertyResolver)**
+- 이름 → 단지. **애매하면 붙이지 않는다**(`AMBIGUOUS`).
+  아무거나 고르면 그 뒤의 가격·수익률이 전부 다른 단지 것이 된다
+- `as_of` 를 주면 **그 시점에 유효했던 별칭만** 본다.
+  지금 이름으로 과거를 조회하면 백테스트가 조용히 틀린다
+- 다른 단지가 이미 쓰는 이름은 별칭으로 **거부**한다 (등록 시점에 사람이 판단할 문제)
+- `merge()` 는 행을 지우지 않고 `canonical_id` 로 접는다 — 이력이 남아야 재현된다
+
+**`apt_engine/repo/attributes.py`**
+- `best()` — 출처 등급(공식 우선) → 최신 → 신뢰도 순
+- `conflicts()` / `record_conflicts()` — 값이 다르면 덮어쓰지 않고 `source_conflict` 에.
+  **등급이 같으면 자동으로 정하지 않는다**("사람이 확인하세요")
+- `as_of` 조회 시 **시점 불명 값은 제외**한다 — 언제 알았는지 모르는 값을 과거
+  모델에 넣으면 그게 look-ahead 다
+
+CLI `resolve lookup/alias/merge` 추가.
+
+### 테스트 결과
+759개 통과 (신규 26개).
+
+### 발견한 오류
+1. `_fold_canonical` 이 후보 1개일 때 건너뛰어, **병합된(중복) 행 id 를 그대로
+   돌려주는** 버그. 그 id 로 조회하면 반쪽짜리 가격이 나온다. 항상 접도록 수정
+2. `merge()` 안에서 `add_alias` 가 자기 자신을 이름 충돌로 오인해 실패.
+   이미 그 단지로 병합된 행은 충돌이 아니다 — 조회 조건에서 제외
+3. `resolve "단지명"` 이 argparse 에서 죽었다(위치인자 choices 함정, redev 에 이어
+   두 번째). 회귀 테스트로 고정
+4. **누출 방지 테스트가 새 테이블 4개를 잡아냈다** — `complex_attribute` 등을
+   시점 분류에 등록하지 않자 `test_스키마의_모든_테이블이_시점_분류에_들어_있다`
+   가 실패. 설계대로 동작했다
+
+### 데이터 부족
+변함없음(사용자 PC 수집 보류 중). 새 테이블도 전부 수기 입력 대상이라
+값이 없어도 구조는 완성됐다.
+
+### 다음 단계
+Phase 3~6 Feature 계층 — Entry Price(§7) · Regime(§8) · Supply Ratio(§13) ·
+Jeonse Lead(§14) · Flow Stage(§15) · Transaction Quality(§16) · Catalyst Alpha(§17).
+각 Feature 는 값과 함께 confidence·UNKNOWN 을 돌려주고, 데이터가 없으면
+점수를 만들지 않는다.

@@ -62,6 +62,10 @@ DATED_TABLES: dict[str, tuple[str, ...]] = {
     "ratio_norm": ("as_of_ym",),
     "cashflow_snapshot": ("as_of",),
     "ranking_run": ("as_of",),
+    # Phase 2 — 값마다 시점이 붙는 속성. as_of 가 없는 행은 조회에서 제외된다
+    # (언제 알았는지 모르는 값을 과거 모델에 넣으면 그게 look-ahead 다).
+    "complex_attribute": ("as_of",),
+    "complex_job_access": ("as_of",),
 }
 
 # 컷오프와 무관한 테이블(시점 개념이 없는 마스터·참조 데이터).
@@ -74,6 +78,8 @@ TIMELESS_TABLES = frozenset({
     "far_standard", "stage_duration_ref", "construction_cost_ref",
     "redev_candidate", "user_profile", "watchlist", "source_conflict",
     "source_tier", "ranking_entry", "investment_lesson",
+    # Phase 2 — 시점 개념이 없는 마스터·큐레이션 데이터
+    "complex_alias", "job_center", "life_zone", "life_zone_adjacency",
 })
 
 # 실거래는 계약 후 신고까지 시간이 걸린다. 그 시점에 **실제로 볼 수 있었던** 것만

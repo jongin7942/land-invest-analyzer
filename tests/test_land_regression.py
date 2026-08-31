@@ -231,3 +231,17 @@ class TestDatabasesAreSeparate:
             encoding="utf-8")
         assert "shutil.rmtree(DOCS_DIR)" not in source, (
             "docs/ 를 통째로 지우면 그 안의 설계 문서가 사라집니다")
+
+    def test_위치인자를_생략해도_서브명령이_죽지_않는다(self):
+        """`resolve "단지명"` 처럼 동작을 생략하는 호출이 argparse 에서 죽지 않아야 한다.
+
+        위치인자에 choices 를 걸어두면 첫 인자가 그 목록에 없을 때 SystemExit 가
+        난다. redev·resolve 에서 실제로 두 번 겪었다.
+        """
+        from apt_engine.cli import build_parser
+
+        parser = build_parser()
+        for argv in (["resolve", "아무단지명"],
+                     ["redev", "show", "아무단지명"],
+                     ["lessons"]):
+            parser.parse_args(argv)      # SystemExit 가 나면 실패

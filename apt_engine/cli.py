@@ -1617,6 +1617,58 @@ def cmd_lessons(args):
     print("\n  CONFIRMED 만 계산에 쓰입니다. HYPOTHESIS·PROVISIONAL 은 참고용입니다.")
 
 
+def cmd_resolve(args):
+    """PropertyResolver — 이 이름이 가리키는 단지가 무엇인가 (지시서 §2)."""
+    from apt_engine import resolver
+
+    # `resolve "주공1단지"` 처럼 동작을 생략하면 첫 인자가 단지명이다.
+    if args.action not in ("lookup", "alias", "merge"):
+        args.name, args.action = args.action, "lookup"
+
+    with get_conn(args.db) as conn:
+        if args.action == "alias":
+            if not (args.complex_id and args.name and args.reason):
+                sys.exit("사용법: resolve alias --complex-id N --name <별칭> "
+                         "--reason <근거> [--kind 이전명] [--from YYYY-MM-DD]")
+            try:
+                resolver.add_alias(conn, args.complex_id, args.name, kind=args.kind,
+                                   reason=args.reason, created_by=args.by,
+                                   valid_from=getattr(args, "from"),
+                                   valid_to=args.to)
+            except resolver.AliasError as e:
+                sys.exit(str(e))
+            print(f"별칭 등록: #{args.complex_id} ← '{args.name}' ({args.kind})")
+            return
+
+        if args.action == "merge":
+            if not (args.keep and args.drop and args.reason):
+                sys.exit("사용법: resolve merge --keep N --drop M --reason <근거>")
+            try:
+                resolver.merge(conn, keep=args.keep, drop=args.drop,
+                               reason=args.reason, created_by=args.by)
+            except resolver.AliasError as e:
+                sys.exit(str(e))
+            print(f"#{args.drop} 을(를) #{args.keep} 의 중복으로 표시했습니다 "
+                  f"(행은 지우지 않았습니다).")
+            return
+
+        if not args.name:
+            sys.exit("사용법: resolve <단지명> [--lawd ...] [--emd ...] [--year ...]")
+        got = resolver.resolve(conn, args.name, lawd_cd=args.lawd,
+                               emd_name=args.emd, approval_year=args.year,
+                               as_of=args.as_of)
+
+    print(f"\n  '{args.name}' → {got.label}")
+    if got.candidates and not got.ok:
+        print(f"\n  {'id':>7} {'단지명':<26} {'지역':<14} {'법정동':<10} {'준공':>6} 경로")
+        for c in got.candidates[:20]:
+            print(f"  {c.complex_id:>7} {c.name[:26]:<26} "
+                  f"{regions.name_of(c.lawd_cd)[:14]:<14} "
+                  f"{(c.emd_name or '-')[:10]:<10} {c.approval_year or '-':>6} {c.via}")
+        print("\n  ※ 애매한 상태로 붙이지 않았습니다. 아무거나 고르면 그 뒤의 가격·"
+              "수익률이\n     전부 다른 단지 것이 됩니다.")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="python -m apt_engine.cli",
@@ -1895,6 +1947,26 @@ def build_parser() -> argparse.ArgumentParser:
     ls.add_argument("--result", help="promote: 결과 요약")
     ls.add_argument("--rule", help="promote: 바뀐 규칙")
 
+    rs = sub.add_parser("resolve", help="단지명 → 단지 (이름변경·동명중복 처리)")
+    # choices 를 걸면 `resolve "주공1단지"` 가 action 자리로 들어가 argparse 가 죽는다.
+    # 첫 위치인자가 동작 이름이 아니면 단지명으로 읽는다(cmd_resolve 가 처리).
+    rs.add_argument("action", nargs="?", default="lookup",
+                    help="lookup(기본) | alias | merge — 생략하면 단지명으로 읽는다")
+    rs.add_argument("name", nargs="?", help="찾을 단지명 또는 등록할 별칭")
+    rs.add_argument("--complex-id", type=int, help="alias: 별칭을 붙일 단지")
+    rs.add_argument("--lawd", help="시군구 코드")
+    rs.add_argument("--emd", help="법정동")
+    rs.add_argument("--year", type=int, help="준공연도")
+    rs.add_argument("--as-of", help="그 시점에 유효했던 별칭만 본다 (백테스트용)")
+    rs.add_argument("--kind", default="이전명",
+                    choices=["이전명", "별칭", "오기", "분양명", "한자", "영문"])
+    rs.add_argument("--reason", help="alias/merge: 근거 (필수)")
+    rs.add_argument("--by", default="사용자", help="등록자")
+    rs.add_argument("--from", dest="from", help="alias: 유효 시작일")
+    rs.add_argument("--to", help="alias: 유효 종료일")
+    rs.add_argument("--keep", type=int, help="merge: 대표로 남길 단지")
+    rs.add_argument("--drop", type=int, help="merge: 중복으로 표시할 단지")
+
     sub.add_parser("validate", help="요구사항 26 검증 규칙 실행")
 
     re_ = sub.add_parser("report", help="진단 리포트")
@@ -1910,7 +1982,7 @@ HANDLERS = {
     "listing": cmd_listing, "market": cmd_market,
     "rule": cmd_rule, "regulation": cmd_regulation, "loan": cmd_loan, "cash": cmd_cash,
     "profile": cmd_profile, "budget": cmd_budget, "cashflow": cmd_cashflow,
-    "lessons": cmd_lessons,
+    "lessons": cmd_lessons, "resolve": cmd_resolve,
     "ladder": cmd_ladder, "relative": cmd_relative,
     "transit": cmd_transit, "supply": cmd_supply, "geocode": cmd_geocode,
     "catalyst": cmd_catalyst, "redev": cmd_redev,
