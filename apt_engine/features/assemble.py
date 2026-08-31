@@ -12,6 +12,8 @@ import sqlite3
 from typing import Callable, Iterable
 
 from apt_engine.blind import cutoff as cutoff_mod
+from apt_engine.features import bands
+from apt_engine.features import stretch as stretch_mod
 from apt_engine.features import (catalyst, entry, flow, jeonse, momentum,
                                  regime, supply)
 from apt_engine.features.base import Feature, FeatureSet
@@ -26,6 +28,9 @@ GROUPS: dict[str, str] = {
     "jeonse": "전세가율·하방방어·전세선행 (§14)",
     "entry": "매수가 구간 대비 현재 위치 (§7)",
     "catalyst": "남은 호재 알파 (§17·§18)",
+    # DELTA UPGRADE — 4 State 의 CORE 후보. 기존 7그룹을 대체하지 않고 위에 얹는다.
+    "bands": "가격대 이동 P25/중앙값/P75 · Latent/Visible · 기울기 지속 (§7·§8·§9)",
+    "stretch": "장기 정상가 대비 이탈 · 상승폭 · 가속 구간 (§4-D·§5·§6)",
 }
 
 
@@ -77,6 +82,36 @@ def build(conn: sqlite3.Connection, complex_id: int, area_band: str, *,
                                     supply_ratio=ratio):
             out = out.add(f)
 
+    if "bands" in wanted or "stretch" in wanted:
+        # 두 그룹이 같은 시계열을 쓴다. 한 번만 읽는다.
+        series = bands.load_bands(conn, complex_id, area_band, as_of=as_of)
+        slopes = bands.slopes(series)
+
+    if "bands" in wanted:
+        for f in bands.migration_features(series):
+            out = out.add(f)
+        out = out.add(bands.slope_persistence(slopes))
+        # 전세 바닥이 유지/상승인지는 jeonse 그룹이 알고 있다. 없으면 조건에서 뺀다.
+        jeonse_floor = None
+        if "jeonse_lead" in out and out["jeonse_lead"].usable:
+            jeonse_floor = (out["jeonse_lead"].value or 0) >= 0
+        out = out.add(bands.latent_movement(series, slopes,
+                                            jeonse_floor_ok=jeonse_floor))
+        shift = out["band_shift_strength"]
+        volume = (out["investigation_priority"].value
+                  if "investigation_priority" in out
+                  and out["investigation_priority"].usable else None)
+        out = out.add(bands.visible_movement(series, shift,
+                                             volume_recovery=volume))
+
+    if "stretch" in wanted:
+        normal = stretch_mod.historical_normal(series)
+        out = out.add(stretch_mod.price_stretch(series, normal))
+        for f in stretch_mod.runup_features(series):
+            out = out.add(f)
+        out = out.add(stretch_mod.acceleration_zone(series, slopes))
+        out = out.add(stretch_mod.price_percentile(series))
+
     if "catalyst" in wanted:
         price = None
         row = conn.execute(
@@ -103,6 +138,11 @@ def group_of(feature_key: str) -> str | None:
         "jeonse": ("jeonse_", "downside_defense"),
         "entry": ("entry_",),
         "catalyst": ("catalyst_",),
+        "bands": ("p25_migration", "median_migration", "p75_migration",
+                  "band_shift_strength", "latent_movement", "visible_movement",
+                  "slope_persistence"),
+        "stretch": ("price_stretch", "runup_", "acceleration_zone",
+                    "price_percentile"),
     }
     for group, keys in prefixes.items():
         if any(feature_key.startswith(k) for k in keys):
