@@ -1897,10 +1897,77 @@ def cmd_today(args):
             print()
             print(delta.detail(result.candidates[0]))
 
+        if args.frontier:
+            _print_frontier(conn, args, as_of, profile, source, learned)
+
+        if args.columns and result.split:
+            _print_columns(conn, result, args)
+
         if args.show_dropped and result.split:
             print("\n  ── 제외된 후보 ──")
             for cid, why in result.split.excluded[:20]:
                 print(f"    #{cid}: {why}")
+
+
+def _print_frontier(conn, args, as_of, profile, source, learned):
+    """§30 — 현금 버킷을 올릴 때 답이 어떻게 바뀌는가."""
+    from dataclasses import replace
+    from apt_engine.ranking import delta_pipeline as delta
+    from apt_engine.ranking import frontier as frontier_mod
+    from apt_engine.ranking import pipeline as pipeline_mod
+
+    gate = (pipeline_mod.GATE_PRICE_ONLY if args.price_only
+            else pipeline_mod.GATE_STRICT)
+    buckets = frontier_mod.default_buckets(profile.available_cash)
+    results = {}
+    for cash in buckets:
+        try:
+            results[cash] = delta.run(
+                conn, as_of=as_of, profile=replace(profile,
+                                                   available_cash=cash),
+                horizon_years=args.horizon, area_band=args.band,
+                lawd_cd=args.lawd, scan_limit=args.scan, gate=gate,
+                weights=learned, weights_source=source, limit=args.limit)
+        except ValueError:
+            continue
+    if not results:
+        print("\n  Capital Frontier: 버킷을 하나도 돌리지 못했습니다")
+        return
+    print()
+    print(frontier_mod.build(results).summary)
+
+
+def _print_columns(conn, result, args):
+    """§62 TOP10 전체 컬럼 + §64 순위변경."""
+    from apt_engine.invest import cash_candidate as cash_mod
+    from apt_engine.ranking import rotation
+
+    previous = rotation.load_previous(
+        conn, run_key=args.run_key, as_of=result.as_of, cash=result.cash,
+        horizon_years=result.horizon_years, profile="delta",
+        list_kind="executable")
+    current = {c.complex_id: (i, c.alpha.alpha or 0.0, c.alpha.confidence)
+               for i, c in enumerate(result.split.executable, 1)}
+    changes = {c.complex_id: c for c in rotation.explain(
+        previous, current,
+        dropped_reasons=dict(result.split.excluded))}
+
+    print("\n  ── TOP 전체 컬럼 (§62) ──")
+    for i, cand in enumerate(result.split.executable, 1):
+        leftover, _, _ = cash_mod.unused_cash_return(
+            result.cash_option, required_equity=cand.required_equity)
+        row = rotation.row_of(cand, rank=i, change=changes.get(cand.complex_id),
+                              unused_cash=leftover,
+                              coverage=result.coverage.verdict
+                              if result.coverage else None)
+        print(f"\n  [{i}] 단지 #{row['complex_id']} · {row['area_band']}㎡ "
+              f"· {row['stage']}")
+        for key, label in rotation.COLUMNS:
+            if key in ("rank", "complex_id", "area_band", "stage"):
+                continue
+            print(f"      {label:<16} {row[key]}")
+    if not previous:
+        print("\n    (직전 실행이 없어 순위변화를 낼 수 없습니다)")
 
 
 MIGRATION_HINT = (
@@ -2459,6 +2526,12 @@ def build_parser() -> argparse.ArgumentParser:
                     choices=["heuristic", "backtested"])
     td.add_argument("--verbose", action="store_true", help="1위 상세")
     td.add_argument("--show-dropped", action="store_true", help="제외 사유")
+    td.add_argument("--frontier", action="store_true",
+                    help="§30 현금 버킷별 비교 (문턱이 어디인지)")
+    td.add_argument("--columns", action="store_true",
+                    help="§62 전체 컬럼 + 순위변화")
+    td.add_argument("--run-key", default="today",
+                    help="순위변화 비교에 쓸 실행 이름")
 
     ld = sub.add_parser("leaders", help="Leader 망 생성·조회 (§11 Buyer Overlap 기준)")
     ld.add_argument("action", help="build / status")

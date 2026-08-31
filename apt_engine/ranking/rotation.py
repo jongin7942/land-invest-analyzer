@@ -305,7 +305,7 @@ def row_of(candidate, *, rank: int, change: Change | None = None,
         "visible": f("visible_movement"),
         "band_shift": f("band_shift_strength"),
         "supply_risk": f("effective_supply_risk"),
-        "leader": "-",
+        "leader": getattr(candidate, "relevant_leader", None) or "확인 불가",
         "transmission": f("transmission_failure"),
         "rank_change": (change.label.split("—")[0].strip() if change
                         else "직전 실행 없음"),

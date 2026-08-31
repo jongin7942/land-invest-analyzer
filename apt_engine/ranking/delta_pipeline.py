@@ -52,6 +52,9 @@ class DeltaCandidate:
     stage: stage_mod.Verdict
     bands: exec_mod.PriceBands
     required_equity: int | None = None
+    # §62 화면에 "누구를 따라가는 후보인가" 를 보여주기 위한 것.
+    # **점수 계산에는 쓰이지 않는다** — 표시용이다.
+    relevant_leader: str | None = None
 
     @property
     def score(self) -> float | None:
@@ -175,7 +178,9 @@ def run(conn: sqlite3.Connection, *, as_of: cutoff_mod.AsOf, profile: Profile,
                      and c.features.items["supply_cliff"].usable) else None)
         households, region = meta.get(c.complex_id, (None, ""))
         features = c.features
-        for f in _leader_features(conn, c.complex_id, band, as_of=as_of):
+        leader_feats, leader_label = _leader_features(
+            conn, c.complex_id, band, as_of=as_of)
+        for f in leader_feats:
             features = features.add(f)
         for f in demand_mod.all_features(
                 market, price=c.price, lawd_cd=region or None,
@@ -197,7 +202,7 @@ def run(conn: sqlite3.Connection, *, as_of: cutoff_mod.AsOf, profile: Profile,
             alternatives_quality=None)   # 아래에서 후보군이 정해진 뒤 다시 계산
         candidates.append(DeltaCandidate(
             c.complex_id, band, c.price, c.features, alpha, verdict,
-            price_bands, c.required_equity))
+            price_bands, c.required_equity, leader_label))
 
     # ⑤-2 Competitive Buy Price — 대안의 질이 정해진 뒤에야 계산된다(§39).
     scored = [c for c in candidates if c.alpha.known]
@@ -214,7 +219,7 @@ def run(conn: sqlite3.Connection, *, as_of: cutoff_mod.AsOf, profile: Profile,
                                         and c.features.items["entry_position"].usable)
                                     else None),
                     alternatives_quality=quality),
-                c.required_equity)
+                c.required_equity, c.relevant_leader)
             for c in candidates]
         notes.append(
             f"같은 자기자본 대안 {len(scored)}개를 반영해 매수가를 조정했습니다(§39)")
@@ -244,7 +249,7 @@ def run(conn: sqlite3.Connection, *, as_of: cutoff_mod.AsOf, profile: Profile,
 
 
 def _leader_features(conn, complex_id: int, band: str, *,
-                     as_of: cutoff_mod.AsOf) -> list:
+                     as_of: cutoff_mod.AsOf) -> tuple[list, str | None]:
     """Leader 망 → 전달 실패 → 회복가능 할인 (§11·§12·§13).
 
     Leader 가 없으면 **세 Feature 모두 '확인 불가'** 다. 0 이 아니다 —
@@ -257,9 +262,9 @@ def _leader_features(conn, complex_id: int, band: str, *,
                f"(후보 {len(leaders)}개 중 0개). "
                f"Leader 를 못 찾은 것과 안 따라온 것은 다릅니다")
         from apt_engine.features.base import Feature
-        return [Feature.missing("transmission_failure", why),
-                Feature.missing("recoverable_discount_ratio", why),
-                Feature.missing("next_node_score", why)]
+        return ([Feature.missing("transmission_failure", why),
+                 Feature.missing("recoverable_discount_ratio", why),
+                 Feature.missing("next_node_score", why)], None)
 
     # 겹침이 가장 큰 Leader 하나로 본다. 여러 Leader 를 평균하면
     # "누구를 따라가야 하는지" 가 흐려진다.
@@ -274,11 +279,12 @@ def _leader_features(conn, complex_id: int, band: str, *,
     d = leader_mod.decompose(discount, transmission_failure=t.failure)
 
     from apt_engine.features.base import Feature
-    return [leader_mod.transmission_feature(t),
-            leader_mod.recoverable_feature(d),
-            Feature.missing("next_node_score",
-                            "생활권 가격 사다리가 아직 입력되지 않았습니다 "
-                            "(`ladder import`)")]
+    return ([leader_mod.transmission_feature(t),
+             leader_mod.recoverable_feature(d),
+             Feature.missing("next_node_score",
+                             "생활권 가격 사다리가 아직 입력되지 않았습니다 "
+                             "(`ladder import`)")],
+            best.label)
 
 
 def _observed_discount(follower, leader) -> float | None:
@@ -336,6 +342,7 @@ def detail(c: DeltaCandidate) -> str:
 
     lines = [
         f"■ 후보 #{c.complex_id} [{c.area_band}㎡]",
+        f"  Relevant Leader          {c.relevant_leader or '확인 불가'}",
         f"  Normal Executable Price  {units.fmt_eok(c.price)}",
         f"  매수가 구간              {c.bands.label}",
     ]

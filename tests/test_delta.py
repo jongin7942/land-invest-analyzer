@@ -1595,8 +1595,9 @@ class TestLeaderBuilder:
         with get_conn(db) as conn:
             synth_mod.build(conn, n_complexes=3, start_ym="202001",
                             end_ym="202412")
-            feats = delta._leader_features(
+            feats, leader_label = delta._leader_features(
                 conn, 1, "84", as_of=cutoff_mod.AsOf("2024-06-01"))
+        assert leader_label is None, "Leader 가 없는데 라벨이 붙었습니다"
         keys = {f.key for f in feats}
         assert keys == {"transmission_failure", "recoverable_discount_ratio",
                         "next_node_score"}
@@ -1710,3 +1711,148 @@ class TestTopColumns:
         # 데이터가 없는 항목은 반드시 '확인 불가' 이지 0 이 아니다
         assert all(v != 0 for v in row.values())
         assert "확인 불가" in row.values()
+
+
+# ── §51·§52·§53 순위 불확실성 ────────────────────────────────────────
+
+class TestUncertainty:
+    def test_신뢰도가_낮으면_구간이_넓다(self):
+        """§36·§52 — '점수는 높은데 근거가 약한' 후보의 구간이 넓어야 한다."""
+        from apt_engine.ranking import uncertainty as u
+        sim = u.rank_ranges({1: 80.0, 2: 80.0, 3: 50.0, 4: 20.0},
+                            {1: 95.0, 2: 20.0, 3: 95.0, 4: 95.0})
+        assert sim.ranges[2].spread > sim.ranges[1].spread
+
+    def test_구간이_넓으면_불안정하다고_말한다(self):
+        from apt_engine.ranking import uncertainty as u
+        sim = u.rank_ranges({i: 50.0 for i in range(1, 11)},
+                            {i: 5.0 for i in range(1, 11)})
+        assert sim.unstable
+        assert "우연에 가깝습니다" in sim.summary
+
+    def test_불확실성을_줄이는_게_아니라_드러낸다고_말한다(self):
+        from apt_engine.ranking import uncertainty as u
+        assert "드러내는" in u.NOTE
+
+    def test_후보가_하나면_구간을_만들지_않는다(self):
+        from apt_engine.ranking import uncertainty as u
+        assert u.rank_ranges({1: 50.0}, {1: 90.0}).ranges == {}
+
+    def test_직전_실행이_없으면_지속성을_내지_않는다(self):
+        """§51."""
+        from apt_engine.ranking import uncertainty as u
+        p = u.persistence([], [1, 2, 3])
+        assert not p.known
+        assert "직전 실행이 없습니다" in p.reason
+
+    def test_매번_크게_바뀌면_모델이_흔들리는_것이다(self):
+        from apt_engine.ranking import uncertainty as u
+        p = u.persistence([1, 2, 3, 4, 5], [6, 7, 8, 9, 10], k=5)
+        assert p.stable is False
+        assert "모델이 흔들리는" in p.label
+
+    def test_변동성을_모르면_시뮬레이션하지_않는다(self):
+        """§53 — 임의의 변동성을 넣으면 그 숫자가 결과를 지배한다."""
+        from apt_engine.ranking import uncertainty as u
+        assert u.monte_carlo(expected_return=0.3, volatility=None) is None
+        assert u.monte_carlo(expected_return=None, volatility=0.2) is None
+
+    def test_전세_방어력이_있으면_하방이_얕다(self):
+        from apt_engine.ranking import uncertainty as u
+        weak = u.monte_carlo(expected_return=0.0, volatility=0.3,
+                             downside_defense=0.0)
+        strong = u.monte_carlo(expected_return=0.0, volatility=0.3,
+                               downside_defense=0.9)
+        assert strong.p10 > weak.p10
+        assert strong.p90 == pytest.approx(weak.p90, rel=0.01), (
+            "전세는 하방만 받쳐야 합니다 — 상방을 올리면 §14 위반입니다")
+
+
+# ── §30·§31 Capital Frontier · 대안매수 ──────────────────────────────
+
+class _FakeAlpha:
+    def __init__(self, value):
+        self.alpha = value
+        self.known = value is not None
+
+
+class _FakeCand:
+    def __init__(self, cid, alpha, required):
+        self.complex_id = cid
+        self.alpha = _FakeAlpha(alpha)
+        self.required_equity = required
+
+
+class _FakeSplit:
+    def __init__(self, cands):
+        self.executable = cands
+
+
+class _FakeResult:
+    def __init__(self, cands):
+        self.split = _FakeSplit(cands)
+
+
+class TestFrontier:
+    def test_문턱을_찾아낸다(self):
+        """§30 — '얼마를 더 모아야 하는가' 에 답할 수 있어야 한다."""
+        from apt_engine.ranking import frontier as fr
+        results = {
+            200_000_000: _FakeResult([_FakeCand(1, 40.0, 200_000_000)]),
+            250_000_000: _FakeResult([_FakeCand(1, 40.5, 200_000_000)]),
+            300_000_000: _FakeResult([_FakeCand(9, 65.0, 300_000_000)]),
+        }
+        f = fr.build(results)
+        assert len(f.thresholds) == 1
+        assert f.thresholds[0].to.cash == 300_000_000
+        assert "문턱" in f.summary
+
+    def test_문턱이_없으면_없다고_말한다(self):
+        from apt_engine.ranking import frontier as fr
+        results = {c: _FakeResult([_FakeCand(1, 40.0, c)])
+                   for c in (200_000_000, 250_000_000, 300_000_000)}
+        assert fr.build(results).thresholds == []
+        assert "뚜렷한 문턱이 없습니다" in fr.build(results).summary
+
+    def test_후보가_없는_버킷을_0점으로_세지_않는다(self):
+        from apt_engine.ranking import frontier as fr
+        f = fr.build({200_000_000: _FakeResult([]),
+                      300_000_000: _FakeResult([_FakeCand(1, 60.0,
+                                                          300_000_000)])})
+        assert f.rungs[0].best_score is None
+        assert "확인 불가" in f.rungs[0].label
+
+    def test_금액이_아니라_자기자본_대비로_비교한다(self):
+        """§31 — 금액으로 비교하면 비싼 것이 항상 이긴다."""
+        from apt_engine.ranking import frontier as fr
+        cheap = _FakeCand(1, 60.0, 200_000_000)
+        pricey = _FakeCand(2, 62.0, 400_000_000)
+        better, why = fr.alternative_purchase(cheap, pricey,
+                                              cash=400_000_000)
+        # 자기자본 4억 기준: 싼 쪽 0.60×2/4=30%, 비싼 쪽 0.62×4/4=62%
+        assert better is True
+        # 자기자본이 2억이면 비싼 쪽은 애초에 못 산다 → 배치가 달라진다
+        assert "자기자본 대비" in why
+
+    def test_더_비싼_걸_사는_것과_더_나은_투자를_구분한다(self):
+        from apt_engine.ranking import frontier as fr
+        cheap = _FakeCand(1, 60.0, 300_000_000)
+        pricey = _FakeCand(2, 60.5, 300_000_000)
+        better, why = fr.alternative_purchase(cheap, pricey,
+                                              cash=300_000_000)
+        assert better is False
+        assert "더 나은 투자가 아닙니다" in why
+
+    def test_실투자금을_모르면_비교하지_않는다(self):
+        from apt_engine.ranking import frontier as fr
+        better, why = fr.alternative_purchase(
+            _FakeCand(1, 60.0, None), _FakeCand(2, 70.0, 300_000_000),
+            cash=300_000_000)
+        assert better is None
+        assert "비싼 것이 항상 이깁니다" in why
+
+    def test_현금_주변_버킷만_돌린다(self):
+        from apt_engine.ranking import frontier as fr
+        near = fr.default_buckets(300_000_000)
+        assert 1_000_000_000 not in near
+        assert 300_000_000 in near
