@@ -77,6 +77,11 @@ DATED_TABLES: dict[str, tuple[str, ...]] = {
     # Phase 8 — 백테스트. 창과 선택은 '그 시점의 결정' 이라 시점 컬럼이 있다.
     # (정답지는 아래 ANSWER_KEY_TABLES 로 따로 차단한다)
     "backtest_window": ("as_of",),
+    # Phase 9 — DELTA UPGRADE. 전부 '그 시점에 알 수 있었던 상태' 라 as_of 가 붙는다.
+    "leader_link": ("as_of",),
+    "transmission_state": ("as_of",),
+    "stage_state": ("as_of",),
+    "universe_coverage": ("as_of",),
 }
 
 # 컷오프와 무관한 테이블(시점 개념이 없는 마스터·참조 데이터).
@@ -94,6 +99,9 @@ TIMELESS_TABLES = frozenset({
     "catalyst",
     # Phase 8 — 실험 메타. 시점 개념이 없다.
     "backtest_run", "backtest_pick",
+    # Phase 9 — 마스터·큐레이션. complex_type 은 '지속 격차' 라 특정 시점 값이 아니고,
+    # control_pair 는 회귀 검사 전용이라 결정 경로에서 읽히지 않는다.
+    "complex_type", "feature_registry", "control_pair",
 })
 
 # ── 정답지 (§55) ──────────────────────────────────────────────────────

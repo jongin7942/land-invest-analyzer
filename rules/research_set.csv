@@ -1,0 +1,35 @@
+# 연구 후보 목록 (지시서 §41)
+#
+# ⚠ 이 목록에 있다는 이유로 점수를 올리거나 내리지 마라.
+#   Regression / Research Set 전용이다.
+#
+# kind
+#   RESEARCH   현재 연구 중인 후보
+#   CONTROL    Control / Trap 사례 (성과가 갈린 쪽의 반대편)
+#   TOO_LATE   Proof–Price Tradeoff 사례 (확실해졌을 때는 이미 늦은)
+#   REVERSE_2021  2021 CASH Reverse Sanity Test 대상 (§28)
+kind,label,note
+RESEARCH,김포사우아이파크59,
+RESEARCH,다산 롯데낙천대59,
+RESEARCH,호매실스타힐스59,
+RESEARCH,부평동아1차76,
+RESEARCH,관악산벽산타운5 59,
+RESEARCH,상동 한아름마을 삼환·동아·동성59,
+RESEARCH,계양 하늘채파크포레59,
+RESEARCH,불암현대59,
+RESEARCH,구월아시아드선수촌2단지59,
+RESEARCH,범박힐스테이트1단지59,
+RESEARCH,선부역어반스퀘어59,
+CONTROL,수리산힐스테이트59,
+CONTROL,부개주공5 소형,§27 Control Pair 의 Loser 쪽
+CONTROL,개봉 거성푸르뫼2 59,
+CONTROL,파주 해오름마을10단지59,
+CONTROL,송도오션파크베르디움84,
+CONTROL,검단 디에트르더펠리체84,
+TOO_LATE,신내6대주59,확실해졌을 때는 이미 늦은 사례
+TOO_LATE,답십리동아59,
+REVERSE_2021,김포사우아이파크59,2021 고점 부근 강한 Money Arrival + 높은 Stretch
+REVERSE_2021,다산 롯데낙천대59,
+REVERSE_2021,호매실스타힐스59,
+REVERSE_2021,부평동아1차76,
+REVERSE_2021,상계주공13 소형,

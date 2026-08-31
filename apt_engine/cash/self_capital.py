@@ -37,6 +37,10 @@ from apt_engine.trace import Calc, Evidence
 Item = cost_mod.CostItem
 
 
+class CapitalCombinationError(ValueError):
+    """현실에 없는 자금조달 조합. 실투자금을 계산하지 않는다."""
+
+
 @dataclass(frozen=True)
 class SelfCapital:
     purchase_price: int
@@ -159,6 +163,27 @@ def compute(conn: sqlite3.Connection, *, price: int, as_of: str | date,
 
     unknown = [i.name for i in items if not i.known]
     total_purchase_cost = sum(i.amount for i in items if i.known)
+
+    # ── 전세 승계와 주담대는 동시에 성립하지 않는다 ──
+    #
+    # 전세보증금은 주택에 걸린 선순위 채권이다. 세입자가 있는 집에 은행이
+    # 주담대를 그 한도대로 내주지 않는다(보증금만큼 담보여력이 줄고, 대개
+    # 아예 안 나온다). 그런데 예전 코드는 **각각의 최대치를 그냥 뺐다.**
+    #
+    #     실투자금 = 총취득비용 − 주담대최대 − 전세보증금
+    #
+    # 그래서 5억짜리에 주담대 3억 + 보증금 3억이 동시에 잡혀 실투자금이
+    # **음수**로 나왔다. 현실에 없는 조합이 가장 매력적인 후보로 올라온다.
+    #
+    # UI 에서만 막으면 `rank` · `backtest` 경로로 그대로 샌다. §2 가 Capital
+    # Gate 를 모든 Ranking 보다 먼저 두라고 한 이상, 거부는 엔진이 해야 한다.
+    if use_mortgage and assume_jeonse and jeonse_deposit:
+        raise CapitalCombinationError(
+            "전세 승계와 주택담보대출을 동시에 적용할 수 없습니다. "
+            "전세보증금이 선순위라 담보여력이 남지 않습니다 — 각각의 최대치를 "
+            "더하면 실투자금이 실제보다 작게(때로는 음수로) 나옵니다. "
+            "`use_mortgage=False`(갭투자) 또는 `assume_jeonse=False`(실입주) 중 "
+            "하나를 고르세요.")
 
     # ── 대출 ──
     mortgage = None

@@ -248,9 +248,22 @@ class TestOutcome:
 # ── §57 KPI ──────────────────────────────────────────────────────────
 
 class TestKpi:
-    def test_열네개다(self):
-        assert len(kpi_mod.KPI_KEYS) == 14
-        assert len(set(kpi_mod.KPI_KEYS)) == 14
+    def test_지시서가_요구한_KPI_가_전부_있다(self):
+        """§57 의 14종 + DELTA §26 의 5종."""
+        assert len(set(kpi_mod.KPI_KEYS)) == len(kpi_mod.KPI_KEYS), "중복"
+        required = {
+            # §57
+            "winner_recall_at_k", "precision_at_k", "false_positive_rate",
+            "false_follower_rate", "regret", "opportunity_alpha",
+            "ex_post_capital_rank", "median_forward_return", "hit_rate",
+            "rank_ic", "max_drawdown", "recovery_months", "discovery_lag",
+            "coverage",
+            # DELTA §26
+            "missed_better_alternative_rate", "cash_accuracy",
+            "after_cost_return", "after_interest_return", "after_tax_return",
+        }
+        assert required <= set(kpi_mod.KPI_KEYS), (
+            f"빠진 KPI: {sorted(required - set(kpi_mod.KPI_KEYS))}")
 
     def test_모든_KPI_에_이름과_단위가_있다(self):
         for key in kpi_mod.KPI_KEYS:
@@ -409,7 +422,7 @@ class TestRunner:
             result = _run(conn, market, start="2018-01-01", end="2023-12-01")
         assert result.status == "COMPLETE"
         assert result.scored_windows
-        assert len(result.aggregate) == 14
+        assert len(result.aggregate) == len(kpi_mod.KPI_KEYS)
 
     def test_합성_시장이라는_사실이_항상_붙어_다닌다(self, db):
         with get_conn(db) as conn:
