@@ -146,3 +146,88 @@ Phase 3~6 Feature 계층 — Entry Price(§7) · Regime(§8) · Supply Ratio(§1
 Jeonse Lead(§14) · Flow Stage(§15) · Transaction Quality(§16) · Catalyst Alpha(§17).
 각 Feature 는 값과 함께 confidence·UNKNOWN 을 돌려주고, 데이터가 없으면
 점수를 만들지 않는다.
+
+---
+
+## Phase 3~6 (1차) — Feature 계층 (2026-08-31) · 진행 중
+
+지시서 §74 의 순서에서 **두 번째 칸**을 만들었다. 여기서 점수를 매기지 않는다 —
+값과 신뢰도를 따로 내놓고, 어떻게 섞을지는 백테스트가 정한다.
+
+### 구현 내용
+
+**`features/base.py` — Feature 계약**
+- §50 대로 **값과 신뢰도를 절대 합치지 않는다.** Feature 는 value·confidence·
+  status·calc 네 가지를 들고 다닌다
+- `Feature.missing()` — 못 구한 값은 **0 이 아니라 None**
+- `usable` — 값이 있어도 신뢰도가 0.35 미만이면 랭킹에 쓰지 않는다
+- `sample_confidence` / `freshness_confidence` / `combine`(기하평균).
+  산술평균을 쓰면 "표본 1건 + 최신" 이 "표본 10건 + 6개월 전" 과 같아진다
+- `FeatureSet.without()` — §71 Ablation 을 위해 이름으로 끌 수 있다
+
+**`features/momentum.py` (§16·§39·§40)**
+- 3/6/12개월 변화율 + 가속도 + `discovery_lag`
+- **상승률을 매수 점수로 바꾸지 않는다.** "이미 많이 올랐다" 는 사실은 별도
+  feature 로 분리하고, 그걸 감점으로 쓸지는 백테스트가 정한다
+
+**`features/regime.py` (§8)** — 7국면 분류. 단지가 아니라 **지역**의 성질이라
+같은 시점 모든 후보가 같은 국면을 본다. 경계값은 `THRESHOLDS` 에 모아 두고
+"백테스트가 대체한다" 를 근거에 적는다
+
+**`features/flow.py` (§15·§16)**
+- Flow Stage 6단계. **어느 단계가 좋은지 정하지 않는다**(지시서가 백테스트로
+  학습하라고 못 박음)
+- 출력 이름이 `buy_signal` 이 아니라 `investigation_priority` 다. 이름이 곧 계약이다
+- Transaction Quality — 표본충분도 × 중층이상 비중 × 가격 응집도.
+  저층 한 건과 중층 여러 건은 같은 '거래 3건' 이 아니다
+
+**`features/supply.py` (§13)**
+- **Supply Ratio = 실효 입주물량 ÷ 기존 stock.** 절대물량으로 비교하면 큰 도시가
+  늘 공급과다로 나온다
+- 단계별 실현 가중치(계획 0.25 → 입주예정 1.0). 경쟁 4분류. Supply Cliff
+- stock 을 모르면 **절대물량으로 대체하지 않고** 확인 불가
+
+**`features/jeonse.py` (§14)**
+- 전세가율은 **같은 기준월끼리만** 나눈다
+- `downside_defense` 와 `capital_efficiency` 로만 쓰고 **Upside 에 더하지 않는다**
+- `jeonse_lead` — 자동 매수 신호가 아니라고 근거에 명시
+
+**마이그레이션 014 — Catalyst Ledger (§17·§18)**
+- `catalyst` + `catalyst_state` + `catalyst_exposure`.
+  호재의 **시점별 상태를 덮어쓰지 않고 쌓는다.** 2024년에 확정된 노선을
+  2023년 백테스트가 읽으면 반칙이므로, 그 시점 행만 읽게 했다
+- Catalyst Alpha 다섯 항목(경제효과·실현확률·시간적합성·노출도·선반영률)을
+  **각각** 저장한다. 합쳐 두면 어느 항목이 틀렸는지 알 수 없다
+- `supply_plan.announced_ym` 추가 — '언제 들어오나'(move_in_ym)와
+  '언제 알았나'(announced_ym)는 다른 것이고, 백테스트에 필요한 건 후자다
+
+### 테스트 결과
+805개 통과 (신규 46개). 확인한 것:
+
+| 테스트 | 지키는 원칙 |
+|---|---|
+| 못 구한 값이 0 이 아니라 None | §67 |
+| 신뢰도 합성이 가장 약한 것에 끌려감 | §50 |
+| 많이 오른 뒤 발견하면 discovery_lag 이 커짐 | §40 |
+| 거래량 feature 이름이 investigation_priority | §15 |
+| 저층만 거래되면 질 점수가 낮음 | §16 |
+| stock 모르면 절대물량으로 대체 안 함 | §13 |
+| 발표 전 공급은 보이지 않음 | §18 |
+| 전세를 Upside 에 더하지 않음 | §14 |
+| 컷오프 이후 급등이 momentum 에 안 들어옴 | §69 |
+| 모든 feature 가 Ablation 그룹에 속함 | §71 |
+
+### 발견한 오류
+1. `trade.cancel_yn` 은 0/1 정수인데 regime.py 가 `IS NOT 'Y'` 로 비교했다.
+   취소거래가 전부 정상으로 세어졌을 것이다
+2. `supply_plan` 에 "언제 알려진 계획인가" 컬럼이 아예 없었다.
+   `effective_from` 을 쓰는 코드를 썼는데 그런 컬럼이 없었다 →
+   `announced_ym` 을 추가하고 컷오프 기준을 그것으로 바꿈
+
+### 데이터 부족
+변함없음. 모든 Feature 를 합성 데이터로 검증했다.
+
+### 다음 단계
+- Entry Price Engine(§7) · Catalyst Alpha(§17) 나머지 feature
+- Phase 7 랭킹 (Consensus Model 9종, heuristic 가중치, TOP100→30→10)
+- Phase 8 walk-forward 백테스트 하네스

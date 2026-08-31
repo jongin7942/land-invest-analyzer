@@ -54,7 +54,9 @@ DATED_TABLES: dict[str, tuple[str, ...]] = {
     "loan_rule": ("effective_from",),
     "cost_rule": ("effective_from",),
     "transit_station": ("status_date",),
-    "supply_plan": ("effective_from", "move_in_ym"),
+    # 공급은 '언제 알았나'(announced_ym)로 컷오프한다. move_in_ym 은 '언제 들어오나'라
+    # 미래여도 정상이다 — 그걸로 자르면 향후 공급을 아예 못 보게 된다.
+    "supply_plan": ("announced_ym",),
     "future_catalyst": ("as_of",),
     "redevelopment_project": ("stage_date",),
     "redevelopment_scenario": ("as_of",),
@@ -66,6 +68,9 @@ DATED_TABLES: dict[str, tuple[str, ...]] = {
     # (언제 알았는지 모르는 값을 과거 모델에 넣으면 그게 look-ahead 다).
     "complex_attribute": ("as_of",),
     "complex_job_access": ("as_of",),
+    # Phase 4 — 호재 원장. 시점별 상태를 쌓고, 그 시점 행만 읽는다(§18)
+    "catalyst_state": ("as_of",),
+    "catalyst_exposure": ("as_of",),
 }
 
 # 컷오프와 무관한 테이블(시점 개념이 없는 마스터·참조 데이터).
@@ -80,6 +85,7 @@ TIMELESS_TABLES = frozenset({
     "source_tier", "ranking_entry", "investment_lesson",
     # Phase 2 — 시점 개념이 없는 마스터·큐레이션 데이터
     "complex_alias", "job_center", "life_zone", "life_zone_adjacency",
+    "catalyst",
 })
 
 # 실거래는 계약 후 신고까지 시간이 걸린다. 그 시점에 **실제로 볼 수 있었던** 것만
