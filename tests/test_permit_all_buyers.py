@@ -266,3 +266,117 @@ def test_같은_단지_아파트_여부를_모르면_NEEDS_CHECK(db):
     d = judge(db, "11680", ptype=gate.ROW_HOUSE, same_complex=None)
     assert d.verdict == gate.NEEDS_CHECK
     assert d.check_code == "SAME_COMPLEX_APARTMENT_STATUS_UNKNOWN"
+
+
+# ── 전유부 대지권 (작업지시서 §3-5 입력) ──────────────────────────────
+#
+# 추정값으로 문을 열면 허가 없이 계약해서 무효가 된다. 그래서 이 블록의
+# 전부는 "추정값이 통과를 만들지 못한다" 를 지키는 것이다.
+
+def _unit(conn, cid, band, *, exclusive, households=100, share=None, src=None):
+    conn.execute(
+        "INSERT INTO unit_type (complex_id, exclusive_area_m2, area_band,"
+        " households, land_share_m2, land_share_source) VALUES (?,?,?,?,?,?)",
+        (cid, exclusive, band, households, share, src))
+
+
+@pytest.fixture
+def shares(tmp_path):
+    from apt_engine.repo import apt as repo
+    path = str(tmp_path / "ls.db")
+    mig.migrate(path)
+    with get_conn(path) as conn:
+        repo.sync_regions(conn)
+        conn.execute(
+            "INSERT INTO complex (id, kapt_code, name, name_norm, lawd_cd,"
+            " land_area_m2) VALUES (1,'K1','대지있음','대지있음','11680',30000)")
+        conn.execute(
+            "INSERT INTO complex (id, kapt_code, name, name_norm, lawd_cd)"
+            " VALUES (2,'K2','대지없음','대지없음','11680')")
+        _unit(conn, 1, "84", exclusive=84.0)
+        _unit(conn, 1, "59", exclusive=59.0)
+        _unit(conn, 2, "84", exclusive=84.0)
+        conn.commit()
+    return path
+
+
+def test_공시_출처가_있어야_확정값이다(shares):
+    from apt_engine.regulation import land_share as ls
+    with get_conn(shares) as conn:
+        ls.upsert(conn, complex_id=1, area_band="84", land_share_m2=42.7,
+                  source="2026 공동주택 공시가격 산정기초자료")
+        conn.commit()
+        got = ls.load(conn, complex_id=1, area_band="84")
+    assert got.verification == ls.VERIFIED and got.trustworthy
+    assert got.exceeds(6.0) is True
+
+
+def test_출처에_공시가_없으면_추정으로_본다(shares):
+    from apt_engine.regulation import land_share as ls
+    with get_conn(shares) as conn:
+        ls.upsert(conn, complex_id=1, area_band="84", land_share_m2=42.7,
+                  source="네이버에서 봄")
+        conn.commit()
+        got = ls.load(conn, complex_id=1, area_band="84")
+    assert got.verification == ls.ESTIMATED and not got.trustworthy
+
+
+def test_대지면적에서_추정한다(shares):
+    """단지 대지면적 × (이 타입 전용 / 전체 전유면적합)."""
+    from apt_engine.regulation import land_share as ls
+    with get_conn(shares) as conn:
+        got = ls.load(conn, complex_id=1, area_band="84")
+    assert got.verification == ls.ESTIMATED
+    # 30000 × 84 / (84×100 + 59×100) = 30000 × 84 / 14300
+    assert got.value == pytest.approx(30000 * 84 / 14300, rel=1e-6)
+
+
+def test_대지면적이_없으면_추정도_안_한다(shares):
+    from apt_engine.regulation import land_share as ls
+    with get_conn(shares) as conn:
+        got = ls.load(conn, complex_id=2, area_band="84")
+    assert not got.known and "대지면적" in got.reason
+
+
+@pytest.mark.parametrize("value,verification,expected", [
+    (45.0, "VERIFIED", True),     # 공시 · 초과
+    (5.0, "VERIFIED", False),     # 공시 · 이하 → 문을 열어도 된다
+    (45.0, "ESTIMATED", True),    # 추정이지만 기준의 3배 넘음 → 닫는 쪽이라 안전
+    (17.0, "ESTIMATED", None),    # 경계 근처 → 확인 필요
+    (5.0, "ESTIMATED", None),     # ⚠ 추정으로 '이하' 라고 문을 열지 않는다
+])
+def test_추정값은_문을_열_수_없다(value, verification, expected):
+    from apt_engine.regulation import land_share as ls
+    assert ls.LandShare(value, "x", verification).exceeds(6.0) is expected
+
+
+def test_Gate가_추정_대지권으로_통과시키지_않는다(db):
+    """추정 5㎡ 는 '6㎡ 이하' 처럼 보이지만 통과시키면 안 된다."""
+    d = judge(db, "11680", land_share=5.0)     # 기본은 VERIFIED
+    assert d.verdict == gate.PASS              # 공시값이면 통과
+
+    with get_conn(db) as conn:
+        rows = conn.execute(
+            "SELECT rule_id,target_scope,buyer_scope,nationality_scope,"
+            "residence_duty_months,status,effective_from,effective_to,"
+            "property_scope,parcel_recheck_required,source_url,"
+            "residential_threshold_sqm FROM land_permit_zone WHERE lawd_cd='11680'"
+        ).fetchall()
+        rules = [gate.Rule(
+            rule_id=r["rule_id"], target_scope=gate.buyer_scope_of(r),
+            nationality_scope=r["nationality_scope"],
+            residence_duty_months=r["residence_duty_months"], status=r["status"],
+            effective_from=r["effective_from"], effective_to=r["effective_to"],
+            property_scope=r["property_scope"],
+            parcel_recheck_required=bool(r["parcel_recheck_required"]),
+            source_url=r["source_url"],
+            residential_threshold_sqm=r["residential_threshold_sqm"])
+            for r in rows]
+    est = gate.evaluate_candidate(
+        rules,
+        gate.Candidate(lawd_cd="11680", land_share_sqm=5.0,
+                       land_share_verification="ESTIMATED"),
+        nationality=gate.KOREAN, occupancy_plan=gate.NON_OCCUPANCY,
+        contract_date="2026-09-01", coverage_status=gate.COMPLETE)
+    assert est.verdict == gate.NEEDS_CHECK
+    assert est.check_code == "LAND_SHARE_ESTIMATED_ONLY"

@@ -2155,6 +2155,81 @@ def cmd_rank(args):
           f"HEURISTIC 은 후보를 좁히는 용도이며, 백테스트가 학습값으로 교체합니다(§74).")
 
 
+LANDSHARE_TEMPLATE = """complex_id,area_band,land_share_m2,source
+# 공동주택 공시가격의 **전유부 대지권**을 넣습니다.
+#
+# 어디서 보나
+#   부동산공시가격알리미 https://www.realtyprice.kr
+#     → 공동주택 공시가격 → 단지·동·호 조회 → 산정기초자료
+#   또는 공공데이터포털 '주택 공시가격 산정기초자료' 파일데이터
+#
+# ⚠ source 에 '공시' 라는 말이 들어가야 확정값으로 취급합니다.
+#   안 들어가면 추정값으로 보고, 추정값은 **허가대상에서 빼주는 데
+#   쓰이지 않습니다** (아래로 틀리면 허가 없이 계약해 무효가 됩니다).
+#
+# 예) 1234,84,42.7,2026 공동주택 공시가격 산정기초자료
+"""
+
+
+def cmd_landshare(args):
+    """전유부 대지권 입력·조회."""
+    import csv as _csv
+
+    from apt_engine.regulation import land_share as ls
+
+    if args.template or (args.action == "import" and not args.path):
+        print(LANDSHARE_TEMPLATE)
+        return
+
+    with repo.get_conn(config.APT_DB_PATH) as conn:
+        if args.action == "import":
+            ok = err = 0
+            with open(args.path, encoding="utf-8-sig") as fh:
+                for i, row in enumerate(
+                        _csv.DictReader(l for l in fh if not l.startswith("#")), 2):
+                    try:
+                        ls.upsert(conn, complex_id=int(row["complex_id"]),
+                                  area_band=row["area_band"].strip(),
+                                  land_share_m2=float(row["land_share_m2"]),
+                                  source=row["source"].strip())
+                        ok += 1
+                    except (ValueError, KeyError) as e:
+                        print(f"  {i}행: {e}")
+                        err += 1
+            conn.commit()
+            print(f"대지권 {ok}건 입력" + (f" · 실패 {err}건" if err else ""))
+            return
+
+        if args.action == "show":
+            if not args.complex_id or not args.band:
+                print("사용: landshare show --complex-id 1234 --band 84")
+                return
+            got = ls.load(conn, complex_id=args.complex_id, area_band=args.band)
+            print(f"  {got.label}")
+            print(f"  허가대상(6㎡ 초과)? "
+                  f"{ {True: '예', False: '아니오', None: '확인 필요'}[got.exceeds(6.0)] }")
+            for k, v in (got.detail or {}).items():
+                print(f"    {k}: {v}")
+            return
+
+        # status
+        total = conn.execute("SELECT COUNT(*) FROM unit_type").fetchone()[0]
+        have = conn.execute(
+            "SELECT COUNT(*) FROM unit_type WHERE land_share_m2 IS NOT NULL"
+        ).fetchone()[0]
+        verified = conn.execute(
+            "SELECT COUNT(*) FROM unit_type WHERE land_share_m2 IS NOT NULL "
+            "AND land_share_source LIKE '%공시%'").fetchone()[0]
+        print(f"타입 {total:,}개 중 대지권 입력 {have:,}개 "
+              f"(공시 확정 {verified:,} · 그 외 {have - verified:,})")
+        if have < total:
+            print(f"  미입력 {total - have:,}개 — 그 타입은 토허 판정이 "
+                  f"NEEDS_CHECK 로 막힙니다")
+        if verified == 0 and have:
+            print("  ⚠ 공시가격 출처가 하나도 없습니다. 추정값만으로는 "
+                  "허가대상에서 빼주지 않습니다.")
+
+
 def cmd_invite(args):
     """초대 관리.
 
@@ -2618,6 +2693,14 @@ def build_parser() -> argparse.ArgumentParser:
     ld.add_argument("--band", help="전용면적 밴드 (기본 84)")
     ld.add_argument("--limit", type=int, help="단지 수 제한 (시험용)")
 
+    lsh = sub.add_parser("landshare",
+                         help="전유부 대지권 (토허 허가대상 판정 입력)")
+    lsh.add_argument("action", choices=["import", "status", "show"])
+    lsh.add_argument("path", nargs="?", help="import: CSV 경로")
+    lsh.add_argument("--complex-id", type=int)
+    lsh.add_argument("--band", help="전용면적 밴드 (예: 84)")
+    lsh.add_argument("--template", action="store_true", help="입력 서식 출력")
+
     iv = sub.add_parser("invite", help="허락한 사람만 화면을 보게 한다 (사람마다 코드)")
     iv.add_argument("action", choices=["add", "list", "revoke", "restore", "links"])
     iv.add_argument("name", nargs="?", help="누구에게 준 코드인지 (예: 철수)")
@@ -2643,7 +2726,7 @@ HANDLERS = {
     "ladder": cmd_ladder, "relative": cmd_relative,
     "transit": cmd_transit, "supply": cmd_supply, "geocode": cmd_geocode,
     "catalyst": cmd_catalyst, "redev": cmd_redev,
-    "invite": cmd_invite,
+    "invite": cmd_invite, "landshare": cmd_landshare,
     "today": cmd_today, "leaders": cmd_leaders, "backtest": cmd_backtest, "validate": cmd_validate, "report": cmd_report,
 }
 

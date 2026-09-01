@@ -133,8 +133,15 @@ def run(conn: sqlite3.Connection, *, as_of: cutoff_mod.AsOf, profile: Profile,
         gate: str = base_pipeline.GATE_STRICT,
         weights: dict[str, float] | None = None,
         weights_source: str = weights_mod.HEURISTIC,
+        nationality: str | None = None,
+        occupancy_plan: str | None = None,
         limit: int = 10) -> DeltaResult:
-    """새 층까지 포함한 한 번의 랭킹."""
+    """새 층까지 포함한 한 번의 랭킹.
+
+    `nationality` · `occupancy_plan` 을 주면 토지거래허가 Hard Gate 가
+    켜진다(§5). 안 주면 Gate 를 적용하지 않는다 — 국적과 실거주 계획을
+    모르는 채로 판정하면 전부 NEEDS_CHECK 가 되어 화면이 빈다.
+    """
     band = area_band or area_mod.DEFAULT_BAND
     notes: list[str] = []
 
@@ -247,9 +254,14 @@ def run(conn: sqlite3.Connection, *, as_of: cutoff_mod.AsOf, profile: Profile,
                for c in ordered if c.alpha.known}
     penalties = {c.complex_id: ((c.alpha.risk or 0.0) / 100.0)
                  for c in ordered if c.alpha.known}
+    # ⑦-b 토지거래허가 Hard Gate (§5). 점수가 아니라 문이라 여기서 건다.
+    gates = _permit_gates(conn, ordered, as_of=as_of.day, band=band,
+                          nationality=nationality,
+                          occupancy_plan=occupancy_plan, notes=notes)
+
     split = exec_mod.split(ordered, stages, cash=cash,
                            expected_returns=returns,
-                           risk_penalties=penalties, limit=limit)
+                           risk_penalties=penalties, gates=gates, limit=limit)
 
     # ⑧
     coverage = exec_mod.measure(conn, as_of=as_of.day, area_band=band,
@@ -348,6 +360,62 @@ def _sample_of(features) -> int:
             except (ValueError, IndexError):
                 continue
     return 0
+
+
+def _permit_gates(conn, candidates, *, as_of: str, band: str,
+                  nationality: str | None, occupancy_plan: str | None,
+                  notes: list[str]) -> dict:
+    """후보별 토허 판정 (§5).
+
+    국적이나 실거주 계획을 안 받았으면 **Gate 를 걸지 않는다.** 걸면
+    전 후보가 NEEDS_CHECK 로 막혀 화면이 비는데, 그건 "확인이 필요하다" 를
+    "아무것도 못 산다" 로 바꿔 말하는 것이다. 대신 그 사실을 메모로 남긴다.
+    """
+    from apt_engine.regulation import gate as gate_mod
+    from apt_engine.regulation import land_share as ls_mod
+
+    if nationality is None or occupancy_plan is None:
+        notes.append(
+            "토지거래허가 Gate 를 적용하지 않았습니다 — 매수자 국적과 "
+            "실거주 계획을 받아야 판정할 수 있습니다(§5).")
+        return {}
+
+    metas = {r["id"]: r for r in conn.execute(
+        "SELECT c.id, c.lawd_cd, r.sido FROM complex c "
+        "LEFT JOIN region r ON r.lawd_cd = c.lawd_cd "
+        f"WHERE c.id IN ({','.join('?' * len(candidates))})",
+        [c.complex_id for c in candidates])} if candidates else {}
+
+    SIDO = {"서울": "서울특별시", "경기": "경기도", "인천": "인천광역시"}
+    out, estimated = {}, 0
+    for c in candidates:
+        meta = metas.get(c.complex_id)
+        if meta is None:
+            continue
+        sido = SIDO.get((meta["sido"] or "")[:2], meta["sido"] or "")
+        share = ls_mod.load(conn, complex_id=c.complex_id, area_band=band)
+        if share.known and share.verification != ls_mod.VERIFIED:
+            estimated += 1
+        rules = gate_mod.load_rules(conn, lawd_cd=meta["lawd_cd"], as_of=as_of)
+        out[c.complex_id] = gate_mod.evaluate_candidate(
+            rules,
+            gate_mod.Candidate(
+                lawd_cd=meta["lawd_cd"], property_type=gate_mod.APARTMENT,
+                land_share_sqm=share.value,
+                land_share_verification=share.verification),
+            nationality=nationality, occupancy_plan=occupancy_plan,
+            contract_date=as_of,
+            coverage_status=gate_mod.coverage_of(
+                conn, sido=sido, target_scope=gate_mod.BROAD_APARTMENT),
+            parcel_coverage=gate_mod.coverage_of(
+                conn, sido=sido, target_scope=gate_mod.PARCEL_SPECIFIC))
+
+    if estimated:
+        notes.append(
+            f"대지권이 추정값인 후보 {estimated}개는 토허 허가대상 판정을 "
+            f"하지 못했습니다 — 공동주택 공시가격의 전유부 대지권이 필요합니다 "
+            f"(`cli landshare import`).")
+    return out
 
 
 def detail(c: DeltaCandidate) -> str:

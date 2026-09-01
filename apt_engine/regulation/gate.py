@@ -463,6 +463,9 @@ class Candidate:
     property_type: str = APARTMENT
     land_share_sqm: float | None = None          # 주거지역 토지지분
     same_complex_has_apartment: bool | None = None
+    # 대지권이 어디서 왔나. 추정값이면 **통과 방향으로 쓰지 않는다**.
+    # (regulation.land_share 의 VERIFIED / ESTIMATED)
+    land_share_verification: str = "VERIFIED"
 
 
 def evaluate_candidate(rules: list[Rule], candidate: Candidate, *,
@@ -581,7 +584,25 @@ def evaluate_candidate(rules: list[Rule], candidate: Candidate, *,
     threshold = next((r.residential_threshold_sqm for r in matched
                       if r.residential_threshold_sqm is not None),
                      DEFAULT_RESIDENTIAL_THRESHOLD)
-    if candidate.land_share_sqm <= threshold:
+
+    # 추정 대지권으로는 **문을 열 수 없다**. 아래로 틀리면 허가 없이
+    # 계약해서 무효가 되기 때문이다(regulation/land_share.py 참고).
+    from apt_engine.regulation import land_share as ls_mod
+    share = ls_mod.LandShare(candidate.land_share_sqm, "-",
+                             candidate.land_share_verification)
+    over = share.exceeds(threshold)
+
+    if over is None:
+        return Decision(
+            NEEDS_CHECK, purpose,
+            f"대지권 {candidate.land_share_sqm:.1f}㎡ 는 추정값이라 "
+            f"허가대상 기준({threshold}㎡ 초과) 판정에 쓸 수 없습니다. "
+            f"공동주택 공시가격의 전유부 대지권을 확인해야 합니다.",
+            nationality=nationality, coverage_status=coverage_status,
+            not_applicable=not_applied, designated=True,
+            rule_id=matched[0].rule_id, check_code="LAND_SHARE_ESTIMATED_ONLY")
+
+    if over is False:
         return Decision(
             PASS, purpose,
             f"토지지분 {candidate.land_share_sqm}㎡ 로 허가대상 기준"
