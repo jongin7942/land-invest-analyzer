@@ -82,7 +82,10 @@ $header-h: 48px;
 }
 
 .app-main {
-  max-width: 1584px;
+  // 1584px 은 Carbon 의 최대 그리드 폭이지 **읽기 좋은 폭**이 아니다.
+  // 그 폭에서는 표의 왼쪽 항목과 오른쪽 값이 30cm 넘게 떨어져, 눈이
+  // 두 값을 한 줄로 못 묶는다. 5개 비교표까지 들어가는 선에서 줄인다.
+  max-width: 1200px;
   margin: 0 auto;
   padding: $spacing-06 $spacing-05 $spacing-09;
 

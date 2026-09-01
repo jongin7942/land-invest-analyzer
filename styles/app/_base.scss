@@ -1,4 +1,7 @@
 // 기본 — 타이포와 페이지 골격
+//
+// 크기·줄간격은 app/_type.scss 에서 토큰으로 정한다. 여기는 폰트 선택과
+// 글의 배치(줄 길이·여백·리듬)만 다룬다.
 @use '../brand' as brand;
 @use '@carbon/styles/scss/theme' as *;
 @use '@carbon/styles/scss/spacing' as *;
@@ -9,7 +12,9 @@
 // 폰트가 섞여 보인다. Pretendard 를 앞에 두고 Plex 는 폴백으로만 남긴다.
 $font-ko: 'Pretendard', 'IBM Plex Sans KR', system-ui, -apple-system,
           'Malgun Gothic', sans-serif;
-$font-num: 'IBM Plex Mono', 'Pretendard', ui-monospace, monospace;
+
+// 코드·산식 **전용**. 숫자에는 쓰지 않는다 — 아래 .num 설명 참고.
+$font-code: 'IBM Plex Mono', ui-monospace, 'D2Coding', monospace;
 
 html { font-size: 16px; }
 
@@ -18,32 +23,70 @@ body {
   background: $background;
   color: $text-primary;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   margin: 0;
+  word-break: keep-all;   // 한글은 단어 중간에서 끊지 않는다
+  overflow-wrap: break-word;
 }
 
-// 숫자는 고정폭으로. 비교표에서 자릿수가 흔들리면 눈으로 못 읽는다.
+// ── 숫자 ─────────────────────────────────────────────────────────────
+//
+// 예전에는 숫자에 IBM Plex Mono 를 썼다. 자릿수는 잘 맞지만 화면이
+// **터미널 출력처럼** 보였다 — "9.78억" 같은 값이 코드로 읽힌다.
+//
+// Pretendard 에도 고정폭 숫자(tabular figures)가 들어 있다.
+// font-variant-numeric 만 켜면 자릿수는 그대로 맞으면서 본문과
+// 같은 얼굴로 읽힌다. 비교표에서 숫자가 흔들리지 않는 것이 목적이지
+// 고정폭 폰트를 쓰는 것이 목적이 아니었다.
 .num, td.num, th.num, .stat-value {
-  font-family: $font-num;
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
+// 표 안의 숫자는 전부 자릿수를 맞춘다 (클래스를 빠뜨려도 흔들리지 않게)
+table td, table th { font-variant-numeric: tabular-nums; }
 
+code, kbd, samp {
+  font-family: $font-code;
+  font-size: .9em;
+  background: $layer-accent-01;
+  padding: 1px 5px;
+  border: 1px solid $border-subtle-01;
+  word-break: break-all;
+}
+
+// ── 제목과 리듬 ──────────────────────────────────────────────────────
+//
+// 제목 위 여백은 넉넉하게, 제목과 그 아래 내용 사이는 좁게. 그래야
+// 어떤 제목에 딸린 내용인지 눈으로 바로 묶인다.
 h1 { @include type-style('productive-heading-05'); margin: 0 0 $spacing-03; }
-h2 { @include type-style('productive-heading-04'); margin: 0 0 $spacing-03; }
-h3 { @include type-style('productive-heading-03'); margin: 0 0 $spacing-03; }
+h2 {
+  @include type-style('productive-heading-04');
+  margin: $spacing-08 0 $spacing-04;
+}
+h3 {
+  @include type-style('productive-heading-03');
+  margin: $spacing-06 0 $spacing-03;
+}
 h4 { @include type-style('productive-heading-02'); margin: 0 0 $spacing-02; }
 
-p { @include type-style('body-01'); margin: 0 0 $spacing-04; }
+// 첫 제목 위에는 여백을 더 얹지 않는다
+h2:first-child, h3:first-child { margin-top: 0; }
+
+p {
+  @include type-style('body-01');
+  margin: 0 0 $spacing-05;
+  max-width: 74ch;    // 한 줄이 너무 길면 다음 줄을 못 찾는다
+}
 
 .page-title {
   @include type-style('productive-heading-05');
-  margin: 0 0 $spacing-02;
+  margin: 0 0 $spacing-03;
 }
 .page-sub {
   @include type-style('body-01');
   color: $text-secondary;
-  margin: 0 0 $spacing-06;
-  max-width: 62ch;   // 긴 줄은 읽기 어렵다
+  margin: 0 0 $spacing-07;
+  max-width: 66ch;
 }
 
 // 과도한 그림자·그라데이션·애니메이션을 쓰지 않는다는 원칙을
@@ -51,7 +94,7 @@ p { @include type-style('body-01'); margin: 0 0 $spacing-04; }
 .surface {
   background: $layer-01;
   border: 1px solid $border-subtle-01;
-  padding: $spacing-05;
+  padding: $spacing-06;
 }
 
 .stack > * + * { margin-top: $spacing-05; }
@@ -59,13 +102,15 @@ p { @include type-style('body-01'); margin: 0 0 $spacing-04; }
 
 .row {
   display: flex;
-  gap: $spacing-04;
+  gap: $spacing-05;
   flex-wrap: wrap;
   align-items: flex-start;
 }
 
 .muted { color: $text-secondary; }
 .small { @include type-style('label-01'); }
+
+a { color: $link-primary; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

@@ -152,10 +152,9 @@ confidence = HIGH   표본 ≥ 10
   <span class="metric__label">
     {% if capital.confirmed %}실투자금{% else %}실투자금 (확인 불가 항목 있음){% endif %}
   </span>
-  <span class="metric__value" style="font-size:1.75rem">
-    {% if capital.required is none %}{{ ui.value(none, reason='필수 항목을 구하지 못했습니다') }}
-    {% else %}{{ capital.required | won }}{% if capital.unknown %}<span class="small muted"> 이상</span>{% endif %}
-    {% endif %}
+  <span class="metric__value">
+    {{ ui.money(capital.required, over=capital.unknown,
+                reason='필수 항목을 구하지 못했습니다') }}
   </span>
   <span class="metric__note">
     {% if capital.confirmed %}

@@ -111,8 +111,8 @@
       {% for r in rows %}
         <td data-label="{{ r.name }}"
             class="{% if best.equity_no_loan == r.id %}compare__best{% endif %}">
-          {% if r.equity_no_loan is none %}{{ ui.value(none, reason=r.cap_error or '매수 부대비용 규칙이 부족합니다') }}
-          {% else %}{{ r.equity_no_loan | won }}{% if r.unknown %}<span class="stale"> 이상</span>{% endif %}{% endif %}
+          {{ ui.money(r.equity_no_loan, over=r.unknown,
+                      reason=r.cap_error or '매수 부대비용 규칙이 부족합니다') }}
         </td>
       {% endfor %}
     </tr>
@@ -121,8 +121,8 @@
       {% for r in rows %}
         <td data-label="{{ r.name }}"
             class="{% if best.equity == r.id %}compare__best{% endif %}">
-          {% if r.equity is none %}{{ ui.value(none, reason=r.cap_error or '대출 규칙이 부족합니다') }}
-          {% else %}{{ r.equity | won }}{% if r.unknown %}<span class="stale"> 이상</span>{% endif %}{% endif %}
+          {{ ui.money(r.equity, over=r.unknown,
+                      reason=r.cap_error or '대출 규칙이 부족합니다') }}
         </td>
       {% endfor %}
     </tr>

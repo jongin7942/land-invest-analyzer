@@ -12339,13 +12339,28 @@ body {
   background: var(--cds-background, #f7f8fa);
   color: var(--cds-text-primary, #1a2230);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   margin: 0;
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 
 .num, td.num, th.num, .stat-value {
-  font-family: "IBM Plex Mono", "Pretendard", ui-monospace, monospace;
   font-variant-numeric: tabular-nums;
   text-align: right;
+}
+
+table td, table th {
+  font-variant-numeric: tabular-nums;
+}
+
+code, kbd, samp {
+  font-family: "IBM Plex Mono", ui-monospace, "D2Coding", monospace;
+  font-size: 0.9em;
+  background: var(--cds-layer-accent-01, #eef0f3);
+  padding: 1px 5px;
+  border: 1px solid var(--cds-border-subtle-01, #e0e4e9);
+  word-break: break-all;
 }
 
 h1 {
@@ -12361,7 +12376,7 @@ h2 {
   font-weight: var(--cds-productive-heading-04-font-weight, 400);
   line-height: var(--cds-productive-heading-04-line-height, 1.28572);
   letter-spacing: var(--cds-productive-heading-04-letter-spacing, 0);
-  margin: 0 0 0.5rem;
+  margin: 2.5rem 0 0.75rem;
 }
 
 h3 {
@@ -12369,7 +12384,7 @@ h3 {
   font-weight: var(--cds-productive-heading-03-font-weight, 400);
   line-height: var(--cds-productive-heading-03-line-height, 1.4);
   letter-spacing: var(--cds-productive-heading-03-letter-spacing, 0);
-  margin: 0 0 0.5rem;
+  margin: 1.5rem 0 0.5rem;
 }
 
 h4 {
@@ -12380,12 +12395,17 @@ h4 {
   margin: 0 0 0.25rem;
 }
 
+h2:first-child, h3:first-child {
+  margin-top: 0;
+}
+
 p {
   font-size: var(--cds-body-01-font-size, 0.875rem);
   font-weight: var(--cds-body-01-font-weight, 400);
   line-height: var(--cds-body-01-line-height, 1.42857);
   letter-spacing: var(--cds-body-01-letter-spacing, 0.16px);
-  margin: 0 0 0.75rem;
+  margin: 0 0 1rem;
+  max-width: 74ch;
 }
 
 .page-title {
@@ -12393,7 +12413,7 @@ p {
   font-weight: var(--cds-productive-heading-05-font-weight, 400);
   line-height: var(--cds-productive-heading-05-line-height, 1.25);
   letter-spacing: var(--cds-productive-heading-05-letter-spacing, 0);
-  margin: 0 0 0.25rem;
+  margin: 0 0 0.5rem;
 }
 
 .page-sub {
@@ -12402,14 +12422,14 @@ p {
   line-height: var(--cds-body-01-line-height, 1.42857);
   letter-spacing: var(--cds-body-01-letter-spacing, 0.16px);
   color: var(--cds-text-secondary, #3d4653);
-  margin: 0 0 1.5rem;
-  max-width: 62ch;
+  margin: 0 0 2rem;
+  max-width: 66ch;
 }
 
 .surface {
   background: var(--cds-layer-01, #ffffff);
   border: 1px solid var(--cds-border-subtle-01, #e0e4e9);
-  padding: 1rem;
+  padding: 1.5rem;
 }
 
 .stack > * + * {
@@ -12422,7 +12442,7 @@ p {
 
 .row {
   display: flex;
-  gap: 0.75rem;
+  gap: 1rem;
   flex-wrap: wrap;
   align-items: flex-start;
 }
@@ -12436,6 +12456,10 @@ p {
   font-weight: var(--cds-label-01-font-weight, 400);
   line-height: var(--cds-label-01-line-height, 1.33333);
   letter-spacing: var(--cds-label-01-letter-spacing, 0.32px);
+}
+
+a {
+  color: var(--cds-link-primary, #16365e);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -12536,7 +12560,7 @@ p {
 }
 
 .app-main {
-  max-width: 1584px;
+  max-width: 1200px;
   margin: 0 auto;
   padding: 1.5rem 1rem 3rem;
 }
@@ -13250,6 +13274,53 @@ p {
   letter-spacing: var(--cds-body-compact-01-letter-spacing, 0.16px);
 }
 
+.money {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.money__main {
+  font-size: var(--cds-body-compact-01-font-size, 0.875rem);
+  font-weight: var(--cds-body-compact-01-font-weight, 400);
+  line-height: var(--cds-body-compact-01-line-height, 1.28572);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing, 0.16px);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.metric__value .money__main {
+  font-size: var(--cds-productive-heading-04-font-size, 1.75rem);
+  font-weight: var(--cds-productive-heading-04-font-weight, 400);
+  line-height: var(--cds-productive-heading-04-line-height, 1.28572);
+  letter-spacing: var(--cds-productive-heading-04-letter-spacing, 0);
+  font-weight: 700;
+}
+
+.money__over {
+  font-size: var(--cds-body-01-font-size, 0.875rem);
+  font-weight: var(--cds-body-01-font-weight, 400);
+  line-height: var(--cds-body-01-line-height, 1.42857);
+  letter-spacing: var(--cds-body-01-letter-spacing, 0.16px);
+  color: #8a5a00;
+  font-weight: 600;
+}
+
+.money__exact {
+  font-size: var(--cds-label-01-font-size, 0.75rem);
+  font-weight: var(--cds-label-01-font-weight, 400);
+  line-height: var(--cds-label-01-line-height, 1.33333);
+  letter-spacing: var(--cds-label-01-letter-spacing, 0.32px);
+  color: var(--cds-text-helper, #6b7684);
+}
+
+@media (max-width: 41.98rem) {
+  .money {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+  }
+}
 .state {
   border: 1px solid var(--cds-border-subtle-01, #e0e4e9);
   background: var(--cds-layer-01, #ffffff);
@@ -13964,6 +14035,47 @@ p {
   --cds-border-subtle-selected: var(--cds-border-subtle-selected-01, #c6c6c6);
   --cds-border-strong: var(--cds-border-strong-01, #c7cdd5);
   --cds-border-tile: var(--cds-border-tile-01, #c6c6c6);
+  --cds-body-01-font-size: 1rem;
+  --cds-body-01-line-height: 1.75;
+  --cds-body-01-letter-spacing: 0;
+  --cds-body-02-font-size: 1.0625rem;
+  --cds-body-02-line-height: 1.8;
+  --cds-body-02-letter-spacing: 0;
+  --cds-body-compact-01-font-size: 0.9375rem;
+  --cds-body-compact-01-line-height: 1.65;
+  --cds-body-compact-01-letter-spacing: 0;
+  --cds-body-compact-02-font-size: 1rem;
+  --cds-body-compact-02-line-height: 1.7;
+  --cds-body-compact-02-letter-spacing: 0;
+  --cds-label-01-font-size: 0.8125rem;
+  --cds-label-01-line-height: 1.6;
+  --cds-label-01-letter-spacing: 0;
+  --cds-helper-text-01-font-size: 0.8125rem;
+  --cds-helper-text-01-line-height: 1.6;
+  --cds-helper-text-01-letter-spacing: 0;
+  --cds-code-01-font-size: 0.8125rem;
+  --cds-code-01-line-height: 1.7;
+  --cds-code-01-letter-spacing: 0;
+  --cds-productive-heading-01-font-size: 0.9375rem;
+  --cds-productive-heading-01-line-height: 1.6;
+  --cds-productive-heading-01-font-weight: 600;
+  --cds-productive-heading-01-letter-spacing: 0;
+  --cds-productive-heading-02-font-size: 1.125rem;
+  --cds-productive-heading-02-line-height: 1.55;
+  --cds-productive-heading-02-font-weight: 600;
+  --cds-productive-heading-02-letter-spacing: 0;
+  --cds-productive-heading-03-font-size: 1.25rem;
+  --cds-productive-heading-03-line-height: 1.5;
+  --cds-productive-heading-03-font-weight: 600;
+  --cds-productive-heading-03-letter-spacing: 0;
+  --cds-productive-heading-04-font-size: 1.5rem;
+  --cds-productive-heading-04-line-height: 1.45;
+  --cds-productive-heading-04-font-weight: 600;
+  --cds-productive-heading-04-letter-spacing: -0.01em;
+  --cds-productive-heading-05-font-size: 1.75rem;
+  --cds-productive-heading-05-line-height: 1.4;
+  --cds-productive-heading-05-font-weight: 700;
+  --cds-productive-heading-05-letter-spacing: -0.015em;
   --cds-button-primary: #16365e;
   --cds-button-primary-hover: #0f2742;
   --cds-button-primary-active: #0a1c30;

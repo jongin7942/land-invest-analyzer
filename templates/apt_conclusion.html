@@ -58,8 +58,8 @@
           {% else %}{{ r.price | eok }}{% endif %}
         </td>
         <td class="num">
-          {% if r.equity is none %}{{ ui.value(none, reason=r.cap_error or '규칙이 부족합니다') }}
-          {% else %}{{ r.equity | won }}{% if r.unknown %} 이상{% endif %}{% endif %}
+          {{ ui.money(r.equity, over=r.unknown,
+                      reason=r.cap_error or '규칙이 부족합니다') }}
         </td>
         <td>
           {% if r.afford is none %}

@@ -108,6 +108,7 @@
 @use '@carbon/styles/scss/components/ui-shell';
 
 @use 'app/base';
+@use 'app/type' as ko-type;
 @use 'app/shell';
 @use 'app/data';
 @use 'app/blocks';
@@ -121,6 +122,10 @@
 // :root 에 발행해야 위 $theme 맵이 실제로 적용된다.
 :root {
   @include theme.theme();
+
+  // 한글 기준 타입 스케일. Carbon 타입 모듈도 :root 에 같은 토큰을
+  // 발행하므로 반드시 그 뒤(= 이 파일 맨 끝)에서 덮어써야 한다.
+  @include ko-type.korean-tokens;
 
   // theme() 는 **기본 테마 → 컴포넌트 토큰** 순으로 발행한다. 버튼·알림처럼
   // 컴포넌트 토큰 층에 있는 값은 위 $theme 맵에 적어도 뒤에서 IBM 기본색으로

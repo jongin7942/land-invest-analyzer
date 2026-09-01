@@ -224,3 +224,29 @@
 .cds--checkbox { width: 16px; height: 16px; accent-color: brand.$brand-700; margin: 0; }
 .cds--checkbox-label { cursor: pointer; }
 .cds--checkbox-label-text { @include type-style('body-compact-01'); }
+
+// ── 금액 ─────────────────────────────────────────────────────────────
+//
+// 큰 숫자를 원 단위로만 보여주면 자릿수를 세어야 읽힌다. 사람은
+// "9억" 으로 읽고 "900,000,000" 으로 확인한다. 둘 다 같은 값이므로
+// 읽는 값과 확인하는 값을 나란히 둔다 — 억만 남기면 반올림된 값이
+// 유일한 값이 되어 버린다.
+.money { display: inline-flex; align-items: baseline; gap: $spacing-03; }
+.money__main {
+  @include type-style('body-compact-01');
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+// 큰 크기는 **그 화면의 답**일 때만. 표 안에서 크게 키우면 그 칸이
+// 가장 중요한 값처럼 읽히는데, 표에서는 어느 칸도 그렇지 않다.
+.metric__value .money__main {
+  @include type-style('productive-heading-04');
+  font-weight: 700;
+}
+.money__over { @include type-style('body-01'); color: brand.$warn-500; font-weight: 600; }
+.money__exact { @include type-style('label-01'); color: $text-helper; }
+
+@include breakpoint-down(md) {
+  .money { flex-direction: column; align-items: flex-start; gap: 0; }
+}
