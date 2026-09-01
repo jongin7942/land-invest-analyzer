@@ -1,0 +1,98 @@
+// 상단 메뉴와 레이아웃
+@use '../brand' as brand;
+@use '@carbon/styles/scss/theme' as *;
+@use '@carbon/styles/scss/spacing' as *;
+@use '@carbon/styles/scss/type' as *;
+@use '@carbon/styles/scss/breakpoint' as *;
+
+$header-h: 48px;
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 8000;
+  height: $header-h;
+  background: brand.$brand-800;
+  color: $text-on-color;
+  display: flex;
+  align-items: center;
+  padding: 0 $spacing-05;
+  gap: $spacing-06;
+}
+
+.app-header__name {
+  @include type-style('productive-heading-01');
+  color: $text-on-color;
+  text-decoration: none;
+  letter-spacing: -.01em;
+  white-space: nowrap;
+}
+
+.app-nav {
+  display: flex;
+  gap: $spacing-02;
+  overflow-x: auto;
+  scrollbar-width: none;
+  &::-webkit-scrollbar { display: none; }
+}
+
+.app-nav a {
+  @include type-style('body-compact-01');
+  color: rgba(255,255,255,.82);
+  text-decoration: none;
+  padding: 0 $spacing-04;
+  height: $header-h;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  border-bottom: 3px solid transparent;
+
+  &:hover { background: rgba(255,255,255,.10); color: #fff; }
+  &[aria-current='page'] {
+    color: #fff;
+    border-bottom-color: #fff;
+    font-weight: 600;
+  }
+  &:focus-visible { outline: 2px solid #fff; outline-offset: -2px; }
+}
+
+// 보기 모드 토글 — 오른쪽 끝
+.mode-switch {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: $spacing-02;
+}
+
+.mode-switch a {
+  @include type-style('label-01');
+  color: rgba(255,255,255,.75);
+  text-decoration: none;
+  padding: $spacing-02 $spacing-03;
+  border: 1px solid rgba(255,255,255,.28);
+  white-space: nowrap;
+
+  &[aria-current='true'] {
+    background: #fff;
+    color: brand.$brand-800;
+    border-color: #fff;
+    font-weight: 600;
+  }
+  &:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+}
+
+.app-main {
+  max-width: 1584px;
+  margin: 0 auto;
+  padding: $spacing-06 $spacing-05 $spacing-09;
+
+  @include breakpoint-down(md) {
+    padding: $spacing-05 $spacing-04 $spacing-08;
+  }
+}
+
+// 모바일에서는 서비스명을 줄이고 메뉴를 가로 스크롤로
+@include breakpoint-down(md) {
+  .app-header { gap: $spacing-04; padding: 0 $spacing-04; }
+  .mode-switch a { padding: $spacing-01 $spacing-02; }
+}

@@ -1,0 +1,75 @@
+// 기본 — 타이포와 페이지 골격
+@use '../brand' as brand;
+@use '@carbon/styles/scss/theme' as *;
+@use '@carbon/styles/scss/spacing' as *;
+@use '@carbon/styles/scss/type' as *;
+@use '@carbon/styles/scss/breakpoint' as *;
+
+// Carbon 은 IBM Plex 를 기본으로 쓴다. 한글 자소가 없어서 한국어 화면에서는
+// 폰트가 섞여 보인다. Pretendard 를 앞에 두고 Plex 는 폴백으로만 남긴다.
+$font-ko: 'Pretendard', 'IBM Plex Sans KR', system-ui, -apple-system,
+          'Malgun Gothic', sans-serif;
+$font-num: 'IBM Plex Mono', 'Pretendard', ui-monospace, monospace;
+
+html { font-size: 16px; }
+
+body {
+  font-family: $font-ko;
+  background: $background;
+  color: $text-primary;
+  -webkit-font-smoothing: antialiased;
+  margin: 0;
+}
+
+// 숫자는 고정폭으로. 비교표에서 자릿수가 흔들리면 눈으로 못 읽는다.
+.num, td.num, th.num, .stat-value {
+  font-family: $font-num;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+h1 { @include type-style('productive-heading-05'); margin: 0 0 $spacing-03; }
+h2 { @include type-style('productive-heading-04'); margin: 0 0 $spacing-03; }
+h3 { @include type-style('productive-heading-03'); margin: 0 0 $spacing-03; }
+h4 { @include type-style('productive-heading-02'); margin: 0 0 $spacing-02; }
+
+p { @include type-style('body-01'); margin: 0 0 $spacing-04; }
+
+.page-title {
+  @include type-style('productive-heading-05');
+  margin: 0 0 $spacing-02;
+}
+.page-sub {
+  @include type-style('body-01');
+  color: $text-secondary;
+  margin: 0 0 $spacing-06;
+  max-width: 62ch;   // 긴 줄은 읽기 어렵다
+}
+
+// 과도한 그림자·그라데이션·애니메이션을 쓰지 않는다는 원칙을
+// 유틸리티로 못박아 둔다. 카드 구분은 테두리로만 한다.
+.surface {
+  background: $layer-01;
+  border: 1px solid $border-subtle-01;
+  padding: $spacing-05;
+}
+
+.stack > * + * { margin-top: $spacing-05; }
+.stack-sm > * + * { margin-top: $spacing-03; }
+
+.row {
+  display: flex;
+  gap: $spacing-04;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.muted { color: $text-secondary; }
+.small { @include type-style('label-01'); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    transition-duration: .01ms !important;
+  }
+}

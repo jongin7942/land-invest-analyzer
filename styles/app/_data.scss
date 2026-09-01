@@ -1,0 +1,238 @@
+// 데이터 신뢰도 표시 (§5) · 점수 표시 (§6) · 비교표
+@use '../brand' as brand;
+@use '@carbon/styles/scss/theme' as *;
+@use '@carbon/styles/scss/spacing' as *;
+@use '@carbon/styles/scss/type' as *;
+@use '@carbon/styles/scss/breakpoint' as *;
+
+// ── 데이터 등급 (§5) ─────────────────────────────────────────────────
+//
+// 실거래 · 호가 · 추정을 **절대 하나의 가격처럼 섞지 않는다.**
+// 색과 라벨 둘 다로 구분한다 — 색만으로 구분하면 색각 이상인 사람이 못 읽는다.
+.grade {
+  @include type-style('label-01');
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px $spacing-02;
+  border: 1px solid;
+  white-space: nowrap;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.grade--confirmed {          // 실거래 — 실제로 일어난 거래
+  color: brand.$grade-confirmed;
+  background: brand.$ok-100;
+  border-color: rgba(27,107,69,.3);
+}
+.grade--listing {            // 호가 — 파는 사람이 부르는 값
+  color: brand.$grade-listing;
+  background: brand.$warn-100;
+  border-color: rgba(138,90,0,.3);
+}
+.grade--estimated {          // 추정 — 우리가 만든 값
+  color: brand.$grade-estimated;
+  background: brand.$gray-100;
+  border-color: brand.$gray-300;
+}
+.grade--unknown {            // 확인 불가 — 0 이 아니다
+  color: brand.$danger-500;
+  background: brand.$danger-100;
+  border-color: rgba(165,32,32,.3);
+}
+
+// 출처·기준일 한 줄
+.provenance {
+  @include type-style('label-01');
+  color: $text-helper;
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-02 $spacing-04;
+  margin-top: $spacing-03;
+  padding-top: $spacing-03;
+  border-top: 1px solid $border-subtle-01;
+}
+.provenance dt { font-weight: 600; display: inline; }
+.provenance dd { display: inline; margin: 0 0 0 4px; }
+.provenance__item { display: inline-flex; gap: 4px; }
+
+// 오래된 데이터 경고
+.stale {
+  color: brand.$warn-500;
+  font-weight: 600;
+}
+
+// ── 상승/하락 (한국 관행: 상승 빨강 · 하락 파랑) ─────────────────────
+//
+// ⚠ 색만 쓰지 않는다. ::before 로 화살표를 항상 붙인다.
+.delta { font-variant-numeric: tabular-nums; font-weight: 600; }
+.delta--up   { color: brand.$rise-500; &::before { content: '▲ '; } }
+.delta--down { color: brand.$fall-500; &::before { content: '▼ '; } }
+.delta--flat { color: $text-secondary; &::before { content: '– '; } }
+
+// ── 점수 (§6) ────────────────────────────────────────────────────────
+//
+// 종합점수만 크게 보여주지 않는다. 항상 세 값을 나란히 둔다.
+.score-set {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  background: $border-subtle-01;
+  border: 1px solid $border-subtle-01;
+}
+.score-cell {
+  background: $layer-01;
+  padding: $spacing-04;
+}
+.score-cell__label {
+  @include type-style('label-01');
+  color: $text-secondary;
+  display: block;
+}
+.score-cell__value {
+  @include type-style('productive-heading-04');
+  font-variant-numeric: tabular-nums;
+  display: block;
+  margin-top: 2px;
+}
+.score-cell--alpha .score-cell__value { color: brand.$brand-700; }
+.score-cell--risk .score-cell__value  { color: brand.$danger-500; }
+.score-cell--conf .score-cell__value  { color: $text-secondary; }
+
+// 점수를 올린/내린 요인
+.factor-list { margin: 0; padding: 0; list-style: none; }
+.factor {
+  display: flex;
+  align-items: baseline;
+  gap: $spacing-03;
+  padding: $spacing-02 0;
+  border-bottom: 1px solid $border-subtle-01;
+  @include type-style('body-compact-01');
+
+  &:last-child { border-bottom: 0; }
+}
+.factor__name { flex: 1; min-width: 0; }
+.factor__weight {
+  @include type-style('label-01');
+  color: $text-helper;
+  font-variant-numeric: tabular-nums;
+}
+.factor__value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  min-width: 5ch;
+  text-align: right;
+}
+.factor--up .factor__value   { color: brand.$brand-700; }
+.factor--down .factor__value { color: brand.$danger-500; }
+
+// 근거 펼치기
+.evidence {
+  border: 1px solid $border-subtle-01;
+  background: $layer-02;
+  margin-top: $spacing-03;
+}
+.evidence > summary {
+  @include type-style('body-compact-01');
+  padding: $spacing-03 $spacing-04;
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+  &::-webkit-details-marker { display: none; }
+  &::before { content: '＋ '; color: $text-secondary; }
+  &:hover { background: $layer-hover-01; }
+  &:focus-visible { outline: 2px solid $focus; outline-offset: -2px; }
+}
+.evidence[open] > summary::before { content: '－ '; }
+.evidence__body {
+  padding: 0 $spacing-04 $spacing-04;
+  @include type-style('body-compact-01');
+}
+.formula {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  background: $layer-accent-01;
+  padding: $spacing-03;
+  overflow-x: auto;
+  @include type-style('code-01');
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+// ── 비교표 (PC 가로 비교) ────────────────────────────────────────────
+.compare-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+.compare {
+  width: 100%;
+  border-collapse: collapse;
+  @include type-style('body-compact-01');
+
+  th, td {
+    padding: $spacing-03 $spacing-04;
+    border-bottom: 1px solid $border-subtle-01;
+    vertical-align: top;
+  }
+  // 항목 이름 열은 스크롤해도 붙어 있어야 비교가 된다
+  th[scope='row'] {
+    text-align: left;
+    font-weight: 600;
+    background: $layer-02;
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    min-width: 148px;
+    border-right: 1px solid $border-subtle-01;
+  }
+  thead th {
+    background: $layer-accent-01;
+    text-align: right;
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    min-width: 132px;
+  }
+  thead th:first-child { left: 0; z-index: 3; text-align: left; }
+  td { text-align: right; font-variant-numeric: tabular-nums; }
+  // 열 너비를 통일해 가로 비교가 쉽게
+  tbody tr:hover td, tbody tr:hover th[scope='row'] { background: $layer-hover-01; }
+}
+
+.compare__best { background: brand.$brand-100 !important; font-weight: 600; }
+
+// ── 모바일: 가로표 → 세로 카드 ───────────────────────────────────────
+@include breakpoint-down(md) {
+  .compare-scroll { overflow: visible; }
+  .compare, .compare thead, .compare tbody, .compare tr,
+  .compare th, .compare td { display: block; }
+
+  .compare thead { display: none; }
+
+  .compare tbody tr {
+    border: 1px solid $border-subtle-01;
+    margin-bottom: $spacing-05;
+    background: $layer-01;
+  }
+  .compare th[scope='row'] {
+    position: static;
+    background: $layer-accent-01;
+    border-right: 0;
+    border-bottom: 1px solid $border-subtle-01;
+  }
+  // 각 값 앞에 어느 단지인지 붙인다 (data-label 로 템플릿이 넣는다)
+  .compare td {
+    display: flex;
+    justify-content: space-between;
+    gap: $spacing-04;
+    text-align: right;
+    border-bottom: 1px solid $border-subtle-01;
+    &:last-child { border-bottom: 0; }
+    &::before {
+      content: attr(data-label);
+      font-weight: 600;
+      text-align: left;
+      color: $text-secondary;
+      flex: 0 0 auto;
+    }
+  }
+  .score-set { grid-template-columns: 1fr; }
+}
