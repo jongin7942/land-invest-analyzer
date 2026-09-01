@@ -36,20 +36,34 @@
 #     지정된 적이 없으므로, 제물포구 전역에 거는 이 규칙은 옛 동구
 #     구역에 대해 실제 지정보다 넓다. 외국인 매수 게이트는 넓은 쪽이
 #     안전하고(허가를 받으라고 말할 뿐이다) 좁은 쪽은 허가 없는 계약
-#     = 무효로 끝난다. 필지 단위 고시를 확보하면 좁힐 것.
+#     = 무효로 끝난다.
+#
+# ── confidence 열 — 나중에 좁힐 행을 표시해 둔다 ──────────────────────
+#
+#   NOTICE_EXACT   공고 범위와 규칙 범위가 일치한다
+#   CONSERVATIVE   **의도적으로 공고보다 넓게 잡았다.** 좁히면 허가
+#                  대상을 통과시킬 위험이 있어 넓은 쪽에 둔 것이다.
+#
+#   필지·법정동 단위 공식 고시를 확보하면 CONSERVATIVE 행을 좁힌다.
+#   그 목록은 이 한 줄로 나온다:
+#
+#     SELECT rule_id, lawd_cd, note FROM land_permit_zone
+#      WHERE confidence = 'CONSERVATIVE'
+#
+#   지금 CONSERVATIVE 인 것은 제물포구 하나뿐이고, 이유는 옛 동구다.
 #
 # 출처: 국토교통부 2026-08-20 외국인 토지거래허가구역 연장 공고
 #      행정구역 코드: 행정표준코드관리시스템 2026-07-01 기준
 #
 # 주택유형: 단독 · 다가구 · 아파트 · 연립 · 다세대
 # 면적기준(㎡): 주거 6 · 상업공업 15 · 녹지 20
-rule_id,lawd_cd,zone_group,target_scope,buyer_scope,nationality_scope,property_scope,effective_from,effective_to,residence_duty_months,jeonse_succession_allowed,residential_threshold_sqm,commercial_threshold_sqm,green_threshold_sqm,status,source_name,source_url,last_verified,note
-LPZ_FOREIGN_ICN_MICHUHOL,28177,CAPITAL_AREA_FOREIGN_HOUSING,외국인,FOREIGN_ONLY,NON_KOREAN,단독/다가구/아파트/연립/다세대,2026-08-26,2027-08-25,24,0,6,15,20,ENACTED,국토교통부,,2026-08-20,인천광역시 미추홀구 · 외국인 전용 — 내국인 매수에는 적용되지 않음
-LPZ_FOREIGN_ICN_YEONSU,28185,CAPITAL_AREA_FOREIGN_HOUSING,외국인,FOREIGN_ONLY,NON_KOREAN,단독/다가구/아파트/연립/다세대,2026-08-26,2027-08-25,24,0,6,15,20,ENACTED,국토교통부,,2026-08-20,인천광역시 연수구 · 외국인 전용 — 내국인 매수에는 적용되지 않음
-LPZ_FOREIGN_ICN_NAMDONG,28200,CAPITAL_AREA_FOREIGN_HOUSING,외국인,FOREIGN_ONLY,NON_KOREAN,단독/다가구/아파트/연립/다세대,2026-08-26,2027-08-25,24,0,6,15,20,ENACTED,국토교통부,,2026-08-20,인천광역시 남동구 · 외국인 전용 — 내국인 매수에는 적용되지 않음
-LPZ_FOREIGN_ICN_BUPYEONG,28237,CAPITAL_AREA_FOREIGN_HOUSING,외국인,FOREIGN_ONLY,NON_KOREAN,단독/다가구/아파트/연립/다세대,2026-08-26,2027-08-25,24,0,6,15,20,ENACTED,국토교통부,,2026-08-20,인천광역시 부평구 · 외국인 전용 — 내국인 매수에는 적용되지 않음
-LPZ_FOREIGN_ICN_GYEYANG,28245,CAPITAL_AREA_FOREIGN_HOUSING,외국인,FOREIGN_ONLY,NON_KOREAN,단독/다가구/아파트/연립/다세대,2026-08-26,2027-08-25,24,0,6,15,20,ENACTED,국토교통부,,2026-08-20,인천광역시 계양구 · 외국인 전용 — 내국인 매수에는 적용되지 않음
-LPZ_FOREIGN_ICN_JEMULPO,28125,CAPITAL_AREA_FOREIGN_HOUSING,외국인,FOREIGN_ONLY,NON_KOREAN,단독/다가구/아파트/연립/다세대,2026-08-26,2027-08-25,24,0,6,15,20,ENACTED,국토교통부,,2026-08-20,인천광역시 제물포구 · 외국인 전용 — 옛 중구(28110) 내륙 + 옛 동구 승계
-LPZ_FOREIGN_ICN_YEONGJONG,28155,CAPITAL_AREA_FOREIGN_HOUSING,외국인,FOREIGN_ONLY,NON_KOREAN,단독/다가구/아파트/연립/다세대,2026-08-26,2027-08-25,24,0,6,15,20,ENACTED,국토교통부,,2026-08-20,인천광역시 영종구 · 외국인 전용 — 옛 중구(28110) 영종도 승계
-LPZ_FOREIGN_ICN_SEOHAE,28275,CAPITAL_AREA_FOREIGN_HOUSING,외국인,FOREIGN_ONLY,NON_KOREAN,단독/다가구/아파트/연립/다세대,2026-08-26,2027-08-25,24,0,6,15,20,ENACTED,국토교통부,,2026-08-20,인천광역시 서해구 · 외국인 전용 — 옛 서구(28260) 아라뱃길 이남 승계·개칭
-LPZ_FOREIGN_ICN_GEOMDAN,28290,CAPITAL_AREA_FOREIGN_HOUSING,외국인,FOREIGN_ONLY,NON_KOREAN,단독/다가구/아파트/연립/다세대,2026-08-26,2027-08-25,24,0,6,15,20,ENACTED,국토교통부,,2026-08-20,인천광역시 검단구 · 외국인 전용 — 옛 서구(28260) 아라뱃길 이북 승계·신설
+rule_id,lawd_cd,zone_group,target_scope,buyer_scope,nationality_scope,property_scope,effective_from,effective_to,residence_duty_months,jeonse_succession_allowed,residential_threshold_sqm,commercial_threshold_sqm,green_threshold_sqm,status,confidence,source_name,source_url,last_verified,note
+LPZ_FOREIGN_ICN_MICHUHOL,28177,CAPITAL_AREA_FOREIGN_HOUSING,외국인,FOREIGN_ONLY,NON_KOREAN,단독/다가구/아파트/연립/다세대,2026-08-26,2027-08-25,24,0,6,15,20,ENACTED,NOTICE_EXACT,국토교통부,,2026-08-20,인천광역시 미추홀구 · 외국인 전용 — 내국인 매수에는 적용되지 않음
+LPZ_FOREIGN_ICN_YEONSU,28185,CAPITAL_AREA_FOREIGN_HOUSING,외국인,FOREIGN_ONLY,NON_KOREAN,단독/다가구/아파트/연립/다세대,2026-08-26,2027-08-25,24,0,6,15,20,ENACTED,NOTICE_EXACT,국토교통부,,2026-08-20,인천광역시 연수구 · 외국인 전용 — 내국인 매수에는 적용되지 않음
+LPZ_FOREIGN_ICN_NAMDONG,28200,CAPITAL_AREA_FOREIGN_HOUSING,외국인,FOREIGN_ONLY,NON_KOREAN,단독/다가구/아파트/연립/다세대,2026-08-26,2027-08-25,24,0,6,15,20,ENACTED,NOTICE_EXACT,국토교통부,,2026-08-20,인천광역시 남동구 · 외국인 전용 — 내국인 매수에는 적용되지 않음
+LPZ_FOREIGN_ICN_BUPYEONG,28237,CAPITAL_AREA_FOREIGN_HOUSING,외국인,FOREIGN_ONLY,NON_KOREAN,단독/다가구/아파트/연립/다세대,2026-08-26,2027-08-25,24,0,6,15,20,ENACTED,NOTICE_EXACT,국토교통부,,2026-08-20,인천광역시 부평구 · 외국인 전용 — 내국인 매수에는 적용되지 않음
+LPZ_FOREIGN_ICN_GYEYANG,28245,CAPITAL_AREA_FOREIGN_HOUSING,외국인,FOREIGN_ONLY,NON_KOREAN,단독/다가구/아파트/연립/다세대,2026-08-26,2027-08-25,24,0,6,15,20,ENACTED,NOTICE_EXACT,국토교통부,,2026-08-20,인천광역시 계양구 · 외국인 전용 — 내국인 매수에는 적용되지 않음
+LPZ_FOREIGN_ICN_JEMULPO,28125,CAPITAL_AREA_FOREIGN_HOUSING,외국인,FOREIGN_ONLY,NON_KOREAN,단독/다가구/아파트/연립/다세대,2026-08-26,2027-08-25,24,0,6,15,20,ENACTED,CONSERVATIVE,국토교통부,,2026-08-20,인천광역시 제물포구 · 외국인 전용 — 옛 중구(28110) 내륙 + 옛 동구 승계
+LPZ_FOREIGN_ICN_YEONGJONG,28155,CAPITAL_AREA_FOREIGN_HOUSING,외국인,FOREIGN_ONLY,NON_KOREAN,단독/다가구/아파트/연립/다세대,2026-08-26,2027-08-25,24,0,6,15,20,ENACTED,NOTICE_EXACT,국토교통부,,2026-08-20,인천광역시 영종구 · 외국인 전용 — 옛 중구(28110) 영종도 승계
+LPZ_FOREIGN_ICN_SEOHAE,28275,CAPITAL_AREA_FOREIGN_HOUSING,외국인,FOREIGN_ONLY,NON_KOREAN,단독/다가구/아파트/연립/다세대,2026-08-26,2027-08-25,24,0,6,15,20,ENACTED,NOTICE_EXACT,국토교통부,,2026-08-20,인천광역시 서해구 · 외국인 전용 — 옛 서구(28260) 아라뱃길 이남 승계·개칭
+LPZ_FOREIGN_ICN_GEOMDAN,28290,CAPITAL_AREA_FOREIGN_HOUSING,외국인,FOREIGN_ONLY,NON_KOREAN,단독/다가구/아파트/연립/다세대,2026-08-26,2027-08-25,24,0,6,15,20,ENACTED,NOTICE_EXACT,국토교통부,,2026-08-20,인천광역시 검단구 · 외국인 전용 — 옛 서구(28260) 아라뱃길 이북 승계·신설

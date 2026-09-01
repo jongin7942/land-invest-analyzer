@@ -279,6 +279,20 @@ def test_같은_지정을_두_파일이_중복으로_적지_않는다(db):
                     f"— {[r.rule_id for r in rules]}")
 
 
+def test_보수적으로_넓게_잡은_행이_표시돼_있다(db):
+    """나중에 좁힐 행을 이름표 없이 두면 영영 못 찾는다.
+
+    제물포구는 옛 동구까지 덮는 **의도된 넓은 오차**다. 필지·법정동
+    단위 공식 고시를 확보하면 좁혀야 하는데, 그때 무엇을 좁혀야 하는지
+    이 한 줄로 나와야 한다.
+    """
+    with get_conn(db) as conn:
+        rows = conn.execute(
+            "SELECT rule_id FROM land_permit_zone "
+            "WHERE confidence = 'CONSERVATIVE'").fetchall()
+    assert [r["rule_id"] for r in rows] == ["LPZ_FOREIGN_ICN_JEMULPO"]
+
+
 def test_옛_동구_코드도_제물포구_지정으로_판정된다(db):
     """제물포구 = 옛 중구 내륙 **+ 옛 동구**.
 

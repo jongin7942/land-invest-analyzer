@@ -152,6 +152,46 @@ def cmd_validate(args):
         sys.exit(1)
 
 
+def _warn_if_incomplete(conn, what: str) -> bool:
+    """수집이 덜 찬 상태로 점수·백테스트를 돌리면 크게 배너를 띄운다.
+
+    **막지는 않는다.** 탐색은 해 봐야 하고, 여기서 막으면 데이터가 채워질
+    때까지 아무것도 못 본다. 막는 대신 화면에 남긴다 — 덜 찬 데이터로 낸
+    숫자가 조용히 '확정값' 이 되는 것만은 피해야 한다.
+
+    통과 여부를 돌려주므로 스크립트가 이 값으로 다음 단계를 정할 수 있다.
+    """
+    from apt_engine.quality import coverage as cov_mod
+
+    rep = cov_mod.audit(conn)
+    if rep.passed:
+        return True
+    bar = "─" * 64
+    print(f"\n{bar}")
+    print(f"  ⚠ 수집이 아직 끝나지 않았습니다. 이 {what}는 잠정값입니다.")
+    for k, c in rep.kinds.items():
+        got = "확인 불가" if c.rate is None else f"{c.rate * 100:.1f}%"
+        print(f"      {k:6s} {c.done:,}/{c.required:,}칸 ({got}) "
+              f"· 미수집 {len(c.never):,} · 실패 {len(c.failed):,}")
+    print("  데이터가 채워지면 숫자가 바뀝니다. 이 결과로 로직을 고정하지 마세요.")
+    print("  자세히:  python -m apt_engine.cli coverage")
+    print(f"{bar}\n")
+    return False
+
+
+def cmd_coverage(args):
+    """수집 완성도 — '수집이 끝났다' 와 '데이터가 다 있다' 를 구분한다."""
+    from apt_engine.quality import coverage as cov_mod
+
+    with get_conn(args.db) as conn:
+        rep = cov_mod.audit(conn, months=args.months, sido=args.sido)
+    print(cov_mod.report(rep, limit=args.limit))
+    if not rep.passed:
+        # 통과 못 하면 0 이 아닌 값으로 끝낸다. 스크립트가 이걸 보고
+        # 다음 단계(점수·백테스트)로 넘어가지 않게 하기 위해서다.
+        sys.exit(1)
+
+
 def cmd_report(args):
     with get_conn(args.db) as conn:
         if args.kind == "unmatched":
@@ -178,7 +218,16 @@ def _report_unmatched(conn, limit: int):
 
 
 def _report_gaps(conn):
-    """시군구별로 거래가 0건인 달 — 코드 개편 시점을 잘못 잡으면 여기가 빈다."""
+    """수집된 구간 **안에서** 시군구별로 거래가 0건인 달.
+
+    ⚠ 이건 완성도 검사가 아니다. 여기 쓰는 `all_yms` 는 **DB 에 들어온
+    달들**이라, 240개월 중 120개월만 받고 멈춰도 그 120개월 안에 공백이
+    없으면 "공백 없음" 이라고 답한다. 없는 8년을 없다고 말하지 못한다.
+
+    받아야 할 격자와 대조하는 것은 `cli coverage` 다.
+    """
+    print("※ 이 리포트는 **이미 받은 구간 안의** 공백만 봅니다.")
+    print("  240개월이 다 찼는지는 `python -m apt_engine.cli coverage` 로 보세요.\n")
     rows = repo.monthly_coverage(conn, "trade", "deal_ymd")
     if not rows:
         print("수집된 매매 실거래가 없습니다.")
@@ -202,8 +251,9 @@ def _report_gaps(conn):
     if not found:
         print("  공백 없음.")
     else:
-        print("\n※ 구 개편 전후 구간이 통째로 비었다면 apt_engine/regions.py 의 "
-              "LEGACY until_ym 을 확인하세요.")
+        print("\n※ 구 개편 전후 구간이 통째로 비었다면 `cli coverage` 로 "
+              "미수집(NEVER)인지 먼저 확인하세요 —")
+        print("  '거래가 0건' 과 '아직 안 받았다' 는 다릅니다.")
 
 
 # ── 수집 ──────────────────────────────────────────────────────────────
@@ -1706,6 +1756,12 @@ def cmd_backtest(args):
     action = args.action
     horizons = tuple(int(h) for h in (args.horizon or "2,5").split(","))
 
+    # run/weights 는 결과를 남기고, weights 는 그 결과로 가중치를 고정한다.
+    # 덜 찬 데이터로 학습한 가중치는 나중에 데이터가 채워져도 그대로 남는다.
+    if action in ("run", "weights"):
+        with get_conn(args.db) as conn:
+            _warn_if_incomplete(conn, "백테스트 결과")
+
     if action == "sanity":
         _backtest_sanity(args)
         return
@@ -2052,6 +2108,8 @@ def cmd_rank(args):
     as_of = cutoff_mod.AsOf(args.as_of or _today())
 
     with get_conn(args.db) as conn:
+        # 덜 찬 데이터로 낸 순위가 조용히 '확정값' 이 되는 것을 막는다.
+        _warn_if_incomplete(conn, "순위")
         profile = Profile.load(conn, args.profile_name) if args.profile_name else None
         if profile is None:
             profile = Profile(name=args.profile_name or args.profile)
@@ -2712,6 +2770,15 @@ def build_parser() -> argparse.ArgumentParser:
     re_ = sub.add_parser("report", help="진단 리포트")
     re_.add_argument("kind", choices=["unmatched", "gaps"])
     re_.add_argument("--limit", type=int, default=30)
+
+    cv = sub.add_parser("coverage",
+                        help="수집 완성도 검사 (지역 × 월 × 거래유형)")
+    cv.add_argument("--months", type=int, default=240,
+                    help="확보해야 할 개월 수 (기본 240)")
+    cv.add_argument("--sido", choices=["서울", "경기", "인천"],
+                    help="이 시도만 검사")
+    cv.add_argument("--limit", type=int, default=12,
+                    help="목록에 보여줄 항목 수")
     return p
 
 
@@ -2728,6 +2795,7 @@ HANDLERS = {
     "catalyst": cmd_catalyst, "redev": cmd_redev,
     "invite": cmd_invite, "landshare": cmd_landshare,
     "today": cmd_today, "leaders": cmd_leaders, "backtest": cmd_backtest, "validate": cmd_validate, "report": cmd_report,
+    "coverage": cmd_coverage,
 }
 
 
