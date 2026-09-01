@@ -25,7 +25,7 @@ function Write-Log($msg) {
 
 # 작업 스케줄러 콘솔은 cp949 다. 파이썬이 한글 안내문(em-dash 등)을 찍다가
 # UnicodeEncodeError 로 죽은 적이 있다 — 한도 소진을 곱게 처리하고도 exit 1 이 됐다.
-$env:PYTHONIOENCODING = utf-8
+$env:PYTHONIOENCODING = "utf-8"
 Set-Location $repo
 Write-Log "=== 수집 시작 (PID $PID) ==="
 
