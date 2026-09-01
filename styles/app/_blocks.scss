@@ -1,0 +1,204 @@
+// 화면 조각 — 알림 · 순위 배지 · 지표 · 입력 폼 · 항목표
+//
+// Carbon 컴포넌트로 되는 것은 Carbon 을 쓰고(버튼·입력·탭·데이터표),
+// 여기 있는 것은 Carbon 에 대응물이 없거나 우리 도메인 전용인 것들이다.
+@use '../brand' as brand;
+@use '@carbon/styles/scss/theme' as *;
+@use '@carbon/styles/scss/spacing' as *;
+@use '@carbon/styles/scss/type' as *;
+@use '@carbon/styles/scss/breakpoint' as *;
+
+// ── 알림 ─────────────────────────────────────────────────────────────
+//
+// Carbon inline notification 과 같은 역할이지만 마크업이 훨씬 단순하다.
+// 왼쪽 굵은 선 하나로 종류를 구분한다 — 그림자·그라데이션 없음.
+.notice {
+  @include type-style('body-compact-01');
+  border: 1px solid $border-subtle-01;
+  border-left: 3px solid brand.$brand-700;
+  background: brand.$brand-100;
+  padding: $spacing-04 $spacing-05;
+  margin-bottom: $spacing-05;
+
+  p:last-child { margin-bottom: 0; }
+  a { color: inherit; }
+}
+.notice--warn   { border-left-color: brand.$warn-500;   background: brand.$warn-100; }
+.notice--danger { border-left-color: brand.$danger-500; background: brand.$danger-100; }
+.notice--ok     { border-left-color: brand.$ok-500;     background: brand.$ok-100; }
+.notice__title { font-weight: 600; display: block; margin-bottom: 2px; }
+
+// ── 순위 배지 ────────────────────────────────────────────────────────
+.rank {
+  @include type-style('label-01');
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid brand.$gray-300;
+  color: $text-secondary;
+  background: $layer-02;
+}
+.rank--top {
+  background: brand.$brand-700;
+  border-color: brand.$brand-700;
+  color: brand.$gray-000;
+}
+
+// ── 작은 라벨칩 ──────────────────────────────────────────────────────
+.chip {
+  @include type-style('label-01');
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px $spacing-02;
+  border: 1px solid brand.$gray-300;
+  background: $layer-02;
+  color: $text-secondary;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+.chip--warn { border-color: rgba(138,90,0,.4); background: brand.$warn-100; color: brand.$warn-500; }
+.chip--ok   { border-color: rgba(27,107,69,.4); background: brand.$ok-100;   color: brand.$ok-500; }
+
+// ── 지표 한 칸 ───────────────────────────────────────────────────────
+.metric__label {
+  @include type-style('label-01');
+  color: $text-secondary;
+  display: block;
+  margin-bottom: 2px;
+}
+.metric__value {
+  @include type-style('productive-heading-03');
+  font-variant-numeric: tabular-nums;
+  display: block;
+}
+.metric__note {
+  @include type-style('label-01');
+  color: $text-helper;
+  display: block;
+  margin-top: $spacing-02;
+}
+
+// ── 3열 / 2열 ────────────────────────────────────────────────────────
+.grid-3, .grid-2 {
+  display: grid;
+  gap: $spacing-05;
+}
+.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+@include breakpoint-down(md) {
+  .grid-3, .grid-2 { grid-template-columns: 1fr; }
+}
+
+// ── 결과 카드 ────────────────────────────────────────────────────────
+.result {
+  background: $layer-01;
+  border: 1px solid $border-subtle-01;
+  padding: $spacing-05;
+  margin-bottom: $spacing-05;
+}
+.result__head {
+  display: flex;
+  gap: $spacing-04;
+  align-items: baseline;
+  flex-wrap: wrap;
+  margin-bottom: $spacing-05;
+}
+.result__name { @include type-style('productive-heading-03'); }
+.result__meta { @include type-style('label-01'); color: $text-secondary; }
+.result__scores { margin-left: auto; display: flex; gap: $spacing-03; align-items: center; }
+
+// ── 이유 목록 ────────────────────────────────────────────────────────
+.bullets {
+  @include type-style('body-compact-01');
+  margin: 0;
+  padding-left: $spacing-05;
+}
+.bullets li { margin-bottom: $spacing-02; }
+.bullets .muted { color: $text-helper; }
+
+// ── 입력 폼 ──────────────────────────────────────────────────────────
+.form {
+  background: $layer-01;
+  border: 1px solid $border-subtle-01;
+  padding: $spacing-05;
+  margin-bottom: $spacing-06;
+}
+.form__fields {
+  display: flex;
+  gap: $spacing-05;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+.field { min-width: 140px; }
+.field--wide { min-width: 220px; flex: 1; }
+.field__label {
+  @include type-style('label-01');
+  color: $text-secondary;
+  display: block;
+  margin-bottom: $spacing-02;
+}
+.field__hint {
+  @include type-style('label-01');
+  color: $text-helper;
+  display: block;
+  margin-top: $spacing-02;
+}
+
+@include breakpoint-down(md) {
+  .form__fields { display: block; }
+  .field, .field--wide { min-width: 0; margin-bottom: $spacing-05; }
+  .field .cds--text-input, .field .cds--select-input { width: 100%; }
+}
+
+// ── 항목표 (이름/값 두 열) ───────────────────────────────────────────
+.kv {
+  width: 100%;
+  border-collapse: collapse;
+  @include type-style('body-compact-01');
+
+  th, td {
+    padding: $spacing-03 $spacing-04;
+    border-bottom: 1px solid $border-subtle-01;
+    vertical-align: top;
+    text-align: left;
+  }
+  th {
+    font-weight: 600;
+    background: $layer-02;
+    width: 200px;
+    white-space: nowrap;
+  }
+  tr:last-child th, tr:last-child td { border-bottom: 0; }
+}
+
+@include breakpoint-down(md) {
+  .kv th, .kv td { display: block; width: auto; }
+  .kv th { border-bottom: 0; }
+}
+
+// ── 페이지 하단 이동 ─────────────────────────────────────────────────
+.pager { margin-top: $spacing-06; }
+
+// ── 표 가로 스크롤 ───────────────────────────────────────────────────
+//
+// 표가 넘칠 때 page body 가 가로로 밀리면 안 된다. 표 안에서만 스크롤한다.
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid $border-subtle-01;
+  background: $layer-01;
+}
+.table-scroll .cds--data-table { min-width: 100%; }
+
+// Carbon data-table 이 기본으로 주는 것 위에 숫자 정렬만 얹는다
+.cds--data-table td.num, .cds--data-table th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}

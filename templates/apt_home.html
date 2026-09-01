@@ -1,265 +1,329 @@
 {% extends "apt_base.html" %}
+{% import "_macros.html" as ui %}
 {% block title %}아파트 투자분석{% endblock %}
 {% block body %}
 
 {% if lock %}
+{# ═══ 잠금 화면 (§7) ═══════════════════════════════════════════════════
+   지금 가장 자주 보이는 화면이다. "잠겼습니다" 만 띄우지 않고
+   무엇이 얼마나 모였는지, 무엇을 하면 풀리는지를 같이 보여준다. #}
 
-<h1>순위는 아직 잠겨 있습니다</h1>
-<p class="sub">백테스트로 가중치를 학습하기 전까지는 순위를 보여주지 않습니다.</p>
+<h1 class="page-title">순위는 아직 잠겨 있습니다</h1>
+<p class="page-sub">백테스트로 가중치를 학습하기 전까지는 순위를 보여주지 않습니다.</p>
 
-<div class="card">
-  <p style="margin:0 0 var(--space-4)">
+<div class="lock">
+  <p class="lock__title">왜 잠가 두었나</p>
+  <p style="margin:0">
     지금도 순위를 <b>계산할 수는</b> 있습니다. 다만 그 순위는 <b>배관이 도는지 확인한
     결과</b>지 투자 판단 근거가 아닙니다 — 가중치가 학습값이 아니라 후보를 좁히기 위한
     임시값이라서입니다. 경고 문구를 붙여도 사람은 순위를 먼저 읽습니다.
     그래서 아예 잠갔습니다.
   </p>
+</div>
 
-  <h2 style="margin-top:0">풀리는 조건</h2>
-  <table>
+<h2 style="margin-top:2rem">풀리는 조건</h2>
+<div class="surface">
+  <table class="kv">
     <tr>
-      <th style="width:200px">① 실거래 20년치</th>
+      <th>① 실거래 20년치</th>
       <td>
         {% if lock.months %}
-          거래가 걸쳐 있는 기간 <b>{{ lock.months }}개월</b>
-          (목표 {{ lock.need_months }}) · 총 <b>{{ "{:,}".format(lock.trades) }}건</b>
+          <span class="num">{{ lock.months }}</span>개월
+          <span class="muted small">(목표 {{ lock.need_months }})</span>
+          · <span class="num">{{ "{:,}".format(lock.trades) }}</span>건
+          {% set pct = (lock.months / lock.need_months * 100) | round(0) | int %}
+          <div class="progress" role="img"
+               aria-label="실거래 기간 {{ lock.months }}개월 / 목표 {{ lock.need_months }}개월">
+            <span class="progress__fill" style="width:{{ [pct, 100] | min }}%"></span>
+          </div>
+          <span class="progress__label">{{ pct }}% 확보</span>
         {% else %}
-          <span class="unknown">실거래 없음</span>
+          {{ ui.value(none, reason='실거래를 아직 한 건도 받지 못했습니다') }}
         {% endif %}
-        <div class="note" style="margin-top:6px">
+        <p class="field__hint" style="margin-top:.5rem">
           겹치지 않는 검증 구간이 6년은 나와야 2년 보유 전략을 검증할 수 있습니다.
           <b>기간이 넓다고 다 받은 것은 아닙니다</b> — 수집 중이면 양 끝만 있고
-          가운데가 비어 있을 수 있으니 아래 시도별 건수를 함께 보세요.
-        </div>
+          가운데가 비어 있을 수 있으니 <a href="/status">데이터 현황</a>에서
+          시도별 건수를 함께 보세요.
+        </p>
       </td>
     </tr>
     <tr>
       <th>② 수도권 전체</th>
       <td>
-        {% for s in lock.by_sido %}{{ s.sido }} {{ "{:,}".format(s.n) }}건{% if not loop.last %} · {% endif %}{% endfor %}
+        {% for s in lock.by_sido %}{{ s.sido }}
+          <span class="num">{{ "{:,}".format(s.n) }}</span>건{% if not loop.last %} · {% endif %}
+        {% endfor %}
         {% if lock.missing_sido %}
-          <div style="margin-top:4px"><span class="unknown">아직 없음: {{ lock.missing_sido | join(", ") }}</span></div>
+          <div style="margin-top:.25rem">
+            <span class="grade grade--unknown">아직 없음</span>
+            <span class="muted small">{{ lock.missing_sido | join(", ") }}</span>
+          </div>
         {% endif %}
       </td>
     </tr>
     <tr>
       <th>③ 백테스트 학습</th>
       <td>
-        <span class="unknown">학습된 가중치 없음</span>
-        <div class="note" style="margin-top:6px">
+        <span class="grade grade--unknown">학습된 가중치 없음</span>
+        <p class="field__hint" style="margin-top:.5rem">
           <code>backtest plan</code> 으로 독립 관측이 충분한지 먼저 보고,
           충분하면 <code>backtest run</code> → <code>backtest weights</code>.
           학습값이 저장되면 이 화면은 <b>저절로 풀립니다.</b>
-        </div>
+        </p>
       </td>
     </tr>
   </table>
 </div>
 
-<p class="note">
-  그때까지 쓸 수 있는 것: <a href="/search">단지 검색</a>에서 이름으로 찾아
-  대표가격·전세가율을 보고, 매수가를 넣어 실투자금을 계산할 수 있습니다.
+<div class="notice" style="margin-top:2rem">
+  <span class="notice__title">그때까지 쓸 수 있는 것</span>
+  <a href="/search">단지 검색</a>에서 이름으로 찾아 대표가격·전세가율을 보고,
+  매수가를 넣어 실투자금을 계산할 수 있습니다.
   이쪽은 학습 가중치와 무관하게 실제 데이터로 계산합니다.
-</p>
+</div>
 
-<p class="note" style="margin-top:var(--space-6);color:var(--text-muted)">
+<p class="small muted pager">
   <a href="?unlock=1&cash={{ form.cash or 3 }}&house_count={{ form.house_count }}&horizon={{ form.horizon }}"
-     style="color:var(--text-muted)">배관 점검용으로 그래도 열기</a>
+     class="muted">배관 점검용으로 그래도 열기</a>
   — 투자 판단에 쓰지 마세요.
 </p>
 
 {% else %}
 
-<h1>얼마로, 몇 채째 사시겠습니까</h1>
-<p class="sub">두 가지만 넣으면 순위가 나옵니다.</p>
+<h1 class="page-title">얼마로, 몇 채째 사시겠습니까</h1>
+<p class="page-sub">두 가지만 넣으면 순위가 나옵니다.</p>
 
 {% if unlocked %}
-<div class="banner" style="border-left-color:var(--danger);background:var(--danger-bg);color:#8A2F2F">
-  <b>잠금을 우회한 상태입니다 — 배관 점검용입니다.</b>
+<div class="notice notice--danger">
+  <span class="notice__title">잠금을 우회한 상태입니다 — 배관 점검용입니다.</span>
   가중치가 학습값이 아니라 임시값이라, 아래 순위는 투자 판단 근거가 아닙니다.
-  <a href="/" style="color:#8A2F2F"><b>잠금 화면으로 돌아가기</b></a>
+  <a href="/"><b>잠금 화면으로 돌아가기</b></a>
 </div>
 {% endif %}
 
-<form class="inline card" method="get" style="align-items:flex-end">
-  <div>
-    <label for="cash">투자금 (억)</label>
-    <input type="text" id="cash" name="cash" value="{{ form.cash }}" placeholder="3"
-           style="width:110px" autofocus>
+<form class="form" method="get">
+  <div class="form__fields">
+    <div class="field">
+      <label class="field__label" for="cash">투자금 (억)</label>
+      <input class="cds--text-input" type="text" id="cash" name="cash"
+             value="{{ form.cash }}" placeholder="3" inputmode="decimal" autofocus>
+    </div>
+    <div class="field">
+      <label class="field__label" for="house_count">취득 후 주택수</label>
+      <input class="cds--text-input" type="number" id="house_count" name="house_count"
+             value="{{ form.house_count }}" min="1" max="5">
+    </div>
+    <div class="field">
+      <label class="field__label" for="horizon">보유기간 (년)</label>
+      <input class="cds--text-input" type="number" id="horizon" name="horizon"
+             value="{{ form.horizon }}" min="1" max="10">
+    </div>
+    {% if unlocked %}<input type="hidden" name="unlock" value="1">{% endif %}
+    {% if mode == MODE_EXPERT %}<input type="hidden" name="mode" value="expert">{% endif %}
+    <div class="field">
+      <button class="cds--btn cds--btn--primary" type="submit">순위 보기</button>
+    </div>
   </div>
-  <div>
-    <label for="house_count">취득 후 주택수</label>
-    <input type="number" id="house_count" name="house_count"
-           value="{{ form.house_count }}" min="1" max="5" style="width:110px">
-  </div>
-  <div>
-    <label for="horizon">보유기간 (년)</label>
-    <input type="number" id="horizon" name="horizon" value="{{ form.horizon }}"
-           min="1" max="10" style="width:110px">
-  </div>
-  {% if unlocked %}<input type="hidden" name="unlock" value="1">{% endif %}
-  <button type="submit">순위 보기</button>
 </form>
 
 {% if not result %}
-  <p class="note">
-    투자금은 <b>실제로 쓸 수 있는 현금</b>입니다. 매매가가 아니라, 세금·중개보수까지
-    낸 뒤 손에서 나가는 돈 기준으로 살 수 있는 것만 추립니다.
-  </p>
+  {{ ui.empty_state(
+       '＄', '투자금을 넣어 주세요',
+       '투자금은 실제로 쓸 수 있는 현금입니다. 매매가가 아니라, 세금·중개보수까지
+        낸 뒤 손에서 나가는 돈 기준으로 살 수 있는 것만 추립니다.',
+       actions=[('/search', '단지 이름으로 먼저 찾아보기')]) }}
 
 {% elif result.error %}
-  <div class="banner"><b>계산하지 못했습니다.</b><br>{{ result.error }}</div>
+  {{ ui.empty_state(
+       '⚠', '계산하지 못했습니다', result.error,
+       actions=[('/status', '데이터 현황 보기'), ('/', '조건 바꿔서 다시')]) }}
 
 {% else %}
 
   {% if result.heuristic %}
-  <div class="banner">
-    <b>지금 순위는 투자 판단 근거가 아닙니다.</b>
-    가중치가 <span class="tag warn">{{ result.weights_label }}</span> 상태입니다 —
+  <div class="notice notice--warn">
+    <span class="notice__title">지금 순위는 투자 판단 근거가 아닙니다.</span>
+    가중치가 <span class="chip chip--warn">{{ result.weights_label }}</span> 상태입니다 —
     백테스트로 학습한 값이 아니라 후보를 좁히기 위한 임시값입니다.
     <code>backtest run</code> 을 돌려야 이 딱지가 사라집니다.
   </div>
   {% endif %}
 
-  <p class="note" style="margin-bottom:18px">
+  <p class="small muted">
     {{ result.summary }} · 시장국면 {{ result.regime or "확인 불가" }}
   </p>
 
   {% if result.cash_recommended %}
-  <div class="card" style="border-left:3px solid var(--unknown)">
-    <div class="k">1순위</div>
-    <p class="stat">현금 보유 / 대기</p>
-    <p class="note" style="margin:6px 0 0">{{ result.cash_reason }}</p>
-    <p class="note">억지로 아파트를 추천하지 않습니다.</p>
+  {# §12 억지로 TOP10 을 만들지 않는다 — 현금이 이기면 현금이 1순위다 #}
+  <div class="result" style="border-left:3px solid var(--cds-support-warning)">
+    <div class="result__head">
+      <span class="rank rank--top">1</span>
+      <span class="result__name">현금 보유 / 대기</span>
+    </div>
+    <p style="margin:0">{{ result.cash_reason }}</p>
+    <p class="small muted" style="margin:.5rem 0 0">억지로 아파트를 추천하지 않습니다.</p>
   </div>
   {% endif %}
 
   {% if result.diagnosis %}
-  <div class="card">
-    <h2 style="margin-top:0">후보가 0개인 이유</h2>
-    {% for r in result.diagnosis.reasons %}
-      <p style="margin:6px 0">{{ r | safe }}</p>
-    {% endfor %}
-    <table style="margin-top:12px">
+  <div class="surface" style="margin-bottom:1.5rem">
+    <h2>후보가 0개인 이유</h2>
+    <ul class="reasons">
+      {% for r in result.diagnosis.reasons %}<li>{{ r | safe }}</li>{% endfor %}
+    </ul>
+    <table class="kv">
       <tr><th>스냅샷이 있는 달</th>
           <td>{{ result.diagnosis.snapshot_months | join(", ") or "없음" }}</td></tr>
       <tr><th>관측 가능 시점</th><td>{{ result.diagnosis.observable }}</td></tr>
-      <tr><th>후보 모집단</th><td>{{ result.diagnosis.universe }}개</td></tr>
+      <tr><th>후보 모집단</th><td><span class="num">{{ result.diagnosis.universe }}</span>개</td></tr>
       {% if result.diagnosis.dropped %}
       <tr><th>단계별 탈락</th>
-          <td>{% for k, v in result.diagnosis.dropped.items() %}{{ k }} {{ v }}개
-              {% if not loop.last %} · {% endif %}{% endfor %}</td></tr>
+          <td>{% for k, v in result.diagnosis.dropped.items() %}{{ k }}
+              <span class="num">{{ v }}</span>개{% if not loop.last %} · {% endif %}{% endfor %}</td></tr>
       {% endif %}
     </table>
     {% if result.diagnosis.dropped_examples %}
-      <p class="note" style="margin-top:10px">탈락 사유 예시</p>
-      <ul class="note" style="margin:4px 0 0">
-        {% for stage, reason in result.diagnosis.dropped_examples %}
-          <li>[{{ stage }}] {{ reason }}</li>
-        {% endfor %}
-      </ul>
+      {% call ui.evidence('탈락 사유 예시', open=(mode == MODE_EXPERT)) %}
+        <ul class="bullets">
+          {% for stage, reason in result.diagnosis.dropped_examples %}
+            <li><span class="chip">{{ stage }}</span> {{ reason }}</li>
+          {% endfor %}
+        </ul>
+      {% endcall %}
     {% endif %}
   </div>
   {% endif %}
 
   {% for r in result.rows %}
-  <div class="card">
-    <div style="display:flex;gap:14px;align-items:baseline;flex-wrap:wrap">
-      <span class="rank {% if r.rank <= 3 %}r{{ r.rank }}{% endif %}">{{ r.rank }}</span>
-      <span style="font-size:17px;font-weight:650">{{ r.name }}</span>
-      <span class="note">{{ r.region }}
+  <article class="result">
+    <div class="result__head">
+      <span class="rank {% if r.rank <= 3 %}rank--top{% endif %}">{{ r.rank }}</span>
+      <span class="result__name">{{ r.name }}</span>
+      <span class="result__meta">{{ r.region }}
         {%- if r.households %} · {{ "{:,}".format(r.households) }}세대{% endif %}
         {%- if r.year %} · {{ r.year }}년{% endif %}
         · 전용 {{ r.band | band }}</span>
-      <span style="margin-left:auto" class="tag">점수 {{ r.score | round(0) | int }}</span>
-      <span class="tag {% if r.confidence < 50 %}warn{% endif %}">신뢰 {{ r.confidence | round(0) | int }}</span>
+      <span class="result__scores">
+        <span class="chip">점수 {{ r.score | round(0) | int }}</span>
+        <span class="chip {% if r.confidence < 50 %}chip--warn{% endif %}">근거 {{ r.confidence | round(0) | int }}</span>
+      </span>
     </div>
 
-    <div class="grid g3" style="margin-top:14px">
-      <div>
-        <div class="k">현재 대표가격</div>
-        <p class="stat" style="font-size:20px">{{ r.price | eok }}</p>
+    <div class="grid-3">
+      <div class="metric">
+        <span class="metric__label">현재 대표가격</span>
+        <span class="metric__value">{{ r.price | eok }}</span>
+        <span class="metric__note">{{ ui.grade('CONFIRMED') }} 실거래 기준</span>
       </div>
-      <div>
-        <div class="k">대출 없이 필요한 현금</div>
-        <p class="stat" style="font-size:20px">
-          {% if r.equity_no_loan is none %}<span class="unknown">확인 불가</span>
+      <div class="metric">
+        <span class="metric__label">대출 없이 필요한 현금</span>
+        <span class="metric__value">
+          {% if r.equity_no_loan is none %}{{ ui.value(none, reason='매수 부대비용을 구하지 못했습니다') }}
           {% else %}{{ r.equity_no_loan | eok }}{% endif %}
-        </p>
+        </span>
         {% if r.mortgage_unknown %}
-          <p class="note" style="margin:4px 0 0">
+          <span class="metric__note">
             대출 반영 시 <b>{{ r.equity | eok }}</b>까지 줄지만,
-            <span class="unknown">한도 {{ r.mortgage_unknown | length }}개가 확인 불가</span>라
+            <span class="grade grade--unknown">한도 {{ r.mortgage_unknown | length }}개 확인 불가</span>라
             실제로는 더 큽니다
-          </p>
+          </span>
         {% elif r.equity is not none and r.equity != r.equity_no_loan %}
-          <p class="note" style="margin:4px 0 0">대출 반영 시 {{ r.equity | eok }}</p>
+          <span class="metric__note">대출 반영 시 {{ r.equity | eok }}</span>
         {% endif %}
       </div>
-      <div>
-        <div class="k">사도 되는 가격</div>
+      <div class="metric">
+        <span class="metric__label">사도 되는 가격</span>
         {% if r.strong_buy %}
-          <p style="margin:2px 0 0;font-size:14px">
-            <b>{{ r.strong_buy }}</b> 이하면 적극<br>
-            <span class="note">{{ r.fair_buy }} 까지 무난 · {{ r.wait }} 넘으면 대기</span>
-          </p>
-          {% if r.verdict %}<span class="tag" style="margin-top:4px">{{ r.verdict }}</span>{% endif %}
+          <span class="metric__value" style="font-size:1rem;line-height:1.4">
+            <b>{{ r.strong_buy }}</b> 이하면 적극
+          </span>
+          <span class="metric__note">
+            {{ r.fair_buy }} 까지 무난 · {{ r.wait }} 넘으면 대기
+          </span>
+          {% if r.verdict %}<span class="chip" style="margin-top:.25rem">{{ r.verdict }}</span>{% endif %}
         {% else %}
-          <p style="margin:2px 0 0"><span class="unknown">확인 불가</span>
-            <span class="note">— 매수가 앵커가 부족합니다</span></p>
+          <span class="metric__value" style="font-size:1rem">
+            {{ ui.value(none, reason='매수가 앵커가 부족합니다') }}
+          </span>
         {% endif %}
       </div>
     </div>
 
-    <div class="grid g3" style="margin-top:16px">
+    <div class="grid-3" style="margin-top:1rem">
       <div>
-        <div class="k">좋은 이유</div>
-        <ul style="margin:6px 0 0;padding-left:18px;font-size:13.5px">
+        <span class="metric__label">좋은 이유</span>
+        <ul class="bullets">
           {% for w in r.why_buy %}
-            <li>{{ w["이유"] }} <span class="note">(기여 {{ w["기여"] }})</span></li>
+            <li>{{ w["이유"] }} <span class="muted small">(기여 {{ w["기여"] }})</span></li>
           {% else %}
-            <li class="unknown">확인된 이유 없음</li>
+            <li><span class="grade grade--unknown">확인된 이유 없음</span></li>
           {% endfor %}
         </ul>
       </div>
       <div>
-        <div class="k">주의할 점</div>
-        <ul style="margin:6px 0 0;padding-left:18px;font-size:13.5px">
+        <span class="metric__label">주의할 점</span>
+        <ul class="bullets">
           {% for w in r.why_not %}
-            <li>{{ w["이유"] }}{% if w["설명"] %} <span class="note">— {{ w["설명"] }}</span>{% endif %}</li>
+            <li>{{ w["이유"] }}{% if w["설명"] %} <span class="muted small">— {{ w["설명"] }}</span>{% endif %}</li>
           {% else %}
-            <li class="note">확인된 위험 없음 (확인 못 한 위험은 별개입니다)</li>
+            <li class="muted">확인된 위험 없음 (확인 못 한 위험은 별개입니다)</li>
           {% endfor %}
         </ul>
       </div>
       <div>
-        <div class="k">업사이드 — 아직 반영 안 된 것</div>
-        <ul style="margin:6px 0 0;padding-left:18px;font-size:13.5px">
-          {% for u in r.upside %}<li>{{ u }}</li>{% endfor %}
+        <span class="metric__label">업사이드 — 아직 반영 안 된 것</span>
+        <ul class="bullets">
+          {% for u in r.upside %}<li>{{ u }}</li>
+          {% else %}<li class="muted">없음</li>{% endfor %}
         </ul>
-        {% if r.peak %}<p class="note" style="margin:6px 0 0">과거 고점 {{ r.peak }}</p>{% endif %}
+        {% if r.peak %}<span class="metric__note">과거 고점 {{ r.peak }}</span>{% endif %}
       </div>
     </div>
 
-    <div style="margin-top:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-      <a class="btn" href="/complex/{{ r.id }}?price={{ r.price }}&house_count={{ r.house_count }}">
+    {% if mode == MODE_EXPERT %}
+      {% call ui.evidence('이 점수가 어떻게 나왔나', open=false) %}
+        <table class="kv">
+          <tr><th>종합점수</th><td><span class="num">{{ r.score | round(2) }}</span></td></tr>
+          <tr><th>근거 충분도</th><td><span class="num">{{ r.confidence | round(2) }}</span>
+              <span class="muted small">— 점수와 섞지 않습니다(§10)</span></td></tr>
+          <tr><th>Kill 사유</th><td>{{ r.kill }}</td></tr>
+          <tr><th>데이터 커버리지</th>
+              <td><span class="num">{{ (r.coverage * 100) | round(0) | int }}</span>%</td></tr>
+          <tr><th>가중치 상태</th>
+              <td>{{ result.weights_label }}
+              {% if result.heuristic %}<span class="chip chip--warn">학습 전</span>{% endif %}</td></tr>
+        </table>
+      {% endcall %}
+    {% endif %}
+
+    <div class="row" style="margin-top:1rem;align-items:center">
+      <a class="cds--btn cds--btn--tertiary"
+         href="/complex/{{ r.id }}?price={{ r.price }}&house_count={{ r.house_count }}{% if mode == MODE_EXPERT %}&mode=expert{% endif %}">
         이 단지 정확히 계산 →
       </a>
-      <span class="note">Kill {{ r.kill }} · 데이터 커버리지 {{ (r.coverage * 100) | round(0) | int }}%</span>
+      <span class="small muted">
+        Kill {{ r.kill }} · 데이터 커버리지 {{ (r.coverage * 100) | round(0) | int }}%
+      </span>
     </div>
-  </div>
+  </article>
   {% endfor %}
 
+  {% if not result.rows and not result.diagnosis and not result.cash_recommended %}
+    {{ ui.empty_state(
+         '○', '조건에 맞는 단지가 없습니다',
+         '투자금으로 실제로 살 수 있으면서, 지금 사는 것이 다른 대안보다 나은 단지를
+          찾지 못했습니다. 억지로 순위를 만들지 않습니다.',
+         reasons=['투자금을 올리면 후보가 늘어납니다',
+                  '실거래 수집이 진행 중이면 후보 모집단 자체가 아직 작습니다'],
+         actions=[('/status', '데이터 현황 보기')]) }}
+  {% endif %}
+
+  {% set qbase = 'cash=' ~ form.cash ~ '&house_count=' ~ form.house_count ~ '&horizon=' ~ form.horizon ~ (('&mode=expert') if mode == MODE_EXPERT else '') %}
   {% if result.rows and result.total > result.rows | length %}
-    <p style="margin-top:20px">
-      <a href="?cash={{ form.cash }}&house_count={{ form.house_count }}&horizon={{ form.horizon }}&limit=30">
-        11~30위 더 보기 →</a>
-    </p>
+    <p class="pager"><a href="?{{ qbase }}&limit=30">11~30위 더 보기 →</a></p>
   {% elif result.rows and form.limit > 10 %}
-    <p style="margin-top:20px">
-      <a href="?cash={{ form.cash }}&house_count={{ form.house_count }}&horizon={{ form.horizon }}&limit=10">
-        ← 상위 10개만 보기</a>
-    </p>
+    <p class="pager"><a href="?{{ qbase }}&limit=10">← 상위 10개만 보기</a></p>
   {% endif %}
 
 {% endif %}

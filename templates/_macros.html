@@ -1,0 +1,118 @@
+{# ═══════════════════════════════════════════════════════════════════════
+   공통 매크로 — 신뢰도 표시(§5)와 점수 표시(§6)
+
+   이 파일의 목적은 "모든 숫자가 같은 규칙으로 나오게" 하는 것이다.
+   화면마다 다르게 쓰면 어디는 출처가 있고 어디는 없는 상태가 된다.
+   ═══════════════════════════════════════════════════════════════════════ #}
+
+{# ── 데이터 등급 (§5) ──────────────────────────────────────────────────
+   실거래 · 호가 · 추정을 절대 하나의 가격처럼 섞지 않는다.
+   색과 라벨 둘 다로 구분한다. #}
+{% macro grade(kind) %}
+  {%- set g = {
+    'CONFIRMED': ('confirmed', '실거래', '실제로 체결된 거래입니다'),
+    'LISTING':   ('listing',   '호가',   '파는 사람이 부르는 값입니다. 실제 체결가와 다릅니다'),
+    'ESTIMATED': ('estimated', '추정',   '우리가 계산한 값입니다. 실측이 아닙니다'),
+    'SCENARIO':  ('estimated', '시나리오', '가정을 넣어 만든 값입니다'),
+    'UNKNOWN':   ('unknown',   '확인 불가', '값을 구하지 못했습니다. 0 이 아닙니다'),
+  }.get(kind|upper, ('unknown', '확인 불가', '')) -%}
+  <span class="grade grade--{{ g[0] }}" title="{{ g[2] }}">{{ g[1] }}</span>
+{%- endmacro %}
+
+{# ── 값 하나 — 없으면 '확인 불가' 로 나온다. 절대 0 이나 빈칸이 아니다 #}
+{% macro value(v, unit='', kind=None, reason=None) %}
+  {%- if v is none -%}
+    <span class="grade grade--unknown"
+          title="{{ reason or '값을 구하지 못했습니다' }}">확인 불가</span>
+  {%- else -%}
+    <span class="num">{{ v }}{{ unit }}</span>
+    {%- if kind %} {{ grade(kind) }}{% endif -%}
+  {%- endif -%}
+{% endmacro %}
+
+{# ── 상승/하락 — 색만 쓰지 않고 ▲▼ 를 CSS 가 붙인다 #}
+{% macro delta(v, unit='%') %}
+  {%- if v is none -%}
+    <span class="grade grade--unknown">확인 불가</span>
+  {%- else -%}
+    {%- set cls = 'up' if v > 0 else ('down' if v < 0 else 'flat') -%}
+    <span class="delta delta--{{ cls }}">{{ '%+.1f'|format(v) }}{{ unit }}</span>
+  {%- endif -%}
+{% endmacro %}
+
+{# ── 출처·기준일 (§5) — 모든 숫자 아래에 붙는다 #}
+{% macro provenance(source=None, as_of=None, grade_kind=None, stale=False,
+                    missing=None) %}
+<dl class="provenance">
+  <span class="provenance__item">
+    <dt>출처</dt><dd>{{ source or '확인 불가' }}</dd>
+  </span>
+  <span class="provenance__item">
+    <dt>기준일</dt>
+    <dd class="{{ 'stale' if stale }}">
+      {{ as_of or '확인 불가' }}{% if stale %} · 오래된 데이터{% endif %}
+    </dd>
+  </span>
+  {% if grade_kind %}
+    <span class="provenance__item"><dt>등급</dt><dd>{{ grade(grade_kind) }}</dd></span>
+  {% endif %}
+  {% if missing %}
+    <span class="provenance__item">
+      <dt>누락</dt><dd class="stale">{{ missing|join(' · ') }}</dd>
+    </span>
+  {% endif %}
+</dl>
+{% endmacro %}
+
+{# ── 점수 셋 (§6) — 종합점수만 크게 보여주지 않는다 #}
+{% macro score_set(alpha, risk, confidence) %}
+<div class="score-set">
+  <div class="score-cell score-cell--alpha">
+    <span class="score-cell__label">기대수익 점수</span>
+    <span class="score-cell__value">
+      {{ '%.0f'|format(alpha) if alpha is not none else '—' }}
+    </span>
+  </div>
+  <div class="score-cell score-cell--risk">
+    <span class="score-cell__label">위험</span>
+    <span class="score-cell__value">
+      {{ '%.0f'|format(risk) if risk is not none else '—' }}
+    </span>
+  </div>
+  <div class="score-cell score-cell--conf">
+    <span class="score-cell__label">근거 충분도</span>
+    <span class="score-cell__value">
+      {{ '%.0f'|format(confidence) if confidence is not none else '—' }}
+    </span>
+  </div>
+</div>
+{% endmacro %}
+
+{# ── 근거 펼치기 (§6) — 전문가 모드에서만 열려 있다 #}
+{% macro evidence(title, open=false) %}
+<details class="evidence" {{ 'open' if open }}>
+  <summary>{{ title }}</summary>
+  <div class="evidence__body">{{ caller() }}</div>
+</details>
+{% endmacro %}
+
+{# ── 빈 상태 (§7) — '결과 없음' 만 띄우지 않는다 #}
+{% macro empty_state(icon, title, body, reasons=None, actions=None) %}
+<div class="state">
+  <span class="state__icon" aria-hidden="true">{{ icon }}</span>
+  <h2 class="state__title">{{ title }}</h2>
+  <p class="state__body">{{ body }}</p>
+  {% if reasons %}
+    <ul class="reasons">
+      {% for r in reasons %}<li>{{ r|safe }}</li>{% endfor %}
+    </ul>
+  {% endif %}
+  {% if actions %}
+    <div class="state__actions">
+      {% for href, label in actions %}
+        <a class="cds--btn cds--btn--tertiary" href="{{ href }}">{{ label }}</a>
+      {% endfor %}
+    </div>
+  {% endif %}
+</div>
+{% endmacro %}

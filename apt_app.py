@@ -19,7 +19,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import date
 
-from flask import Flask, render_template, request
+from flask import Flask, make_response, redirect, render_template, request
 
 import config
 from apt_engine import area as area_mod
@@ -27,8 +27,106 @@ from apt_engine import regions, units
 from apt_engine.repo import apt as repo
 from apt_engine.repo import rules as rule_repo
 
-app = Flask(__name__, template_folder="templates")
+app = Flask(__name__, template_folder="templates", static_folder="static")
 PORT = 5001
+
+# ── 보기 모드 (§3) ────────────────────────────────────────────────────
+#
+# 같은 데이터를 두 방식으로 보여준다. 라우트를 나누지 않는 이유:
+# URL 을 나누면 링크를 공유했을 때 상대가 다른 모드로 보게 되고,
+# 새로고침에서 모드가 풀린다.
+MODE_EASY = "easy"
+MODE_EXPERT = "expert"
+MODES = (MODE_EASY, MODE_EXPERT)
+DEFAULT_MODE = MODE_EASY
+
+
+@app.context_processor
+def _inject_mode():
+    """모든 템플릿에서 `mode` 를 쓸 수 있게 한다.
+
+    모르는 값이 오면 기본으로 되돌린다 — 쿼리스트링을 손으로 고쳐도
+    화면이 깨지지 않아야 한다.
+    """
+    raw = (request.args.get("mode") or "").strip().lower()
+    return {"mode": raw if raw in MODES else DEFAULT_MODE,
+            "MODE_EASY": MODE_EASY, "MODE_EXPERT": MODE_EXPERT}
+
+
+# ── 비교 후보 (§4 아파트 검색·후보 관리) ──────────────────────────────
+#
+# 최대 5개. 그 이상은 가로 비교표가 읽히지 않는다 — 화면에 다 안 들어가고,
+# 사람이 한 번에 비교할 수 있는 항목 수도 그쯤에서 끝난다.
+#
+# 저장은 쿠키다. DB 커넥션이 읽기 전용(수집 배치와 나란히 읽어야 해서)이라
+# 서버에 쓸 수 없고, 담아둔 후보는 개인 설정이라 서버에 둘 이유도 없다.
+WATCH_MAX = 5
+WATCH_COOKIE = "watch"
+
+
+def _watch_ids() -> list[int]:
+    """쿠키에서 후보 id 목록. 손으로 고쳐도 화면이 깨지지 않게 다 걸러낸다."""
+    raw = request.cookies.get(WATCH_COOKIE) or ""
+    out: list[int] = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part.isdigit():
+            continue
+        cid = int(part)
+        if cid not in out:
+            out.append(cid)
+    return out[:WATCH_MAX]
+
+
+@app.context_processor
+def _inject_watch():
+    ids = _watch_ids()
+    return {"watch_ids": ids, "watch_max": WATCH_MAX}
+
+
+def _watch_rows(conn, ids: list[int]):
+    """담아둔 순서를 지켜서 단지 행을 돌려준다 (IN 절은 순서를 안 지킨다)."""
+    if not ids:
+        return []
+    marks = ",".join("?" * len(ids))
+    rows = {r["id"]: r for r in conn.execute(
+        f"SELECT * FROM complex WHERE id IN ({marks})", ids).fetchall()}
+    return [rows[i] for i in ids if i in rows]
+
+
+def _safe_next(raw: str | None) -> str:
+    """열린 리다이렉트를 막는다. 우리 사이트 안의 경로만 허용."""
+    if not raw or not raw.startswith("/") or raw.startswith("//"):
+        return "/search"
+    return raw
+
+
+def _set_watch(ids: list[int], target: str):
+    resp = make_response(redirect(target, code=303))
+    resp.set_cookie(WATCH_COOKIE, ",".join(str(i) for i in ids[:WATCH_MAX]),
+                    max_age=60 * 60 * 24 * 30, samesite="Lax", path="/")
+    return resp
+
+
+@app.route("/watchlist/add", methods=["POST"])
+def watchlist_add():
+    ids = _watch_ids()
+    raw = (request.form.get("id") or "").strip()
+    if raw.isdigit() and int(raw) not in ids and len(ids) < WATCH_MAX:
+        ids.append(int(raw))
+    return _set_watch(ids, _safe_next(request.form.get("next")))
+
+
+@app.route("/watchlist/remove", methods=["POST"])
+def watchlist_remove():
+    raw = (request.form.get("id") or "").strip()
+    ids = [i for i in _watch_ids() if not (raw.isdigit() and i == int(raw))]
+    return _set_watch(ids, _safe_next(request.form.get("next")))
+
+
+@app.route("/watchlist/clear", methods=["POST"])
+def watchlist_clear():
+    return _set_watch([], _safe_next(request.form.get("next")))
 
 
 # ── DB ────────────────────────────────────────────────────────────────
@@ -326,10 +424,12 @@ def _why_empty(conn, as_of, result) -> dict:
 def search():
     q = (request.args.get("q") or "").strip()
     rows = []
-    if q:
-        with ro_conn() as conn:
+    with ro_conn() as conn:
+        if q:
             rows = repo.find_complexes(conn, q)
-    return render_template("apt_search.html", q=q, rows=rows)
+        watchlist = _watch_rows(conn, _watch_ids())
+    return render_template("apt_search.html", q=q, rows=rows,
+                           watchlist=watchlist)
 
 
 # ── 단지 상세 ─────────────────────────────────────────────────────────
@@ -401,6 +501,177 @@ def _compute_capital(conn, row, price_in, house_count, assume_jeonse, income_in,
     except Exception as e:                      # 규칙 미입력 등은 여기로 온다
         return None, f"{type(e).__name__}: {e}"
     return cap, None
+
+
+# ── 종합 비교 (§4) ────────────────────────────────────────────────────
+#
+# 계산은 전부 기존 함수를 그대로 쓴다. 이 화면이 하는 일은 **줄 세우기**뿐이고,
+# 새로운 산식을 만들지 않는다 — 상세화면과 비교화면의 숫자가 다르면
+# 둘 중 하나는 틀린 것이고, 사용자는 어느 쪽이 틀렸는지 알 방법이 없다.
+
+def _compare_band(prices, want: str | None = None):
+    """비교에 쓸 면적대 하나를 고른다.
+
+    같은 단지 안에서도 면적대가 다르면 다른 상품이다. 아무거나 고르면
+    59㎡ 와 84㎡ 를 나란히 놓고 '싸다' 는 결론이 나온다. 고른 면적대는
+    화면에 반드시 같이 표시한다.
+    """
+    if want:
+        hit = next((p for p in prices if p["band"] == want), None)
+        if hit:
+            return hit
+    hit = next((p for p in prices if p["band"] == "84" and p["price"]), None)
+    if hit:
+        return hit
+    priced = [p for p in prices if p["price"]]
+    if priced:
+        return max(priced, key=lambda p: p["price"]["sample_n"])
+    return prices[0] if prices else None
+
+
+def _compare_row(conn, row, house_count, band_want):
+    """단지 하나의 비교용 값. 못 구한 값은 0 이 아니라 None 으로 남긴다."""
+    cid = row["id"]
+    bands = [r[0] for r in conn.execute(
+        "SELECT DISTINCT area_band FROM trade WHERE complex_id=? ORDER BY 1",
+        (cid,)).fetchall()]
+    prices = [{"band": b,
+               "price": repo.latest_price_snapshot(conn, cid, b),
+               "jeonse": repo.latest_jeonse_snapshot(conn, cid, b)}
+              for b in bands]
+    pick = _compare_band(prices, band_want)
+    ps = pick["price"] if pick else None
+    js = pick["jeonse"] if pick else None
+
+    capital, cap_error = None, None
+    if ps:
+        capital, cap_error = _compute_capital(
+            conn, row, str(ps["representative_price"]), house_count,
+            False, "", prices, True)
+
+    return {
+        "id": cid,
+        "name": row["name"],
+        "region": f"{regions.name_of(row['lawd_cd'])} {row['emd_name'] or ''}".strip(),
+        "households": row["apt_households"],
+        "year": row["approval_year"],
+        "bands": bands,
+        "band": pick["band"] if pick else None,
+        "price": ps["representative_price"] if ps else None,
+        "price_as_of": ps["as_of_ym"] if ps else None,
+        "price_confidence": ps["confidence"] if ps else None,
+        "price_n": ps["sample_n"] if ps else None,
+        "deposit": js["representative_deposit"] if js else None,
+        "deposit_as_of": js["as_of_ym"] if js else None,
+        "deposit_n": js["sample_n"] if js else None,
+        "jeonse_ratio": js["jeonse_ratio"] if js else None,
+        "equity": getattr(capital, "required", None),
+        "equity_no_loan": getattr(capital, "required_without_loan", None),
+        "unknown": list(capital.unknown) if capital else [],
+        "confirmed": getattr(capital, "confirmed", None),
+        "cap_error": cap_error,
+    }
+
+
+# 확인 불가 항목이 있으면 그 단지의 필요 현금은 **하한**이다. 하한끼리
+# 비교해서 1등을 뽑으면, 못 구한 비용이 큰 단지가 가장 싸 보인다.
+LOWER_BOUND_KEYS = {"equity", "equity_no_loan"}
+
+
+def _best(rows, key, want_max: bool):
+    """이 항목 하나만 놓고 봤을 때 가장 좋은 단지의 id.
+
+    종합 판정이 아니다. 항목별 최고가 곧 최선이라고 읽히지 않도록
+    화면에서 '이 항목만 놓고 볼 때' 라고 밝힌다.
+
+    하한값(확인 불가 항목이 있는 필요 현금)은 아예 비교하지 않는다 —
+    "이 정도 이상" 인 값끼리 대소를 따지면 결론이 뒤집힐 수 있다.
+    """
+    usable = rows
+    if key in LOWER_BOUND_KEYS:
+        usable = [r for r in rows if not r.get("unknown")]
+    vals = [(r["id"], r[key]) for r in usable if r.get(key) is not None]
+    if len(vals) < 2:
+        return None      # 비교 대상이 하나뿐이면 1등이라는 말이 성립하지 않는다
+    return (max if want_max else min)(vals, key=lambda kv: kv[1])[0]
+
+
+@app.route("/compare")
+def compare():
+    house_count = int(request.args.get("house_count") or 1)
+    band_want = (request.args.get("band") or "").strip() or None
+    ids = _watch_ids()
+    with ro_conn() as conn:
+        complexes = _watch_rows(conn, ids)
+        rows = [_compare_row(conn, r, house_count, band_want) for r in complexes]
+
+    mixed_bands = len({r["band"] for r in rows if r["band"]}) > 1
+    best = {
+        "price": _best(rows, "price", want_max=False),
+        "equity": _best(rows, "equity", want_max=False),
+        "equity_no_loan": _best(rows, "equity_no_loan", want_max=False),
+        "jeonse_ratio": _best(rows, "jeonse_ratio", want_max=True),
+    }
+    return render_template("apt_compare.html", rows=rows, best=best,
+                           mixed_bands=mixed_bands,
+                           form={"house_count": house_count, "band": band_want or ""})
+
+
+# ── 최종 투자결론 (§4) ────────────────────────────────────────────────
+#
+# 이 화면은 **새 점수를 만들지 않는다.** 결론을 낼 근거가 없으면 결론을
+# 내지 않고, 무엇이 없어서 못 내는지를 대신 보여준다(§12: 모든 후보가
+# 나쁘더라도 억지로 추천하지 않는다).
+#
+# 지금 데이터로 정직하게 말할 수 있는 것은 두 가지뿐이다
+#   ① 가진 현금으로 실제로 살 수 있는가        — 규칙만 있으면 사실 판정
+#   ② 그중 어느 것이 더 좋은가                 — 가중치를 학습해야 답할 수 있다
+# ②를 못 하는 동안 ①을 ②인 것처럼 보여주지 않는다.
+
+@app.route("/conclusion")
+def conclusion():
+    cash_in = (request.args.get("cash") or "").strip()
+    house_count = int(request.args.get("house_count") or 1)
+    band_want = (request.args.get("band") or "").strip() or None
+
+    cash = None
+    cash_error = None
+    if cash_in:
+        from apt_engine.listing.provider import parse_price
+        try:
+            cash = parse_price(cash_in)
+        except Exception:
+            cash_error = f"투자금을 읽지 못했습니다: {cash_in!r} (예: 3 또는 300000000)"
+
+    with ro_conn() as conn:
+        lock = _lock_state(conn)
+        complexes = _watch_rows(conn, _watch_ids())
+        rows = [_compare_row(conn, r, house_count, band_want) for r in complexes]
+
+    # ① 살 수 있는가 — 못 구한 항목이 있으면 '가능' 이라고 말하지 않는다.
+    for r in rows:
+        need = r["equity"]
+        if cash is None or need is None:
+            r["afford"] = None
+            r["afford_reason"] = ("투자금을 넣어 주세요" if cash is None
+                                  else (r["cap_error"] or "필요 현금을 구하지 못했습니다"))
+        elif r["unknown"]:
+            # 확인 불가 항목을 0원으로 세면 '살 수 있다' 가 거짓이 된다.
+            r["afford"] = None
+            r["afford_reason"] = (
+                f"확인 불가 항목 {len(r['unknown'])}개가 있어 실제 필요 현금은 "
+                f"이보다 큽니다 — 가능하다고 말할 수 없습니다")
+        else:
+            r["afford"] = need <= cash
+            r["afford_reason"] = ("여유 " + _won(cash - need) if need <= cash
+                                  else _won(need - cash) + " 부족")
+
+    affordable = [r for r in rows if r["afford"] is True]
+    return render_template("apt_conclusion.html", rows=rows, lock=lock,
+                           cash=cash, cash_error=cash_error,
+                           affordable=affordable,
+                           form={"cash": cash_in, "house_count": house_count,
+                                 "band": band_want or ""})
 
 
 # ── 미매칭 리포트 ─────────────────────────────────────────────────────

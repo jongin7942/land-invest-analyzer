@@ -1,0 +1,168 @@
+{% extends "apt_base.html" %}
+{% import "_macros.html" as ui %}
+{% block title %}최종 투자결론 · 아파트 투자분석{% endblock %}
+{% block body %}
+
+<h1 class="page-title">최종 투자결론</h1>
+<p class="page-sub">담아둔 후보를 놓고, <b>지금 데이터로 정직하게 말할 수 있는 것만</b>
+  말합니다. 근거가 없으면 결론을 만들지 않습니다.</p>
+
+{% if not rows %}
+  {{ ui.empty_state(
+       '○', '결론을 낼 후보가 없습니다',
+       '단지를 담은 뒤 다시 오세요.',
+       actions=[('/search', '단지 검색'), ('/compare', '비교표로')]) }}
+{% else %}
+
+<form class="form" method="get">
+  <div class="form__fields">
+    <div class="field">
+      <label class="field__label" for="cash">투자금 (억)</label>
+      <input class="cds--text-input" type="text" id="cash" name="cash"
+             value="{{ form.cash }}" placeholder="3" inputmode="decimal" autofocus>
+      <span class="field__hint">실제로 쓸 수 있는 현금</span>
+    </div>
+    <div class="field">
+      <label class="field__label" for="house_count">취득 후 주택수</label>
+      <input class="cds--text-input" type="number" id="house_count" name="house_count"
+             value="{{ form.house_count }}" min="1" max="5">
+    </div>
+    {% if form.band %}<input type="hidden" name="band" value="{{ form.band }}">{% endif %}
+    {% if mode == MODE_EXPERT %}<input type="hidden" name="mode" value="expert">{% endif %}
+    <div class="field">
+      <button class="cds--btn cds--btn--primary" type="submit">결론 보기</button>
+    </div>
+  </div>
+</form>
+
+{% if cash_error %}
+  <div class="notice notice--danger">{{ cash_error }}</div>
+{% endif %}
+
+{# ── 결론 ①: 무엇을 살 수 있는가 (사실 판정) ─────────────────────── #}
+<h2>① 이 현금으로 실제로 살 수 있는가</h2>
+<div class="table-scroll">
+  <table class="cds--data-table cds--data-table--sm">
+    <thead><tr>
+      <th>단지</th><th>면적대</th><th class="num">매매 대표가격</th>
+      <th class="num">필요 현금</th><th>판정</th>
+    </tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td><a class="cds--link" href="/complex/{{ r.id }}">{{ r.name }}</a><br>
+            <span class="small muted">{{ r.region }}</span></td>
+        <td>{% if r.band %}{{ r.band | band }}{% else %}–{% endif %}</td>
+        <td class="num">
+          {% if r.price is none %}{{ ui.value(none, reason='실거래 스냅샷이 없습니다') }}
+          {% else %}{{ r.price | eok }}{% endif %}
+        </td>
+        <td class="num">
+          {% if r.equity is none %}{{ ui.value(none, reason=r.cap_error or '규칙이 부족합니다') }}
+          {% else %}{{ r.equity | won }}{% if r.unknown %} 이상{% endif %}{% endif %}
+        </td>
+        <td>
+          {% if r.afford is none %}
+            <span class="grade grade--unknown">판단 불가</span>
+            <span class="small muted">{{ r.afford_reason }}</span>
+          {% elif r.afford %}
+            <span class="chip chip--ok">살 수 있음</span>
+            <span class="small muted">{{ r.afford_reason }}</span>
+          {% else %}
+            <span class="chip chip--warn">현금 부족</span>
+            <span class="small muted">{{ r.afford_reason }}</span>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="field__hint" style="margin-top:.75rem">
+  확인 불가 항목이 하나라도 있으면 <b>“살 수 있음”이라고 말하지 않습니다.</b>
+  못 구한 비용을 0원으로 세면 실제로는 못 사는 집이 살 수 있는 집으로 보입니다.
+</p>
+
+{# ── 결론 ②: 그중 어느 것이 나은가 ────────────────────────────────── #}
+<h2 style="margin-top:2rem">② 그중 어느 것이 더 나은가</h2>
+
+{% if lock %}
+  <div class="lock">
+    <p class="lock__title">아직 답할 수 없습니다</p>
+    <p style="margin:0">
+      어느 쪽이 더 나은지는 <b>백테스트로 학습한 가중치</b>가 있어야 답할 수 있습니다.
+      지금 가중치는 후보를 좁히기 위한 임시값이라, 이걸로 순위를 매기면
+      <b>근거 없는 순서에 근거가 있는 것처럼 보이는 라벨</b>이 붙습니다.
+      그래서 순위를 만들지 않습니다.
+    </p>
+  </div>
+  <ul class="reasons" style="margin-top:1rem">
+    <li>실거래 기간 <b>{{ lock.months or 0 }}개월</b> / 목표 {{ lock.need_months }}개월
+        — <a href="/status">데이터 현황</a></li>
+    {% if lock.missing_sido %}
+      <li>아직 없는 지역: <span class="stale">{{ lock.missing_sido | join(", ") }}</span></li>
+    {% endif %}
+    <li>학습된 가중치 없음 — <code>backtest run</code> → <code>backtest weights</code></li>
+  </ul>
+{% elif affordable | length == 0 %}
+  {{ ui.empty_state(
+       '○', '살 수 있는 후보가 없습니다',
+       '순위를 매길 대상 자체가 없습니다. 억지로 순서를 만들지 않습니다.',
+       reasons=['투자금을 올리면 후보가 생길 수 있습니다',
+                '확인 불가 항목이 많으면 규칙 입력 후 다시 계산됩니다'],
+       actions=[('/status', '규칙 입력 현황 보기')]) }}
+{% elif affordable | length == 1 %}
+  <div class="notice notice--ok">
+    <span class="notice__title">살 수 있는 후보가 하나뿐입니다 — {{ affordable[0].name }}</span>
+    비교 대상이 없으므로 “가장 낫다”가 아니라 “유일하게 가능하다”입니다.
+    이것이 <b>현금을 그냥 들고 있는 것보다 나은지</b>는 별개의 질문이고,
+    가중치를 학습해야 답할 수 있습니다.
+  </div>
+{% else %}
+  <div class="notice">
+    <span class="notice__title">살 수 있는 후보 {{ affordable | length }}개</span>
+    {% for r in affordable %}<a class="chip" href="/complex/{{ r.id }}">{{ r.name }}</a>{% endfor %}
+    <p style="margin:.5rem 0 0">
+      이 중 어느 것이 나은지는 <a href="/">순위 화면</a>에서 학습된 가중치로 판정합니다.
+      이 화면에서 따로 점수를 만들지 않습니다 — 화면마다 다른 점수가 나오면
+      어느 쪽이 맞는지 알 수 없게 됩니다.
+    </p>
+  </div>
+{% endif %}
+
+{# ── 결론 ③: 현금과 비교 ──────────────────────────────────────────── #}
+<h2 style="margin-top:2rem">③ 사지 않는 선택</h2>
+<div class="surface">
+  <p style="margin:0">
+    아파트를 사는 것은 <b>현금을 계속 들고 있는 것</b>과 경쟁합니다.
+    후보가 전부 현금보다 못하면 이 엔진은 <b>“사지 마세요”를 1순위로</b> 내놓습니다.
+    억지로 TOP10 을 채우지 않습니다.
+  </p>
+  {% if lock %}
+    <p class="field__hint" style="margin-top:.75rem">
+      이 비교에는 기대수익 추정이 필요하고, 그것도 학습된 가중치가 있어야 나옵니다.
+      지금은 <span class="grade grade--unknown">확인 불가</span> 상태입니다.
+    </p>
+  {% endif %}
+</div>
+
+{% if mode == MODE_EXPERT %}
+  {% call ui.evidence('이 화면이 쓰는 값과 쓰지 않는 값') %}
+    <table class="kv">
+      <tr><th>쓰는 값</th>
+          <td>대표가격(실거래 스냅샷) · <code>cash.self_capital.compute</code> 의 필요 현금 ·
+              확인 불가 항목 목록 · 잠금 상태</td></tr>
+      <tr><th>쓰지 않는 값</th>
+          <td>이 화면에서 만든 점수 — <b>없습니다.</b> 순위는 순위 화면 한 곳에서만
+              나옵니다.</td></tr>
+      <tr><th>판정 규칙</th>
+          <td><code>필요현금 ≤ 투자금</code> 이고 <code>확인 불가 항목 = 0</code> 일 때만
+              “살 수 있음”. 하나라도 어긋나면 “판단 불가”.</td></tr>
+    </table>
+  {% endcall %}
+{% endif %}
+
+<p class="pager"><a href="/compare">← 비교표로 돌아가기</a></p>
+
+{% endif %}
+{% endblock %}
