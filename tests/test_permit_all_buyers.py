@@ -26,7 +26,10 @@ def db(tmp_path_factory):
     with get_conn(path) as conn:
         repo.sync_regions(conn)
     env = {**os.environ, "APT_DB_PATH": path}
-    for f in ("rules/permit_all_buyers.csv", "rules/permit_foreign.csv"):
+    # permit.csv 도 넣는다 — 실제 운영 DB 에는 셋 다 들어간다. 두 개만
+    # 넣고 테스트하면 파일끼리 같은 지정을 중복으로 적어도 안 잡힌다.
+    for f in ("rules/permit_all_buyers.csv", "rules/permit_foreign.csv",
+              "rules/permit.csv"):
         r = subprocess.run([sys.executable, "-m", "apt_engine.cli", "rule",
                             "import", "permit", f],
                            capture_output=True, text=True, env=env)
@@ -94,23 +97,38 @@ def test_ALL_BUYERS_40행이_들어갔다(db):
     assert n == 40, f"지시서 §7 이 요구한 40행이 아니다: {n}"
 
 
-def test_인천_7개구는_FOREIGN_ONLY로만_남는다(db):
-    """인천 외국인 지정이 ALL_BUYERS 로 섞여 들어가면 안 된다."""
+def test_인천_외국인_지정은_전부_FOREIGN_ONLY다(db):
+    """인천 외국인 지정이 ALL_BUYERS 로 섞여 들어가면 안 된다.
+
+    인천에는 외국인 지정 말고도 구월2 공공주택지구(2024~2025, 이미 만료)
+    처럼 '전체' 대상 지정이 있다. 그건 정상적으로 ALL_BUYERS 다 —
+    여기서 보는 것은 **외국인 지정만** 이다.
+    """
     with get_conn(db) as conn:
         rows = conn.execute(
-            "SELECT lawd_cd, buyer_scope FROM land_permit_zone "
-            "WHERE lawd_cd LIKE '28%'").fetchall()
-    assert rows, "인천 규칙이 사라졌다"
-    assert all(r["buyer_scope"] == "FOREIGN_ONLY" for r in rows), (
+            "SELECT lawd_cd, target_scope, buyer_scope FROM land_permit_zone "
+            "WHERE lawd_cd LIKE '28%' AND target_scope='외국인'").fetchall()
+    assert len(rows) == 18, f"인천 외국인 규칙 수가 바뀌었다: {len(rows)}"
+    # permit.csv 는 buyer_scope 열이 없어 NULL 로 들어온다. 판정에 실제로
+    # 쓰이는 값은 buyer_scope_of() 가 유도한 쪽이므로 그것을 본다.
+    assert all(gate.buyer_scope_of(r) == gate.FOREIGN_ONLY for r in rows), (
         "인천 외국인 지정이 ALL_BUYERS 로 들어갔다")
 
 
-def test_ALL_BUYERS에_인천이_없다(db):
+def test_인천에_유효한_ALL_BUYERS_지정은_없다(db):
+    """내국인이 인천 아파트를 사는 길이 막혀 있으면 안 된다.
+
+    구월2 공공주택지구 지정은 '전체' 대상이라 ALL_BUYERS 가 맞지만
+    2025-09-20 에 만료됐다. **오늘 기준으로 유효한** ALL_BUYERS 지정이
+    인천에 있으면 그건 외국인 지정이 잘못 들어온 것이다.
+    """
     with get_conn(db) as conn:
-        n = conn.execute("SELECT COUNT(*) FROM land_permit_zone "
-                         "WHERE buyer_scope='ALL_BUYERS' AND lawd_cd LIKE '28%'"
-                         ).fetchone()[0]
-    assert n == 0
+        rows = conn.execute(
+            "SELECT rule_id, lawd_cd, effective_to FROM land_permit_zone "
+            "WHERE buyer_scope='ALL_BUYERS' AND lawd_cd LIKE '28%' "
+            "AND effective_from <= ? AND effective_to >= ?",
+            (TODAY, TODAY)).fetchall()
+    assert not rows, f"인천에 유효한 ALL_BUYERS 지정: {[tuple(r) for r in rows]}"
 
 
 def test_ALL_BUYERS_코드는_전부_실제_행정구역이다(db):
@@ -123,23 +141,176 @@ def test_ALL_BUYERS_코드는_전부_실제_행정구역이다(db):
     assert not bad, f"region 표에 없는 코드: {[(r[0], r[1]) for r in bad]}"
 
 
-def test_인천_외국인_중구서구는_행정구역_개편으로_조회_안_된다(db):
-    """2026 개편으로 중구(28110)·서구(28260)가 사라졌다.
+def test_토허_코드는_전부_region에_있다(db):
+    """지어낸 코드가 있으면 그 규칙은 영원히 안 걸린다 — 조용한 실패다.
 
-    어느 신설 구가 지정을 승계했는지 공식 확인 전까지 **임의로 매핑하지
-    않는다**(§8). 대신 그 사실을 여기에 못박고, 인천 FOREIGN_ONLY
-    커버리지를 PARTIAL 로 낮춰 '다 확인했다' 고 말하지 않게 한다.
+    2026-07-01 개편으로 폐지된 중구(28110)·서구(28260)도 `is_active=0`
+    으로 region 에 남아 있어야 여기를 통과한다. 폐지 코드를 지우면 그
+    코드로 저장된 과거 데이터가 고아가 된다.
     """
     with get_conn(db) as conn:
         orphan = {r["lawd_cd"] for r in conn.execute(
             "SELECT z.lawd_cd FROM land_permit_zone z "
             "LEFT JOIN region r ON r.lawd_cd = z.lawd_cd "
             "WHERE r.lawd_cd IS NULL")}
+    assert not orphan, f"region 표에 없는 코드: {orphan}"
+
+
+def test_인천_외국인_커버리지는_COMPLETE다(db):
+    """승계가 끝났으므로 '다 확인했다' 고 말할 수 있다."""
+    with get_conn(db) as conn:
         cov = gate.coverage_of(conn, sido="인천광역시",
                                target_scope=gate.FOREIGN_ONLY)
-    assert orphan == {"28110", "28260"}, f"예상 못 한 미매칭 코드: {orphan}"
-    assert cov != gate.COMPLETE, (
-        "일부만 조회되는데 커버리지가 COMPLETE 다")
+    assert cov == gate.COMPLETE
+
+
+# ── 2026-07-01 인천 행정체제 개편 승계 ────────────────────────────────
+#
+# 국토교통부 2026-08-20 연장 공고: "지정기간만 1년 연장 · 허가구역
+# 범위는 기존과 동일하며 행정구역 변경을 반영하여 지정 공고".
+#
+#   중구(28110) → 제물포구(28125) · 영종구(28155)
+#   서구(28260) → 서해구(28275)   · 검단구(28290)
+
+NEW_ICN = [("제물포구", "28125"), ("영종구", "28155"),
+           ("서해구", "28275"), ("검단구", "28290")]
+
+
+@pytest.mark.parametrize("name,lawd_cd", NEW_ICN)
+def test_신설구_외국인_비거주는_BLOCK(db, name, lawd_cd):
+    """지시서 §7 — 신설 4개 구 각각에서 Hard Gate 가 실제로 닫히는가."""
+    d = judge(db, lawd_cd, nationality=gate.FOREIGN, sido="인천광역시")
+    assert d.verdict == gate.BLOCKED, f"{name}: {d.verdict} — {d.reason}"
+    assert d.residence_duty_months == 24
+
+
+@pytest.mark.parametrize("name,lawd_cd", NEW_ICN)
+def test_신설구_내국인은_외국인규칙으로_막히지_않는다(db, name, lawd_cd):
+    """승계를 넣다가 내국인까지 막으면 개편 처리가 사고로 바뀐다."""
+    d = judge(db, lawd_cd, sido="인천광역시")
+    assert d.verdict == gate.PASS, f"{name}: {d.verdict} — {d.reason}"
+    # 규칙이 없어서 통과한 게 아니라 **국적이 달라 적용되지 않아서** 통과다.
+    # 이 구분이 없으면 승계 규칙이 통째로 빠져도 테스트가 초록이다.
+    assert [r.rule_id for r in d.not_applicable], (
+        f"{name}: 적용 제외된 외국인 규칙이 하나도 없다 — 승계가 안 들어갔다")
+
+
+@pytest.mark.parametrize("name,lawd_cd", NEW_ICN)
+def test_신설구_외국인_실거주는_허가받고_가능(db, name, lawd_cd):
+    d = judge(db, lawd_cd, nationality=gate.FOREIGN,
+              occupancy=gate.OCCUPANCY, sido="인천광역시")
+    assert d.verdict == gate.PASS_WITH_PERMIT, f"{name}: {d.verdict} — {d.reason}"
+
+
+def test_폐지코드는_region에_남지만_비활성이다(db):
+    """지우지 않는다 — 옛 코드로 저장된 과거 데이터의 근거가 사라진다."""
+    with get_conn(db) as conn:
+        rows = {r["lawd_cd"]: r for r in conn.execute(
+            "SELECT lawd_cd, name, is_active, until_ym FROM region "
+            "WHERE lawd_cd IN ('28110','28140','28260')")}
+    assert set(rows) == {"28110", "28140", "28260"}
+    for code, r in rows.items():
+        assert r["is_active"] == 0, f"{code} 가 아직 활성이다"
+        assert r["until_ym"] == "202606", f"{code} 의 마지막 유효월이 틀렸다"
+
+
+def test_승계관계가_보존된다(db):
+    with get_conn(db) as conn:
+        edges = {(r["predecessor_lawd_cd"], r["successor_lawd_cd"]): r["relation"]
+                 for r in conn.execute("SELECT * FROM region_lineage")}
+    assert edges == {
+        ("28110", "28125"): "SPLIT",    # 중구 내륙 → 제물포구
+        ("28110", "28155"): "SPLIT",    # 중구 영종도 → 영종구
+        ("28140", "28125"): "ABSORB",   # 동구 전역 → 제물포구
+        ("28260", "28275"): "RENAME",   # 서구 이남 → 서해구
+        ("28260", "28290"): "SPLIT",    # 서구 이북 → 검단구
+    }
+
+
+def test_폐지코드로_저장된_데이터도_판정된다(db):
+    """옛 중구(28110) 코드로 들어온 물건도 판정이 나와야 한다.
+
+    규칙은 신설 구 코드로만 적혀 있다. 승계를 못 타면 옛 코드 물건은
+    '규칙 없음 = 통과' 가 되는데, 외국인에게 허가 없이 사도 된다고
+    말하는 셈이다.
+    """
+    with get_conn(db) as conn:
+        # 개편 전 계약 — 원지정(permit.csv)이 잡힌다
+        assert gate.load_rules(conn, lawd_cd="28110", as_of="2026-03-01")
+        assert gate.load_rules(conn, lawd_cd="28260", as_of="2026-03-01")
+        # 개편 후 계약 — 연장분(permit_foreign.csv)이 잡힌다
+        ids = {r.rule_id for r in
+               gate.load_rules(conn, lawd_cd="28110", as_of="2026-09-01")}
+        assert ids == {"LPZ_FOREIGN_ICN_JEMULPO", "LPZ_FOREIGN_ICN_YEONGJONG"}
+        ids = {r.rule_id for r in
+               gate.load_rules(conn, lawd_cd="28260", as_of="2026-09-01")}
+        assert ids == {"LPZ_FOREIGN_ICN_SEOHAE", "LPZ_FOREIGN_ICN_GEOMDAN"}
+
+
+@pytest.mark.parametrize("name,lawd_cd", NEW_ICN)
+def test_지정기간에_구멍이_없다(db, name, lawd_cd):
+    """원지정 만료일(08-25)과 연장 시행일(08-26) 사이가 끊기면 안 된다.
+
+    구멍이 나면 그 날 계약이 '규칙 없음 = 통과' 로 나와, 실제로는
+    허가가 필요한 거래를 그냥 사도 된다고 말하게 된다.
+    """
+    with get_conn(db) as conn:
+        for day in ("2025-08-26", "2026-06-30", "2026-07-01",
+                    "2026-08-25", "2026-08-26", "2027-08-25"):
+            assert gate.load_rules(conn, lawd_cd=lawd_cd, as_of=day), (
+                f"{name} {day}: 유효한 규칙이 없다")
+        # 지정 시작 전과 만료 후에는 없어야 한다
+        assert not gate.load_rules(conn, lawd_cd=lawd_cd, as_of="2025-08-25")
+        assert not gate.load_rules(conn, lawd_cd=lawd_cd, as_of="2027-08-26")
+
+
+def test_같은_지정을_두_파일이_중복으로_적지_않는다(db):
+    """permit.csv(원지정)와 permit_foreign.csv(연장) 는 기간이 겹치지 않는다.
+
+    겹치면 같은 규칙이 두 번 잡히고, 둘의 값이 어긋나는 순간 어느 쪽이
+    맞는지 말할 수 없게 된다.
+    """
+    with get_conn(db) as conn:
+        for _, code in NEW_ICN + [("부평구", "28237")]:
+            for day in ("2026-03-01", "2026-08-01", "2026-09-01"):
+                rules = gate.load_rules(conn, lawd_cd=code, as_of=day)
+                assert len(rules) == 1, (
+                    f"{code} {day} 에 규칙이 {len(rules)}건 "
+                    f"— {[r.rule_id for r in rules]}")
+
+
+def test_옛_동구_코드도_제물포구_지정으로_판정된다(db):
+    """제물포구 = 옛 중구 내륙 **+ 옛 동구**.
+
+    외국인 토허 7개 구 목록에 동구는 없다. 그런데 원지정이 공공데이터에
+    이미 제물포구 코드로 기록돼 있어, 옛 동구 구역까지 지정 범위로
+    잡힌다. **이 오차는 넓은 쪽이라 그대로 둔다** — 외국인 매수 게이트가
+    넓으면 "허가를 받으라" 로 끝나고, 좁으면 허가 없는 계약 = 무효로
+    끝난다. 필지 단위 고시를 확보하면 좁힐 것.
+
+    여기서 못박는 것은 **동구 코드로 저장된 물건이 조용히 통과하지
+    않는다**는 사실이다.
+    """
+    with get_conn(db) as conn:
+        for day in ("2026-03-01", "2026-09-01"):
+            assert gate.load_rules(conn, lawd_cd="28140", as_of=day), (
+                f"{day}: 옛 동구 물건이 규칙 없이 통과한다")
+
+
+def test_승계는_형제구로_새지_않는다(db):
+    """제물포구 조회가 영종구 규칙까지 끌고 오면 안 된다.
+
+    조상을 타고 올라간 뒤 다시 내려오면 형제 구가 딸려온다. 지금은 둘 다
+    같은 지정을 물려받아 결과가 같지만, 한쪽에만 걸린 규칙이 생기는 순간
+    조용히 틀린다.
+    """
+    with get_conn(db) as conn:
+        assert gate.lineage_codes(conn, "28125") == ["28110", "28125", "28140"]
+        assert gate.lineage_codes(conn, "28155") == ["28110", "28155"]
+        assert gate.lineage_codes(conn, "28275") == ["28260", "28275"]
+        assert gate.lineage_codes(conn, "28290") == ["28260", "28290"]
+        # 개편과 무관한 코드는 자기 자신뿐 — 기존 동작과 완전히 같다
+        assert gate.lineage_codes(conn, "11680") == ["11680"]
 
 
 # ── §6 테스트 1~6 · 광역 지정은 BLOCK ─────────────────────────────────

@@ -28,8 +28,13 @@ SEOUL = {
     "11740": "서울 강동구",
 }
 
-# 2026 인천 행정체제 개편 반영. 중구·동구 → 제물포구/영종구, 서구 → 서해구/검단구.
-# 2026-08-31 K-apt 전국 단지목록(22,288건)의 bjdCode 앞 5자리로 대조해 확정했다.
+# 2026-07-01 인천형 행정체제 개편 반영.
+#   중구(28110) 내륙 + 동구(28140)  → 제물포구(28125)
+#   중구(28110) 영종도             → 영종구(28155)
+#   서구(28260) 아라뱃길 이남      → 서해구(28275)   ← 개칭·존속이지만 코드가 바뀐다
+#   서구(28260) 아라뱃길 이북      → 검단구(28290)
+# 2026-08-31 K-apt 전국 단지목록(22,288건)의 bjdCode 앞 5자리로 대조해 확정했고,
+# 국토교통부 실거래가 API totalCount 로도 재확인했다(아래 LEGACY 주석).
 INCHEON = {
     "28125": "인천 제물포구", "28155": "인천 영종구", "28177": "인천 미추홀구",
     "28185": "인천 연수구", "28200": "인천 남동구", "28237": "인천 부평구",
@@ -79,11 +84,95 @@ SIGUNGU: dict[str, str] = {**SEOUL, **INCHEON, **GYEONGGI}
 LEGACY: dict[str, dict] = {}
 
 
+# ── 개편으로 사라진 코드 · 승계 관계 ──────────────────────────────────
+#
+# **LEGACY 와 완전히 다른 목적이다. 절대 섞지 않는다.**
+#
+#   LEGACY   수집할 때 어느 코드로 API 를 때릴지 정한다 → 비어 있어야 한다
+#   RETIRED  옛 코드가 무엇이었는지 이름을 남긴다        → 조회·이력용
+#   LINEAGE  어느 코드가 어느 코드를 승계했는지 남긴다   → 규칙 판정용
+#
+# RETIRED 항목을 LEGACY 에 옮겨 적으면 codes_for_ym() 이 그 구간을 폐지
+# 코드로 요청해 수집이 통째로 0건이 된다(위 주석 참조).
+#
+# 2026-07-01 인천형 행정체제 개편 — 1995년 이후 31년 만.
+#   중구 내륙 + 동구 → 제물포구 / 중구 영종도 → 영종구
+#   서구 아라뱃길 이남 → 서해구(개칭) / 이북 → 검단구(신설)
+RETIRED: dict[str, dict] = {
+    "28110": {"name": "인천 중구", "sido": "인천", "until_ym": "202606"},
+    "28140": {"name": "인천 동구", "sido": "인천", "until_ym": "202606"},
+    "28260": {"name": "인천 서구", "sido": "인천", "until_ym": "202606"},
+}
+
+# (옛 코드, 새 코드, 관계, 승계범위)
+#   FULL     옛 구역 전체가 그 새 구로 넘어갔다
+#   PARTIAL  옛 구역의 일부만 넘어갔다 — 옛 구에 걸린 규칙을 그대로
+#            물려주면 지정된 적 없는 땅까지 규제 대상이 될 수 있다
+LINEAGE: tuple[tuple[str, str, str, str], ...] = (
+    ("28110", "28125", "SPLIT", "PARTIAL"),   # 중구 내륙 → 제물포구
+    ("28110", "28155", "SPLIT", "PARTIAL"),   # 중구 영종도 → 영종구
+    ("28140", "28125", "ABSORB", "FULL"),     # 동구 전역 → 제물포구
+    ("28260", "28275", "RENAME", "PARTIAL"),  # 서구 이남 → 서해구
+    ("28260", "28290", "SPLIT", "PARTIAL"),   # 서구 이북 → 검단구
+)
+
+LINEAGE_EFFECTIVE_FROM = "2026-07-01"
+LINEAGE_SOURCE = "행정표준코드관리시스템 · 인천광역시 행정체제 개편"
+
+
+def successors_of(code: str) -> list[str]:
+    """이 코드를 승계한 현재 코드들. 개편이 없었으면 빈 목록."""
+    return [new for old, new, _, _ in LINEAGE if old == code]
+
+
+def predecessors_of(code: str) -> list[str]:
+    """이 코드가 승계한 옛 코드들."""
+    return [old for old, new, _, _ in LINEAGE if new == code]
+
+
+def _walk(code: str, step) -> set[str]:
+    seen: set[str] = set()
+    queue = [code]
+    while queue:
+        for nxt in step(queue.pop()):
+            if nxt not in seen:
+                seen.add(nxt)
+                queue.append(nxt)
+    return seen
+
+
+def ancestors_of(code: str) -> list[str]:
+    """이 코드가 승계한 옛 코드 전부 (개편을 여러 번 거쳐도 따라간다)."""
+    return sorted(_walk(code, predecessors_of))
+
+
+def descendants_of(code: str) -> list[str]:
+    """이 코드를 승계한 새 코드 전부."""
+    return sorted(_walk(code, successors_of))
+
+
+def related_codes(code: str) -> list[str]:
+    """같은 땅을 가리키는 코드 — 자기 자신 + 조상 + 후손.
+
+    **위아래를 섞어 걷지 않는다.** 조상을 타고 올라간 뒤 다시 내려오면
+    형제 구까지 딸려온다. 중구(28110)에서 올라간 제물포구가 다시
+    영종구(28155)를 끌고 오는 식인데, 영종구는 제물포구와 같은 땅이
+    아니다. 지금 데이터에서는 둘 다 같은 지정을 물려받아 결과가 같지만,
+    한쪽에만 걸린 규칙이 생기는 순간 조용히 틀린다.
+
+    규칙 판정은 이 집합으로 넓혀 읽되 **유효기간으로 다시 거른다** —
+    넓히는 것만으로는 옛 규칙이 되살아나지 않는다.
+    """
+    return sorted({code} | set(ancestors_of(code)) | set(descendants_of(code)))
+
+
 def name_of(code: str) -> str:
     if code in SIGUNGU:
         return SIGUNGU[code]
     if code in LEGACY:
         return LEGACY[code]["name"]
+    if code in RETIRED:
+        return RETIRED[code]["name"]
     return code
 
 
@@ -94,6 +183,8 @@ def sido_of(code: str) -> str | None:
     if code in LEGACY:
         # 폐지 코드는 후속 코드의 시도를 따른다.
         return sido_of(LEGACY[code]["successors"][0])
+    if code in RETIRED:
+        return RETIRED[code]["sido"]
     return None
 
 

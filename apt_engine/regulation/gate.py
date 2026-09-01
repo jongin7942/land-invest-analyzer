@@ -25,8 +25,10 @@ scope 를 필수로 받는 이유가 이것이고, 여기서도 사용자의 국
 """
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass, field
 
+from apt_engine import regions
 from apt_engine.regulation import zone as zone_mod
 
 # 매수 목적. 실거주 의무는 '비거주 투자' 에서만 문제가 된다.
@@ -655,16 +657,70 @@ def evaluate_candidate(rules: list[Rule], candidate: Candidate, *,
         parcel_recheck_required=recheck, not_applicable=not_applied)
 
 
+def lineage_codes(conn, lawd_cd: str) -> list[str]:
+    """같은 땅을 가리키는 코드 전부 — 자기 자신 + 조상 + 후손.
+
+    **왜 필요한가.** 2026-07-01 인천 개편으로 중구(28110)·서구(28260)가
+    사라지고 제물포·영종·서해·검단이 생겼다. 지정은 그대로인데 코드만
+    바뀌었으므로,
+
+      · 제물포구 물건의 2026-03 계약을 판정하려면 옛 중구 규칙을 봐야 하고
+      · 옛 중구 코드로 저장된 데이터의 2026-09 계약을 판정하려면
+        새 제물포·영종 규칙을 봐야 한다.
+
+    옛 코드를 새 코드로 치환해 버리면 첫 번째가 불가능해진다. 그래서
+    치환하지 않고 **읽을 때 넓힌다.** 넓혀도 유효기간(effective_from/to)
+    으로 다시 거르므로 만료된 지정이 되살아나지는 않는다.
+
+    DB 의 region_lineage 를 먼저 보고, 비어 있으면(마이그레이션만 하고
+    sync_regions 를 안 돌린 DB) 코드표로 대신한다.
+    """
+    try:
+        rows = conn.execute(
+            "SELECT predecessor_lawd_cd AS a, successor_lawd_cd AS b "
+            "FROM region_lineage").fetchall()
+    except sqlite3.OperationalError:      # 020 이전 스키마
+        rows = []
+    if not rows:
+        return regions.related_codes(lawd_cd)
+
+    up: dict[str, list[str]] = {}
+    down: dict[str, list[str]] = {}
+    for r in rows:
+        down.setdefault(r["a"], []).append(r["b"])
+        up.setdefault(r["b"], []).append(r["a"])
+
+    def walk(edges):
+        # 위아래를 섞어 걷지 않는다 — 섞으면 형제 구까지 딸려온다
+        # (regions.related_codes 의 주석 참조).
+        seen, queue = set(), [lawd_cd]
+        while queue:
+            for nxt in edges.get(queue.pop(), ()):
+                if nxt not in seen:
+                    seen.add(nxt)
+                    queue.append(nxt)
+        return seen
+
+    return sorted({lawd_cd} | walk(up) | walk(down))
+
+
 def load_rules(conn, *, lawd_cd: str, as_of: str) -> list[Rule]:
-    """그 시점에 유효한 규칙만 읽는다. 만료된 지정은 적용하지 않는다."""
+    """그 시점에 유효한 규칙만 읽는다. 만료된 지정은 적용하지 않는다.
+
+    행정구역 개편을 거친 코드는 승계 관계를 타고 옛·새 코드까지 함께
+    읽는다(`lineage_codes`). 개편이 없던 코드는 자기 자신뿐이라
+    기존 동작과 완전히 같다.
+    """
+    codes = lineage_codes(conn, lawd_cd)
+    marks = ",".join("?" * len(codes))
     rows = conn.execute(
         "SELECT rule_id, target_scope, buyer_scope, nationality_scope,"
         "       residence_duty_months, status, effective_from, effective_to,"
         "       property_scope, parcel_recheck_required, source_url,"
         "       residential_threshold_sqm "
-        "FROM land_permit_zone "
-        "WHERE lawd_cd = ? AND effective_from <= ? AND effective_to >= ?",
-        (lawd_cd, as_of, as_of)).fetchall()
+        f"FROM land_permit_zone "
+        f"WHERE lawd_cd IN ({marks}) AND effective_from <= ? AND effective_to >= ?",
+        (*codes, as_of, as_of)).fetchall()
     return [Rule(rule_id=r["rule_id"], target_scope=buyer_scope_of(r),
                  nationality_scope=r["nationality_scope"],
                  residence_duty_months=r["residence_duty_months"],
@@ -698,7 +754,7 @@ def evaluate_at(conn, *, lawd_cd: str, sido: str, as_of: str,
 
 
 __all__ = ["Decision", "Rule", "decide", "decide_at", "evaluate", "evaluate_at",
-           "load_rules", "coverage_of", "applies_to_buyer", "buyer_scope_of",
+           "load_rules", "lineage_codes", "coverage_of", "applies_to_buyer", "buyer_scope_of",
            "Candidate", "evaluate_candidate", "matches_property",
            "APARTMENT", "ROW_HOUSE", "MULTI_FAMILY",
            "APARTMENT_ONLY", "APT_AND_SAME_COMPLEX",

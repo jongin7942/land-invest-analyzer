@@ -21,16 +21,47 @@ def _now() -> str:
 # ── 시군구 ────────────────────────────────────────────────────────────
 
 def sync_regions(conn: sqlite3.Connection) -> int:
-    """regions.py 의 코드표를 region 테이블에 반영한다(멱등)."""
+    """regions.py 의 코드표를 region 표에 반영한다(멱등).
+
+    개편으로 사라진 코드(`RETIRED`)도 `is_active=0` 으로 함께 넣는다.
+    **지우지 않는 이유**: 그 코드로 저장된 과거 거래와 과거 판정의 근거가
+    남아 있어야 나중에 되짚을 수 있다. 지우면 그 데이터가 고아가 된다.
+    """
     rows = [(code, regions.sido_of(code), name, 1, None)
             for code, name in regions.SIGUNGU.items()]
     rows += [(code, regions.sido_of(code), info["name"], 0, info["until_ym"])
              for code, info in regions.LEGACY.items()]
+    rows += [(code, info["sido"], info["name"], 0, info["until_ym"])
+             for code, info in regions.RETIRED.items()]
     conn.executemany(
         "INSERT INTO region (lawd_cd, sido, name, is_active, until_ym) VALUES (?,?,?,?,?) "
         "ON CONFLICT(lawd_cd) DO UPDATE SET "
         "sido=excluded.sido, name=excluded.name, "
         "is_active=excluded.is_active, until_ym=excluded.until_ym",
+        rows,
+    )
+    sync_region_lineage(conn)
+    return len(rows)
+
+
+def sync_region_lineage(conn: sqlite3.Connection) -> int:
+    """개편 승계 관계를 region_lineage 에 반영한다(멱등).
+
+    옛 코드를 새 코드로 **치환하지 않고 잇는다.** 치환하면 개편 전
+    이력이 사라지고, 그 시점에 어떤 규칙이 걸려 있었는지 다시 말할 수
+    없게 된다.
+    """
+    rows = [(old, new, regions.LINEAGE_EFFECTIVE_FROM, relation, coverage,
+             regions.LINEAGE_SOURCE,
+             f"{regions.name_of(old)} → {regions.name_of(new)}")
+            for old, new, relation, coverage in regions.LINEAGE]
+    conn.executemany(
+        "INSERT INTO region_lineage (predecessor_lawd_cd, successor_lawd_cd,"
+        " effective_from, relation, coverage, source_name, note)"
+        " VALUES (?,?,?,?,?,?,?)"
+        " ON CONFLICT(predecessor_lawd_cd, successor_lawd_cd, effective_from)"
+        " DO UPDATE SET relation=excluded.relation, coverage=excluded.coverage,"
+        " source_name=excluded.source_name, note=excluded.note",
         rows,
     )
     return len(rows)
@@ -447,7 +478,7 @@ def find_complexes(conn: sqlite3.Connection, query: str) -> list[sqlite3.Row]:
 
 
 __all__ = [
-    "sync_regions", "source_id", "log_collection",
+    "sync_regions", "sync_region_lineage", "source_id", "log_collection",
     "upsert_complexes", "candidates_for", "upsert_unit_types",
     "derive_unit_types_from_trades", "insert_trades", "insert_jeonse",
     "distinct_unmatched_names", "apply_match", "clear_matches", "match_stats",

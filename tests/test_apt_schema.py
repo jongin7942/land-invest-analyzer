@@ -231,7 +231,65 @@ class TestRegionCodes:
             legacy = conn.execute(
                 "SELECT COUNT(*) FROM region WHERE is_active=0").fetchone()[0]
         assert active == len(regions.SIGUNGU)
-        assert legacy == len(regions.LEGACY)
+        assert legacy == len(regions.LEGACY) + len(regions.RETIRED)
+
+    # ── 2026-07-01 인천 개편 이력 ──────────────────────────────────────
+
+    def test_폐지코드는_RETIRED에만_있고_LEGACY에는_없다(self):
+        """둘을 섞으면 수집이 통째로 0건이 된다.
+
+        LEGACY 에 넣으면 codes_for_ym() 이 과거 달에 폐지 코드로 요청하는데,
+        실거래가 API 는 과거 거래까지 현재 코드로 소급 재편해 돌려주므로
+        그 구간이 전부 빈다.
+        """
+        assert set(regions.RETIRED) == {"28110", "28140", "28260"}
+        assert regions.LEGACY == {}
+        assert not (set(regions.RETIRED) & set(regions.SIGUNGU))
+        for ym in ("202101", "202606", "202608"):
+            assert not (set(regions.RETIRED) & set(regions.codes_for_ym(ym)))
+
+    def test_폐지코드도_이름과_시도를_안다(self):
+        assert regions.name_of("28110") == "인천 중구"
+        assert regions.name_of("28260") == "인천 서구"
+        assert regions.sido_of("28140") == "인천"
+
+    def test_승계_관계(self):
+        assert regions.successors_of("28110") == ["28125", "28155"]
+        assert regions.successors_of("28260") == ["28275", "28290"]
+        assert regions.predecessors_of("28125") == ["28110", "28140"]
+        assert regions.successors_of("11680") == []
+
+    def test_related_codes는_형제구를_끌어오지_않는다(self):
+        """조상을 타고 올라간 뒤 다시 내려오면 형제 구가 딸려온다.
+
+        제물포구 조회에 영종구가 섞이면, 영종구에만 걸린 규칙이 생기는
+        순간 제물포구가 조용히 그 규칙을 물려받는다.
+        """
+        assert regions.related_codes("28125") == ["28110", "28125", "28140"]
+        assert regions.related_codes("28155") == ["28110", "28155"]
+        assert regions.related_codes("28275") == ["28260", "28275"]
+        assert regions.related_codes("28290") == ["28260", "28290"]
+        assert regions.related_codes("11680") == ["11680"]
+
+    def test_승계표가_DB에_들어간다(self, db):
+        with get_conn(db) as conn:
+            rows = conn.execute(
+                "SELECT predecessor_lawd_cd, successor_lawd_cd, effective_from,"
+                " coverage FROM region_lineage ORDER BY 1,2").fetchall()
+        assert len(rows) == len(regions.LINEAGE)
+        assert all(r["effective_from"] == "2026-07-01" for r in rows)
+        # 동구는 전역이 제물포구로 넘어갔다 — 유일한 FULL
+        full = {(r["predecessor_lawd_cd"], r["successor_lawd_cd"])
+                for r in rows if r["coverage"] == "FULL"}
+        assert full == {("28140", "28125")}
+
+    def test_승계표_동기화는_멱등이다(self, db):
+        from apt_engine.repo import apt as repo
+        with get_conn(db) as conn:
+            repo.sync_regions(conn)
+            repo.sync_regions(conn)
+            n = conn.execute("SELECT COUNT(*) FROM region_lineage").fetchone()[0]
+        assert n == len(regions.LINEAGE)
 
 
 class TestValidation:
