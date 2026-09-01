@@ -1,0 +1,58 @@
+# ═══════════════════════════════════════════════════════════════════════
+# 내국인에게도 적용되는 아파트 토지거래허가구역 (ALL_BUYERS)
+# ═══════════════════════════════════════════════════════════════════════
+#
+# ⚠ 이 파일은 rules/permit_foreign.csv 와 **완전히 다른 레이어**다.
+#   저기는 외국인만(FOREIGN_ONLY), 여기는 내국인·외국인 모두(ALL_BUYERS).
+#   섞으면 내국인이 인천 아파트를 못 사거나, 외국인 규칙이 서울 전체에
+#   걸리는 사고가 난다.
+#
+# ⚠ 이것은 **광역(시·구 단위) 아파트 지정**이다. 재건축·재개발·
+#   신속통합기획·모아타운 등 **필지 단위** 지정은 별도 레이어이고
+#   아직 수집하지 않았다 (permit_coverage 의 PARCEL_SPECIFIC 참고).
+#
+# 허가 대상: 주거지역 토지지분 6㎡ **초과** (6㎡ 이하는 대상 아님)
+# 실거주의무: 24개월 → 비거주 투자는 BLOCK
+#
+# lawd_cd 는 전부 region 표에서 조회한 값이다. 지어낸 코드가 없다.
+rule_id,lawd_cd,zone_group,target_scope,buyer_scope,property_scope,effective_from,effective_to,residence_duty_months,jeonse_succession_allowed,residential_threshold_sqm,status,source_name,source_url,last_verified,note
+LPZ_2025_SEOUL_JONGNO,11110,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,서울 종로구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_SEOUL_JUNG,11140,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,서울 중구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_SEOUL_YONGSAN,11170,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,서울 용산구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_SEOUL_SEONGDONG,11200,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,서울 성동구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_SEOUL_GWANGJIN,11215,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,서울 광진구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_SEOUL_DONGDAEMUN,11230,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,서울 동대문구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_SEOUL_JUNGNANG,11260,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,서울 중랑구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_SEOUL_SEONGBUK,11290,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,서울 성북구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_SEOUL_GANGBUK,11305,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,서울 강북구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_SEOUL_DOBONG,11320,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,서울 도봉구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_SEOUL_NOWON,11350,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,서울 노원구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_SEOUL_EUNPYEONG,11380,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,서울 은평구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_SEOUL_SEODAEMUN,11410,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,서울 서대문구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_SEOUL_MAPO,11440,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,서울 마포구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_SEOUL_YANGCHEON,11470,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,서울 양천구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_SEOUL_GANGSEO,11500,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,서울 강서구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_SEOUL_GURO,11530,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,서울 구로구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_SEOUL_GEUMCHEON,11545,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,서울 금천구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_SEOUL_YEONGDEUNGPO,11560,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,서울 영등포구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_SEOUL_DONGJAK,11590,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,서울 동작구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_SEOUL_GWANAK,11620,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,서울 관악구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_SEOUL_SEOCHO,11650,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,서울 서초구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_SEOUL_GANGNAM,11680,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,서울 강남구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_SEOUL_SONGPA,11710,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,서울 송파구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_SEOUL_GANGDONG,11740,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,서울 강동구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_GYEONGGI_GWACHEON,41290,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,과천시 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_GYEONGGI_GWANGMYEONG,41210,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,광명시 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_GYEONGGI_SEONGNAM_BUNDANG,41135,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,성남시 분당구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_GYEONGGI_SEONGNAM_SUJEONG,41131,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,성남시 수정구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_GYEONGGI_SEONGNAM_JUNGWON,41133,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,성남시 중원구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_GYEONGGI_SUWON_YEONGTONG,41117,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,수원시 영통구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_GYEONGGI_SUWON_JANGAN,41111,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,수원시 장안구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_GYEONGGI_SUWON_PALDAL,41115,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,수원시 팔달구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_GYEONGGI_ANYANG_DONGAN,41173,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,안양시 동안구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_GYEONGGI_YONGIN_SUJI,41465,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,용인시 수지구 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_GYEONGGI_UIWANG,41430,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,의왕시 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2025_GYEONGGI_HANAM,41450,2025_10_15,전체,ALL_BUYERS,APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING,2025-10-20,2026-12-31,24,0,6,ENACTED,국토교통부 2025 10·15 대책,https://www.korea.kr/news/policyNewsView.do?newsId=148950973,2026-09-01,하남시 · 아파트 및 동일단지에 아파트 1개동 이상 포함된 연립·다세대
+LPZ_2026_GYEONGGI_YONGIN_GIHEUNG,41463,2026_GG_ADD,전체,ALL_BUYERS,APARTMENT_ONLY,2026-07-05,2027-12-31,24,0,6,ENACTED,경기도 2026 추가지정 공고,https://gnews.gg.go.kr/briefing/brief_gongbo_view.do?BS_CODE=S017&number=70759,2026-09-01,용인시 기흥구 · 아파트만
+LPZ_2026_GYEONGGI_HWASEONG_DONGTAN,41597,2026_GG_ADD,전체,ALL_BUYERS,APARTMENT_ONLY,2026-07-05,2027-12-31,24,0,6,ENACTED,경기도 2026 추가지정 공고,https://gnews.gg.go.kr/briefing/brief_gongbo_view.do?BS_CODE=S017&number=70759,2026-09-01,화성시 동탄구 · 아파트만
+LPZ_2026_GYEONGGI_GURI,41310,2026_GG_ADD,전체,ALL_BUYERS,APARTMENT_ONLY,2026-07-05,2027-12-31,24,0,6,ENACTED,경기도 2026 추가지정 공고,https://gnews.gg.go.kr/briefing/brief_gongbo_view.do?BS_CODE=S017&number=70759,2026-09-01,구리시 · 아파트만

@@ -1,0 +1,217 @@
+{# ═══════════════════════════════════════════════════════════════════════
+   공통 매크로 — 신뢰도 표시(§5)와 점수 표시(§6)
+
+   이 파일의 목적은 "모든 숫자가 같은 규칙으로 나오게" 하는 것이다.
+   화면마다 다르게 쓰면 어디는 출처가 있고 어디는 없는 상태가 된다.
+   ═══════════════════════════════════════════════════════════════════════ #}
+
+{# ── 데이터 등급 (§5) ──────────────────────────────────────────────────
+   실거래 · 호가 · 추정을 절대 하나의 가격처럼 섞지 않는다.
+   색과 라벨 둘 다로 구분한다. #}
+{% macro grade(kind) %}
+  {%- set g = {
+    'CONFIRMED': ('confirmed', '실거래', '실제로 체결된 거래입니다'),
+    'LISTING':   ('listing',   '호가',   '파는 사람이 부르는 값입니다. 실제 체결가와 다릅니다'),
+    'ESTIMATED': ('estimated', '추정',   '우리가 계산한 값입니다. 실측이 아닙니다'),
+    'SCENARIO':  ('estimated', '시나리오', '가정을 넣어 만든 값입니다'),
+    'UNKNOWN':   ('unknown',   '확인 불가', '값을 구하지 못했습니다. 0 이 아닙니다'),
+  }.get(kind|upper, ('unknown', '확인 불가', '')) -%}
+  <span class="grade grade--{{ g[0] }}" title="{{ g[2] }}">{{ g[1] }}</span>
+{%- endmacro %}
+
+{# ── 값 하나 — 없으면 '확인 불가' 로 나온다. 절대 0 이나 빈칸이 아니다 #}
+{% macro value(v, unit='', kind=None, reason=None) %}
+  {%- if v is none -%}
+    <span class="grade grade--unknown"
+          title="{{ reason or '값을 구하지 못했습니다' }}">확인 불가</span>
+  {%- else -%}
+    <span class="num">{{ v }}{{ unit }}</span>
+    {%- if kind %} {{ grade(kind) }}{% endif -%}
+  {%- endif -%}
+{% endmacro %}
+
+{# ── 상승/하락 — 색만 쓰지 않고 ▲▼ 를 CSS 가 붙인다 #}
+{% macro delta(v, unit='%') %}
+  {%- if v is none -%}
+    <span class="grade grade--unknown">확인 불가</span>
+  {%- else -%}
+    {%- set cls = 'up' if v > 0 else ('down' if v < 0 else 'flat') -%}
+    <span class="delta delta--{{ cls }}">{{ '%+.1f'|format(v) }}{{ unit }}</span>
+  {%- endif -%}
+{% endmacro %}
+
+{# ── 출처·기준일 (§5) — 모든 숫자 아래에 붙는다 #}
+{% macro provenance(source=None, as_of=None, grade_kind=None, stale=False,
+                    missing=None) %}
+<dl class="provenance">
+  <span class="provenance__item">
+    <dt>출처</dt><dd>{{ source or '확인 불가' }}</dd>
+  </span>
+  <span class="provenance__item">
+    <dt>기준일</dt>
+    <dd class="{{ 'stale' if stale }}">
+      {{ as_of or '확인 불가' }}{% if stale %} · 오래된 데이터{% endif %}
+    </dd>
+  </span>
+  {% if grade_kind %}
+    <span class="provenance__item"><dt>등급</dt><dd>{{ grade(grade_kind) }}</dd></span>
+  {% endif %}
+  {% if missing %}
+    <span class="provenance__item">
+      <dt>누락</dt><dd class="stale">{{ missing|join(' · ') }}</dd>
+    </span>
+  {% endif %}
+</dl>
+{% endmacro %}
+
+{# ── 점수 셋 (§6) — 종합점수만 크게 보여주지 않는다 #}
+{% macro score_set(alpha, risk, confidence) %}
+<div class="score-set">
+  <div class="score-cell score-cell--alpha">
+    <span class="score-cell__label">기대수익 점수</span>
+    <span class="score-cell__value">
+      {{ '%.0f'|format(alpha) if alpha is not none else '—' }}
+    </span>
+  </div>
+  <div class="score-cell score-cell--risk">
+    <span class="score-cell__label">위험</span>
+    <span class="score-cell__value">
+      {{ '%.0f'|format(risk) if risk is not none else '—' }}
+    </span>
+  </div>
+  <div class="score-cell score-cell--conf">
+    <span class="score-cell__label">근거 충분도</span>
+    <span class="score-cell__value">
+      {{ '%.0f'|format(confidence) if confidence is not none else '—' }}
+    </span>
+  </div>
+</div>
+{% endmacro %}
+
+{# ── 근거 펼치기 (§6) — 전문가 모드에서만 열려 있다 #}
+{% macro evidence(title, open=false) %}
+<details class="evidence" {{ 'open' if open }}>
+  <summary>{{ title }}</summary>
+  <div class="evidence__body">{{ caller() }}</div>
+</details>
+{% endmacro %}
+
+{# ── 빈 상태 (§7) — '결과 없음' 만 띄우지 않는다 #}
+{% macro empty_state(icon, title, body, reasons=None, actions=None) %}
+<div class="state">
+  <span class="state__icon" aria-hidden="true">{{ icon }}</span>
+  <h2 class="state__title">{{ title }}</h2>
+  <p class="state__body">{{ body }}</p>
+  {% if reasons %}
+    <ul class="reasons">
+      {% for r in reasons %}<li>{{ r|safe }}</li>{% endfor %}
+    </ul>
+  {% endif %}
+  {% if actions %}
+    <div class="state__actions">
+      {% for href, label in actions %}
+        <a class="cds--btn cds--btn--tertiary" href="{{ href }}">{{ label }}</a>
+      {% endfor %}
+    </div>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{# ── 금액 (§5) — 큰 숫자는 '억' 으로 읽고, 정확한 값은 그 아래 ────────
+   `900,000,000원` 은 자릿수를 세어야 읽힌다. 사람은 "9억" 으로 읽는다.
+   그렇다고 억만 보여주면 반올림된 값이 유일한 값이 되므로, 정확한 원
+   단위를 항상 같이 남긴다. 둘 다 같은 계산 결과다. #}
+{% macro money(won, over=false, reason=None) %}
+  {%- if won is none -%}
+    <span class="grade grade--unknown"
+          title="{{ reason or '값을 구하지 못했습니다' }}">확인 불가</span>
+  {%- else -%}
+    <span class="money">
+      <span class="money__main num">{{ won | eok }}</span>
+      {%- if over %}<span class="money__over">이상</span>{% endif %}
+      <span class="money__exact num">{{ won | won }}</span>
+    </span>
+  {%- endif -%}
+{% endmacro %}
+
+{# ── 추이 차트 (§5) ────────────────────────────────────────────────────
+   SVG 를 직접 그린다. 차트 라이브러리를 싣지 않는 이유는 두 가지다 —
+   선 두 개를 그리려고 100KB 를 받을 이유가 없고, 이 앱은 종인님 PC 에서
+   로컬로 도는데 CDN 이 막히면 차트 자리가 빈칸으로 남는다.
+
+   ⚠ y축을 0 에서 시작하지 않는다. 부동산 가격은 0 근처로 안 가서
+     0 부터 그리면 변화가 안 보인다. **대신 축 눈금에 실제 값을 적어**
+     기울기만 보고 오해하지 않게 한다. #}
+{% macro trend_chart(sale, jeonse, height=170) %}
+  {%- set pts = (sale or []) + (jeonse or []) -%}
+  {%- if not sale -%}
+    <p class="small muted" style="margin:0">추이를 그릴 스냅샷이 없습니다.</p>
+  {%- else -%}
+    {%- set vals = pts | map(attribute=1) | list -%}
+    {%- set lo = vals | min -%}
+    {%- set hi = vals | max -%}
+    {%- set span = (hi - lo) if hi > lo else 1 -%}
+    {%- set w = 320 -%}
+    {%- set h = height -%}
+    {%- set pad = 26 -%}
+    <div class="chart__legend">
+      <span class="chart__key chart__key--sale">실거래가</span>
+      {% if jeonse %}<span class="chart__key chart__key--jeonse">전세가</span>{% endif %}
+    </div>
+    <svg class="chart" viewBox="0 0 {{ w }} {{ h }}" role="img"
+         aria-label="실거래가와 전세가 추이. {{ sale[0][0] }}부터 {{ sale[-1][0] }}까지,
+                     실거래가 {{ sale[0][1] | eok }}에서 {{ sale[-1][1] | eok }}로 변화">
+      {# 가로 눈금 3개 — 값을 적어야 기울기만 보고 오해하지 않는다 #}
+      {% for f in [0, 0.5, 1.0] %}
+        {% set y = pad + (1 - f) * (h - pad * 2) %}
+        <line x1="0" y1="{{ y }}" x2="{{ w }}" y2="{{ y }}"
+              stroke="#e0e4e9" stroke-width="1"/>
+        <text x="0" y="{{ y - 4 }}" font-size="9" fill="#6b7684">
+          {{ (lo + span * f) | round(0) | int | eok }}
+        </text>
+      {% endfor %}
+      {% for series, colour in [(sale, '#c62828'), (jeonse, '#1565c0')] %}
+        {% if series and series | length > 1 %}
+          {%- set n = series | length -%}
+          <polyline fill="none" stroke="{{ colour }}" stroke-width="2"
+                    stroke-linejoin="round" stroke-linecap="round"
+                    points="{% for ym, v in series %}{{ (loop.index0 / (n - 1) * w) | round(1) }},{{ (pad + (1 - (v - lo) / span) * (h - pad * 2)) | round(1) }} {% endfor %}"/>
+        {% endif %}
+      {% endfor %}
+      <text x="0" y="{{ h - 4 }}" font-size="9" fill="#6b7684">{{ sale[0][0] }}</text>
+      <text x="{{ w }}" y="{{ h - 4 }}" font-size="9" fill="#6b7684"
+            text-anchor="end">{{ sale[-1][0] }}</text>
+    </svg>
+  {%- endif -%}
+{% endmacro %}
+
+
+{# ── 등급 한 칸 (순위표) ─────────────────────────────────────────── #}
+{% macro rate(r, pill=false) %}
+  {%- if r.level is none -%}
+    <span class="grade grade--unknown"
+          title="이 모델을 계산할 데이터가 부족합니다">확인 불가</span>
+  {%- elif pill -%}
+    <span class="rate-pill rate-pill--{{ r.level }}"
+          title="{{ r.label }} 모델 점수 {{ '%.2f'|format(r.value) }}">{{ r.text }}</span>
+  {%- else -%}
+    <span class="rate rate--{{ r.level }}"
+          title="{{ r.label }} 모델 점수 {{ '%.2f'|format(r.value) }}">{{ r.text }}</span>
+  {%- endif -%}
+{% endmacro %}
+
+
+{# ── 신뢰도 막대 ──────────────────────────────────────────────────── #}
+{% macro meter(v, of=100) %}
+  {%- if v is none -%}
+    <span class="grade grade--unknown">확인 불가</span>
+  {%- else -%}
+    {%- set pct = ((v / of) * 100) | round(0) | int -%}
+    <span class="meter">
+      <span class="meter__bar" role="img" aria-label="신뢰도 {{ v | round(0) | int }}점">
+        <span class="meter__fill" style="width:{{ [[pct, 0] | max, 100] | min }}%"></span>
+      </span>
+      <span class="meter__text">{{ v | round(0) | int }}/{{ of }}</span>
+    </span>
+  {%- endif -%}
+{% endmacro %}

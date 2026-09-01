@@ -1,0 +1,14 @@
+.git
+.venv
+node_modules
+tests
+docs
+docs_dev
+scripts
+*.db
+*.db-wal
+*.db-shm
+__pycache__
+.pytest_cache
+styles
+package*.json

@@ -167,6 +167,7 @@ def build(conn: sqlite3.Connection, *, capital: SelfCapital, as_of: str | date,
           mortgage_term_years: int = 30,
           repayment_type: str = "원리금균등",
           house_count: int = 1, resided_years: int | None = None,
+          agent_vat_registered: bool | None = None,
           region: str | None = None, lawd_cd: str | None = None,
           allow_unverified: bool = False) -> Timeline:
     """보유기간 현금흐름 한 벌.
@@ -252,7 +253,8 @@ def build(conn: sqlite3.Connection, *, capital: SelfCapital, as_of: str | date,
         sale_price = units.as_won(sale_price)
         fee, vat, ev = cost_mod.brokerage(conn, price=sale_price, as_of=day,
                                           region=region,
-                                          allow_unverified=allow_unverified)
+                                          allow_unverified=allow_unverified,
+                                          agent_vat_registered=agent_vat_registered)
         evidence.extend(ev)
         exit_items += [cost_mod.CostItem("매도 중개보수", fee.amount, fee.verification,
                                          fee.formula, fee.note),

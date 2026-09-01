@@ -108,11 +108,23 @@ def vat_rate(conn: sqlite3.Connection, *, as_of: str | date,
 
 def brokerage(conn: sqlite3.Connection, *, price: int, as_of: str | date,
               region: str | None = None, negotiated_rate: float | None = None,
+              agent_vat_registered: bool | None = None,
               allow_unverified: bool = False) -> tuple[CostItem, CostItem,
                                                        list[Evidence]]:
     """중개보수와 그 부가가치세. (보수, 부가세, 근거).
 
     negotiated_rate 를 주면 협의 요율로 계산하되, 법정 상한을 넘으면 상한으로 깎는다.
+
+    `agent_vat_registered` — 그 중개사무소가 **일반과세자인가**.
+
+        True   부가세 10% 를 계산한다
+        False  0원 (간이과세·면세 사업자는 따로 받지 않는다)
+        None   **확인 불가.** 자동으로 붙이지 않는다.
+
+    기본값이 None 인 이유: 간이과세 중개사무소는 부가세를 따로 받지 않는데,
+    확인도 안 하고 10% 를 얹으면 **실제로 안 나가는 돈을 필요 현금에 넣는
+    것**이다. 반대로 일반과세인데 안 얹으면 모자란다. 어느 쪽이든 틀리므로
+    모르면 모른다고 둔다.
     """
     price = units.as_won(price)
     day = rules.as_ymd(as_of)
@@ -152,6 +164,21 @@ def brokerage(conn: sqlite3.Connection, *, price: int, as_of: str | date,
                        "이 규칙은 부가세 별도 항목이 아님")
         return fee, vat, evidence
 
+    if agent_vat_registered is False:
+        vat = CostItem("중개보수 부가세", 0, rules.VERIFIED,
+                       "간이과세·면세 사업자",
+                       "이 중개사무소는 부가세를 따로 받지 않습니다")
+        return fee, vat, evidence
+
+    if agent_vat_registered is None:
+        # 확인 안 된 것을 붙이지 않는다. 0 으로도 두지 않는다 —
+        # 일반과세면 실제로 나가는 돈이라 0 은 과소계상이다.
+        vat = CostItem("중개보수 부가세", None, rules.UNKNOWN,
+                       "중개업자 과세유형 미확인",
+                       "일반과세면 10%가 붙고 간이과세면 안 붙습니다. "
+                       "확인 전에는 어느 쪽으로도 계산하지 않습니다")
+        return fee, vat, evidence
+
     rate, ev = vat_rate(conn, as_of=day, allow_unverified=allow_unverified)
     if rate is None:
         vat = CostItem("중개보수 부가세", None, rules.UNKNOWN, "부가가치세율 규칙 미입력",
@@ -162,7 +189,7 @@ def brokerage(conn: sqlite3.Connection, *, price: int, as_of: str | date,
         vat = CostItem("중개보수 부가세", int(units.won_round(amount * rate)),
                        rules.VERIFIED,
                        f"{units.fmt_won(amount)} × {units.fmt_pct(rate)}",
-                       "간이과세 중개사무소는 부가세를 따로 받지 않을 수 있습니다")
+                       "일반과세 중개사무소로 확인됨")
     return fee, vat, evidence
 
 

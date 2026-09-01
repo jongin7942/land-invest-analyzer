@@ -1,0 +1,623 @@
+// 화면 조각 — 알림 · 순위 배지 · 지표 · 입력 폼 · 항목표
+//
+// Carbon 컴포넌트로 되는 것은 Carbon 을 쓰고(버튼·입력·탭·데이터표),
+// 여기 있는 것은 Carbon 에 대응물이 없거나 우리 도메인 전용인 것들이다.
+@use '../brand' as brand;
+@use '@carbon/styles/scss/theme' as *;
+@use '@carbon/styles/scss/spacing' as *;
+@use '@carbon/styles/scss/type' as *;
+@use '@carbon/styles/scss/breakpoint' as *;
+
+// ── 알림 ─────────────────────────────────────────────────────────────
+//
+// Carbon inline notification 과 같은 역할이지만 마크업이 훨씬 단순하다.
+// 왼쪽 굵은 선 하나로 종류를 구분한다 — 그림자·그라데이션 없음.
+.notice {
+  @include type-style('body-compact-01');
+  border: 1px solid $border-subtle-01;
+  border-left: 3px solid brand.$brand-700;
+  border-radius: brand.$radius-sm;
+  background: brand.$brand-100;
+  padding: $spacing-04 $spacing-05;
+  margin-bottom: $spacing-05;
+
+  p:last-child { margin-bottom: 0; }
+  a { color: inherit; }
+}
+.notice--warn   { border-left-color: brand.$warn-500;   background: brand.$warn-100; }
+.notice--danger { border-left-color: brand.$danger-500; background: brand.$danger-100; }
+.notice--ok     { border-left-color: brand.$ok-500;     background: brand.$ok-100; }
+.notice__title { font-weight: 600; display: block; margin-bottom: 2px; }
+
+// ── 순위 배지 ────────────────────────────────────────────────────────
+.rank {
+  @include type-style('label-01');
+  border-radius: 6px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid brand.$gray-300;
+  color: $text-secondary;
+  background: $layer-02;
+}
+.rank--top {
+  background: brand.$brand-700;
+  border-color: brand.$brand-700;
+  color: brand.$gray-000;
+}
+
+// ── 작은 라벨칩 ──────────────────────────────────────────────────────
+.chip {
+  @include type-style('label-01');
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px $spacing-02;
+  border: 1px solid brand.$gray-300;
+  background: $layer-02;
+  color: $text-secondary;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+.chip--warn { border-color: rgba(138,90,0,.4); background: brand.$warn-100; color: brand.$warn-500; }
+.chip--ok   { border-color: rgba(27,107,69,.4); background: brand.$ok-100;   color: brand.$ok-500; }
+
+// ── 지표 한 칸 ───────────────────────────────────────────────────────
+.metric__label {
+  @include type-style('label-01');
+  color: $text-secondary;
+  display: block;
+  margin-bottom: 2px;
+}
+.metric__value {
+  @include type-style('productive-heading-03');
+  font-variant-numeric: tabular-nums;
+  display: block;
+}
+.metric__note {
+  @include type-style('label-01');
+  color: $text-helper;
+  display: block;
+  margin-top: $spacing-02;
+}
+
+// ── 3열 / 2열 ────────────────────────────────────────────────────────
+.grid-3, .grid-2 {
+  display: grid;
+  gap: $spacing-05;
+}
+.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+@include breakpoint-down(md) {
+  .grid-3, .grid-2 { grid-template-columns: 1fr; }
+}
+
+// ── 결과 카드 ────────────────────────────────────────────────────────
+.result {
+  background: $layer-01;
+  border: 1px solid $border-subtle-01;
+  border-radius: brand.$radius;
+  box-shadow: brand.$shadow-card;
+  padding: $spacing-06;
+  margin-bottom: $spacing-05;
+}
+.result__head {
+  display: flex;
+  gap: $spacing-04;
+  align-items: baseline;
+  flex-wrap: wrap;
+  margin-bottom: $spacing-05;
+}
+.result__name { @include type-style('productive-heading-03'); }
+.result__meta { @include type-style('label-01'); color: $text-secondary; }
+.result__scores { margin-left: auto; display: flex; gap: $spacing-03; align-items: center; }
+
+// ── 이유 목록 ────────────────────────────────────────────────────────
+.bullets {
+  @include type-style('body-compact-01');
+  margin: 0;
+  padding-left: $spacing-05;
+}
+.bullets li { margin-bottom: $spacing-02; }
+.bullets .muted { color: $text-helper; }
+
+// ── 입력 폼 ──────────────────────────────────────────────────────────
+.form {
+  background: $layer-01;
+  border: 1px solid $border-subtle-01;
+  border-radius: brand.$radius;
+  box-shadow: brand.$shadow-card;
+  padding: $spacing-06;
+  margin-bottom: $spacing-06;
+}
+.form__fields {
+  display: flex;
+  gap: $spacing-05;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+.field { min-width: 140px; }
+.field--wide { min-width: 220px; flex: 1; }
+.field__label {
+  @include type-style('label-01');
+  color: $text-secondary;
+  display: block;
+  margin-bottom: $spacing-02;
+}
+.field__hint {
+  @include type-style('label-01');
+  color: $text-helper;
+  display: block;
+  margin-top: $spacing-02;
+}
+
+@include breakpoint-down(md) {
+  .form__fields { display: block; }
+  .field, .field--wide { min-width: 0; margin-bottom: $spacing-05; }
+  .field .cds--text-input, .field .cds--select-input { width: 100%; }
+}
+
+// ── 항목표 (이름/값 두 열) ───────────────────────────────────────────
+.kv {
+  width: 100%;
+  border-collapse: collapse;
+  @include type-style('body-compact-01');
+
+  th, td {
+    padding: $spacing-03 $spacing-04;
+    border-bottom: 1px solid $border-subtle-01;
+    vertical-align: top;
+    text-align: left;
+  }
+  th {
+    font-weight: 600;
+    background: $layer-02;
+    width: 200px;
+    white-space: nowrap;
+  }
+  tr:last-child th, tr:last-child td { border-bottom: 0; }
+}
+
+@include breakpoint-down(md) {
+  .kv th, .kv td { display: block; width: auto; }
+  .kv th { border-bottom: 0; }
+}
+
+// ── 페이지 하단 이동 ─────────────────────────────────────────────────
+.pager { margin-top: $spacing-06; }
+
+// ── 표 가로 스크롤 ───────────────────────────────────────────────────
+//
+// 표가 넘칠 때 page body 가 가로로 밀리면 안 된다. 표 안에서만 스크롤한다.
+.table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  // ⚠ overflow-x:auto 만으로는 부족하다. 스크롤 컨테이너의 넘침 영역이
+  //   조상까지 전파돼서, 표는 안에서 잘 잘리는데 **페이지 전체가 가로로
+  //   스크롤된다** (오른쪽에 빈 여백만 생긴다). contain:paint 로 여기서
+  //   끊는다 — 안쪽이 이 상자 밖으로 그려지지 않는다고 못박는 것이라
+  //   의미도 정확히 그 뜻이다.
+  contain: paint;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid $border-subtle-01;
+  border-radius: brand.$radius;
+  box-shadow: brand.$shadow-card;
+  background: $layer-01;
+}
+.table-scroll .cds--data-table { min-width: 100%; }
+
+// 모바일에서 열이 짜부라지면 글자가 한 자씩 끊겨 읽을 수 없고, 오른쪽 열은
+// 아예 잘려 나간다. 최소 폭을 줘서 **짜부라지는 대신 가로로 스크롤**하게 한다.
+// 넘치는 것은 이 상자 안이므로 페이지 본문은 밀리지 않는다.
+@include breakpoint-down(md) {
+  .table-scroll .cds--data-table { min-width: 620px; }
+}
+
+// Carbon data-table 이 기본으로 주는 것 위에 숫자 정렬만 얹는다
+.cds--data-table td.num, .cds--data-table th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+// ── 체크박스 ─────────────────────────────────────────────────────────
+//
+// Carbon 1.x 의 checkbox SCSS 는 상자 그림을 웹컴포넌트 쪽에 두고 있어서
+// 순수 HTML 로는 네모가 안 그려진다. 네이티브 체크박스를 그대로 쓰고
+// 라벨 타이포만 Carbon 것을 얹는다 — 네이티브가 접근성·조작성이 더 낫다.
+.cds--checkbox-wrapper {
+  display: flex;
+  align-items: center;
+  gap: $spacing-03;
+  margin-bottom: $spacing-02;
+}
+.cds--checkbox { width: 16px; height: 16px; accent-color: brand.$brand-700; margin: 0; }
+.cds--checkbox-label { cursor: pointer; }
+.cds--checkbox-label-text { @include type-style('body-compact-01'); }
+
+// ── 금액 ─────────────────────────────────────────────────────────────
+//
+// 큰 숫자를 원 단위로만 보여주면 자릿수를 세어야 읽힌다. 사람은
+// "9억" 으로 읽고 "900,000,000" 으로 확인한다. 둘 다 같은 값이므로
+// 읽는 값과 확인하는 값을 나란히 둔다 — 억만 남기면 반올림된 값이
+// 유일한 값이 되어 버린다.
+.money { display: inline-flex; align-items: baseline; gap: $spacing-03; }
+.money__main {
+  @include type-style('body-compact-01');
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+// 큰 크기는 **그 화면의 답**일 때만. 표 안에서 크게 키우면 그 칸이
+// 가장 중요한 값처럼 읽히는데, 표에서는 어느 칸도 그렇지 않다.
+.metric__value .money__main {
+  @include type-style('productive-heading-04');
+  font-weight: 700;
+}
+.money__over { @include type-style('body-01'); color: brand.$warn-500; font-weight: 600; }
+.money__exact { @include type-style('label-01'); color: $text-helper; }
+
+@include breakpoint-down(md) {
+  .money { flex-direction: column; align-items: flex-start; gap: 0; }
+}
+
+// ── 조건 요약 줄 ─────────────────────────────────────────────────────
+//
+// "내가 무슨 조건으로 본 결과인가" 를 결과 바로 위에 둔다. 조건을 폼에만
+// 두면 스크롤을 내린 뒤에는 무슨 조건이었는지 잊는다.
+.terms {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex-wrap: wrap;
+  background: $layer-01;
+  border: 1px solid $border-subtle-01;
+  border-radius: brand.$radius;
+  box-shadow: brand.$shadow-card;
+  padding: $spacing-05 $spacing-06;
+  margin-bottom: $spacing-06;
+}
+.terms__title {
+  @include type-style('productive-heading-02');
+  flex: 0 0 100%;
+  margin-bottom: $spacing-05;
+}
+.terms__item {
+  display: flex;
+  align-items: center;
+  gap: $spacing-04;
+  padding-right: $spacing-06;
+  margin-right: $spacing-06;
+  border-right: 1px solid $border-subtle-01;
+
+  &:last-of-type { border-right: 0; }
+}
+.terms__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px; height: 36px;
+  flex: 0 0 36px;
+  border-radius: 999px;
+  background: brand.$brand-100;
+  color: brand.$brand-700;
+}
+.terms__label { @include type-style('label-01'); color: $text-secondary; display: block; }
+.terms__value {
+  @include type-style('productive-heading-01');
+  display: block;
+  font-variant-numeric: tabular-nums;
+}
+.terms__action { margin-left: auto; }
+
+@include breakpoint-down(md) {
+  .terms { display: grid; grid-template-columns: 1fr 1fr; gap: $spacing-05; }
+  .terms__item { border-right: 0; padding: 0; margin: 0; }
+  .terms__action { grid-column: 1 / -1; margin-left: 0; }
+}
+
+// ── 요약 지표 카드 ───────────────────────────────────────────────────
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: $spacing-05;
+  margin-bottom: $spacing-06;
+}
+.stat {
+  display: flex;
+  align-items: flex-start;
+  gap: $spacing-04;
+  background: $layer-01;
+  border: 1px solid $border-subtle-01;
+  border-radius: brand.$radius;
+  box-shadow: brand.$shadow-card;
+  padding: $spacing-05 $spacing-06;
+}
+.stat__body { min-width: 0; flex: 1; }
+.stat__label { @include type-style('label-01'); color: $text-secondary; display: block; }
+.stat__value {
+  @include type-style('productive-heading-03');
+  font-variant-numeric: tabular-nums;
+  display: block;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stat__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px; height: 38px;
+  flex: 0 0 38px;
+  border-radius: 999px;
+  background: brand.$gray-100;
+  color: $text-secondary;
+}
+.stat--good .stat__icon { background: brand.$ok-100;   color: brand.$ok-500; }
+.stat--rise .stat__icon { background: brand.$rise-100; color: brand.$rise-500; }
+.stat--rise .stat__value { color: brand.$rise-500; }
+.stat--warn .stat__icon { background: brand.$warn-100; color: brand.$warn-500; }
+.stat--brand .stat__icon { background: brand.$brand-100; color: brand.$brand-700; }
+
+@include breakpoint-down(lg) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@include breakpoint-down(sm) { .stats { grid-template-columns: minmax(0, 1fr); } }
+
+// ── 본문 + 오른쪽 패널 ───────────────────────────────────────────────
+.with-rail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: $spacing-06;
+  align-items: start;
+}
+// 그리드 칸은 기본이 min-width:auto 라 안쪽 표가 칸을 밀어낸다.
+// 이걸 안 잡으면 표의 가로 스크롤이 안 걸리고 페이지 전체가 밀린다.
+.with-rail > * { min-width: 0; }
+.rail { position: sticky; top: calc(60px + 1.5rem); display: grid; gap: $spacing-05; }
+
+@include breakpoint-down(xlg) {
+  .with-rail { grid-template-columns: 1fr; }
+  .rail { position: static; }
+}
+
+// ── 순위표 ───────────────────────────────────────────────────────────
+.ranktable {
+  width: 100%;
+  // 열이 10개다. 폭이 모자라면 짜부라뜨리지 말고 **가로로 스크롤**한다 —
+  // 짜부라지면 '8.07억 이상' 이 두 줄로 접히고 단지명이 다섯 줄이 된다.
+  min-width: 800px;
+  border-collapse: collapse;
+  @include type-style('body-compact-01');
+
+  // 열이 9개다. 좌우 여백을 크게 주면 마지막 열이 화면 밖으로 밀린다.
+  th, td {
+    padding: $spacing-04 $spacing-03;
+    border-bottom: 1px solid $border-subtle-01;
+    text-align: left;
+    vertical-align: middle;
+  }
+  // 첫 칸과 끝 칸만 바깥 여백을 준다
+  th:first-child, td:first-child { padding-left: $spacing-05; }
+  th:last-child, td:last-child { padding-right: $spacing-05; }
+  thead th {
+    @include type-style('label-01');
+    color: $text-secondary;
+    font-weight: 600;
+    background: $layer-02;
+    white-space: nowrap;
+  }
+  td.num, th.num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;   // '8.07억 이상' 이 두 줄로 접히면 안 된다
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr:hover td { background: $layer-02; }
+}
+// 1위 줄은 배경으로 표시한다 — 글씨를 키우면 표의 리듬이 깨진다
+.ranktable tbody tr.is-top td { background: brand.$brand-100; }
+.ranktable tbody tr.is-top:hover td { background: brand.$brand-200; }
+
+// 단지 칸 — 이름 한 줄, 위치 한 줄. 두 줄을 넘기지 않는다.
+// 넘치면 줄바꿈이 아니라 말줄임으로 자른다 (전체는 링크를 눌러 본다).
+.ranktable td:nth-child(2) { min-width: 168px; max-width: 220px; }
+.rank-name {
+  font-weight: 600;
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rank-region {
+  @include type-style('label-01');
+  color: $text-secondary;
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+// 등급 — 색만 쓰지 않는다. 말이 먼저고 색은 거들 뿐이다.
+.rate {
+  @include type-style('label-01');
+  font-weight: 600;
+  white-space: nowrap;
+}
+.rate--high { color: brand.$rise-500; }
+.rate--mid  { color: $text-secondary; }
+.rate--low  { color: brand.$fall-500; }
+.rate-pill {
+  @include type-style('label-01');
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 2px $spacing-03;
+  white-space: nowrap;
+  border: 1px solid;
+}
+.rate-pill--high { color: brand.$ok-500;   background: brand.$ok-100;   border-color: rgba(27,107,69,.3); }
+.rate-pill--mid  { color: $text-secondary; background: brand.$gray-100; border-color: brand.$gray-300; }
+.rate-pill--low  { color: brand.$warn-500; background: brand.$warn-100; border-color: rgba(138,90,0,.3); }
+
+// 신뢰도 막대 + 숫자
+// span 은 기본이 inline 이라 height 가 안 먹는다 — 막대가 사라진다
+.meter { display: inline-block; min-width: 62px; width: 62px; }
+.meter__bar {
+  display: block;
+  height: 6px;
+  border-radius: 999px;
+  background: brand.$gray-200;
+  overflow: hidden;
+}
+.meter__fill { display: block; height: 100%; border-radius: 999px; background: brand.$brand-700; }
+.meter__text {
+  @include type-style('label-01');
+  color: $text-secondary;
+  font-variant-numeric: tabular-nums;
+  display: block;
+  text-align: right;
+  margin-top: 2px;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px; height: 32px;
+  border-radius: brand.$radius-sm;
+  border: 1px solid $border-subtle-01;
+  color: $text-secondary;
+  text-decoration: none;
+
+  &:hover { background: $layer-02; color: brand.$brand-700; border-color: brand.$brand-300; }
+  &:focus-visible { outline: 2px solid brand.$brand-700; outline-offset: 1px; }
+}
+
+// 표 아래 줄 — 총 개수 / 페이지 이동
+.tablefoot {
+  display: flex;
+  align-items: center;
+  gap: $spacing-05;
+  padding: $spacing-05 $spacing-06;
+  border-top: 1px solid $border-subtle-01;
+  @include type-style('label-01');
+  color: $text-secondary;
+}
+.tablefoot__pages { margin-left: auto; display: flex; gap: $spacing-02; }
+.tablefoot__pages a, .tablefoot__pages span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px; height: 30px;
+  padding: 0 $spacing-03;
+  border: 1px solid $border-subtle-01;
+  border-radius: brand.$radius-sm;
+  text-decoration: none;
+  color: $text-secondary;
+  font-variant-numeric: tabular-nums;
+}
+.tablefoot__pages a:hover { background: $layer-02; }
+.tablefoot__pages [aria-current='page'] {
+  background: brand.$brand-700; color: #fff; border-color: brand.$brand-700; font-weight: 600;
+}
+
+// ── 오른쪽 패널 안쪽 ─────────────────────────────────────────────────
+.rail__section + .rail__section {
+  margin-top: $spacing-05;
+  padding-top: $spacing-05;
+  border-top: 1px solid $border-subtle-01;
+}
+.rail__label {
+  @include type-style('productive-heading-01');
+  margin: 0 0 $spacing-03;
+}
+.rail__big {
+  @include type-style('productive-heading-04');
+  color: brand.$brand-700;
+  font-variant-numeric: tabular-nums;
+}
+.rail__head { display: flex; align-items: baseline; gap: $spacing-04; flex-wrap: wrap; }
+.rail__aside { margin-left: auto; text-align: right; }
+
+// 추이 차트 (SVG 직접 그린다 — 라이브러리를 싣지 않는다)
+.chart { width: 100%; height: auto; display: block; }
+.chart__legend {
+  display: flex;
+  gap: $spacing-05;
+  @include type-style('label-01');
+  color: $text-secondary;
+  margin-bottom: $spacing-03;
+}
+.chart__key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  &::before {
+    content: '';
+    width: 14px; height: 3px;
+    border-radius: 2px;
+    background: currentColor;
+  }
+}
+.chart__key--sale { color: brand.$rise-500; }
+.chart__key--jeonse { color: brand.$fall-500; }
+
+.terms__input { width: 108px; margin-top: 2px; }
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+// ── 손가락으로 누르는 화면 ───────────────────────────────────────────
+//
+// 마우스 포인터는 1px 을 찍지만 손가락은 못 찍는다. iOS·안드로이드 모두
+// 최소 44px 을 권한다. 표 안의 링크가 25px, 체크박스가 16px 이었다.
+//
+// `pointer: coarse` 로 **터치 기기에서만** 키운다. 화면 폭으로 판단하면
+// 창을 좁힌 데스크톱까지 헐거워지고, 큰 태블릿은 손가락인데도 안 걸린다.
+@media (pointer: coarse) {
+  // 표 안의 링크 — 글자는 그대로 두고 위아래 여백으로 누를 곳을 넓힌다
+  .cds--data-table td a,
+  .ranktable td a:not(.icon-btn),
+  .compare td a {
+    display: inline-block;
+    padding: 10px 0;
+  }
+
+  // 문장 속 링크는 44px 로 만들 수 없다(줄 간격이 무너진다).
+  // 대신 좌우로 조금 넓혀 빗나감을 줄인다.
+  .bullets a, .reasons a, .field__hint a, p a { padding: 2px 3px; margin: 0 -3px; }
+
+  .mode-switch a { min-height: 44px; display: inline-flex; align-items: center; }
+
+  .cds--text-input, .cds--select-input { min-height: 44px; }
+
+  // 체크박스는 상자 자체를 키우고, 라벨 줄 전체를 누를 수 있게 한다
+  .cds--checkbox { width: 22px; height: 22px; }
+  .cds--checkbox-wrapper { min-height: 44px; }
+  .cds--checkbox-label { display: flex; align-items: center; min-height: 44px; }
+
+  .evidence > summary { min-height: 44px; display: flex; align-items: center; }
+
+  .icon-btn { width: 44px; height: 44px; }
+
+  .tablefoot__pages a, .tablefoot__pages span { min-width: 44px; height: 44px; }
+}
+
+// 폰에서 접는 열
+//
+// 표가 가로로 스크롤되면 **오른쪽 끝의 버튼을 아무도 못 찾는다.**
+// 검색 결과의 '비교에 담기' 가 그랬다 — 이 화면의 주 동작인데 화면
+// 밖에 있었다. 참고용 열(세대수·준공)을 접어서 동작을 화면 안으로 넣는다.
+// 접힌 값은 단지 상세화면에 그대로 있다.
+@include breakpoint-down(md) {
+  .col-optional { display: none; }
+  // 참고 열을 접었으니 남은 열은 짜부라뜨리지 말고 폭을 나눠 갖게 한다
+  .table-scroll .cds--data-table { min-width: 0; }
+}

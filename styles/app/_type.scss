@@ -1,0 +1,89 @@
+// ═══════════════════════════════════════════════════════════════════════
+// 읽기 편한 타이포 — Carbon 타입 토큰을 한글 기준으로 다시 잡는다
+// ═══════════════════════════════════════════════════════════════════════
+//
+// Carbon 의 productive 스케일은 **영문 UI 기준**이다. 그대로 쓰면
+// 한국어 화면에서 세 가지가 동시에 걸린다.
+//
+//   ① 너무 작다        body-compact-01 = 14px, label-01 = 12px.
+//                      한글은 같은 픽셀에서 라틴 문자보다 작아 보인다 —
+//                      가로획이 많아 자소가 뭉친다.
+//   ② 줄간격이 좁다    line-height 1.29. 한글은 상하 여백이 필요해서
+//                      1.6~1.8 이 아니면 줄이 서로 붙어 보인다.
+//   ③ 자간이 벌어진다  letter-spacing 0.16px 는 라틴 문자용 트래킹이다.
+//                      한글에 주면 글자가 흩어져 초점이 안 맞는 느낌이 난다.
+//
+// Carbon 은 타입을 `var(--cds-body-01-font-size, …)` 로 발행하므로
+// **토큰만 다시 정의하면** 200개 넘는 호출부를 안 건드리고 전부 바뀐다.
+// 여기 없는 것은 Carbon 기본값 그대로 간다.
+//
+// ⚠ 믹스인으로 두는 이유: Carbon 의 타입 모듈도 :root 에 같은 토큰을
+//   발행한다. 같은 특이도라 **나중에 나온 쪽이 이긴다.** @use 는 파일
+//   맨 위에만 올 수 있어서 이대로 두면 우리 값이 먼저 나와 진다.
+//   app.scss 맨 끝에서 include 해야 실제로 적용된다.
+
+@mixin korean-tokens {
+  // ── 본문 ───────────────────────────────────────────────────────────
+  --cds-body-01-font-size: 1rem;         // 14 → 16px
+  --cds-body-01-line-height: 1.75;       // 1.43 → 1.75
+  --cds-body-01-letter-spacing: 0;
+
+  --cds-body-02-font-size: 1.0625rem;    // 16 → 17px
+  --cds-body-02-line-height: 1.8;
+  --cds-body-02-letter-spacing: 0;
+
+  // 표·목록처럼 밀도가 필요한 곳. 그래도 줄간격은 넉넉히 준다.
+  --cds-body-compact-01-font-size: 0.9375rem;   // 14 → 15px
+  --cds-body-compact-01-line-height: 1.65;      // 1.29 → 1.65
+  --cds-body-compact-01-letter-spacing: 0;
+
+  --cds-body-compact-02-font-size: 1rem;
+  --cds-body-compact-02-line-height: 1.7;
+  --cds-body-compact-02-letter-spacing: 0;
+
+  // ── 라벨·보조 ──────────────────────────────────────────────────────
+  //
+  // 12px 은 '작은 글씨' 가 아니라 '안 읽는 글씨' 다. 출처·기준일·신뢰도가
+  // 전부 이 크기라, 읽히지 않으면 §5 를 지키는 의미가 없다.
+  --cds-label-01-font-size: 0.8125rem;   // 12 → 13px
+  --cds-label-01-line-height: 1.6;
+  --cds-label-01-letter-spacing: 0;
+
+  --cds-helper-text-01-font-size: 0.8125rem;
+  --cds-helper-text-01-line-height: 1.6;
+  --cds-helper-text-01-letter-spacing: 0;
+
+  --cds-code-01-font-size: 0.8125rem;
+  --cds-code-01-line-height: 1.7;
+  --cds-code-01-letter-spacing: 0;
+
+  // ── 제목 ───────────────────────────────────────────────────────────
+  //
+  // Carbon 은 큰 제목을 얇게(300~400) 쓴다. 라틴 문자에서는 우아한데
+  // 한글에서는 획이 가늘어져 흐릿하게 보인다. 굵기를 올리고 크기는
+  // 오히려 조금 줄여서 화면이 덜 소리치게 한다.
+  --cds-productive-heading-01-font-size: 0.9375rem;
+  --cds-productive-heading-01-line-height: 1.6;
+  --cds-productive-heading-01-font-weight: 600;
+  --cds-productive-heading-01-letter-spacing: 0;
+
+  --cds-productive-heading-02-font-size: 1.125rem;   // 18px
+  --cds-productive-heading-02-line-height: 1.55;
+  --cds-productive-heading-02-font-weight: 600;
+  --cds-productive-heading-02-letter-spacing: 0;
+
+  --cds-productive-heading-03-font-size: 1.25rem;    // 20px
+  --cds-productive-heading-03-line-height: 1.5;
+  --cds-productive-heading-03-font-weight: 600;
+  --cds-productive-heading-03-letter-spacing: 0;
+
+  --cds-productive-heading-04-font-size: 1.5rem;     // 28 → 24px
+  --cds-productive-heading-04-line-height: 1.45;
+  --cds-productive-heading-04-font-weight: 600;
+  --cds-productive-heading-04-letter-spacing: -0.01em;
+
+  --cds-productive-heading-05-font-size: 1.75rem;    // 32 → 28px
+  --cds-productive-heading-05-line-height: 1.4;
+  --cds-productive-heading-05-font-weight: 700;
+  --cds-productive-heading-05-letter-spacing: -0.015em;
+}

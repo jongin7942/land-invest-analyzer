@@ -1,0 +1,20 @@
+{
+  "name": "apt-invest-ui",
+  "private": true,
+  "version": "0.1.0",
+  "description": "아파트 투자분석 UI — IBM Carbon Design System 기반",
+  "scripts": {
+    "build:css": "sass --no-source-map --load-path=node_modules styles/app.scss static/css/app.css",
+    "build:css:watch": "sass --watch --load-path=node_modules styles/app.scss static/css/app.css",
+    "build:js": "esbuild styles/carbon-elements.js --bundle --minify --format=esm --outfile=static/js/carbon.js",
+    "build": "npm run build:css && npm run build:js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "sass": "^1.83.0"
+  },
+  "dependencies": {
+    "@carbon/styles": "^1.114.0",
+    "@carbon/web-components": "^2.62.0"
+  }
+}

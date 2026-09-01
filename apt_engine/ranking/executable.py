@@ -49,34 +49,78 @@ TEMPERATURE_NOTE = ("시장온도는 개별 후보 점수를 강제로 바꾸지
 FULL_COVERAGE_MIN = 0.80
 
 
+# §2 가격 5구간. 순위는 아파트가 아니라 **아파트 × 가격**에 붙는다.
+# 같은 단지도 3.6억이면 매우 매력적이고 4.1억이면 매력이 크게 떨어진다.
+STRONG_BUY = "STRONG BUY"      # 강력 매수
+FAIR_BUY = "BUY"               # 적정 매수
+COMPARE = "COMPARE"            # 비교 필요 — 다른 후보와 견줘 봐야 한다
+CHASE_RISK = "CHASE RISK"      # 추격매수 위험
+DO_NOT_BUY = "DO NOT BUY"      # 투자 제외
+
+BAND_LABEL = {
+    STRONG_BUY: "이 가격이면 적극적으로 살 만합니다",
+    FAIR_BUY: "무난한 가격입니다",
+    COMPARE: "같은 돈으로 살 수 있는 다른 후보와 비교해 보세요",
+    CHASE_RISK: "이 가격부터는 쫓아가서 사는 것입니다",
+    DO_NOT_BUY: "이 가격에는 사지 마세요",
+}
+
+
 @dataclass(frozen=True)
 class PriceBands:
-    """§39 — 하나의 점수가 아니라 가격대별 투자매력."""
+    """§2·§39 — 하나의 점수가 아니라 **가격의 함수**로서의 투자매력.
+
+    `InvestmentRank = f(ActualEntryPrice)` 를 이 객체가 들고 있다.
+    `verdict(price)` 에 실제 매수가를 넣으면 그 가격에서의 판정이 나온다.
+    """
     strong_buy: int | None
     fair: int | None
     do_not_buy: int | None
     current: int
     competitive_note: str = ""
+    compare: int | None = None      # §2 비교 필요 선
+    chase: int | None = None        # §2 추격매수 위험 선
 
     def verdict(self, price: int | None = None) -> str:
+        """이 **가격**에서의 판정. 단지가 아니라 가격에 붙는 판정이다."""
         p = price if price is not None else self.current
         if self.do_not_buy is not None and p >= self.do_not_buy:
-            return "DO NOT BUY"
+            return DO_NOT_BUY
         if self.strong_buy is not None and p <= self.strong_buy:
-            return "STRONG BUY"
+            return STRONG_BUY
         if self.fair is not None and p <= self.fair:
-            return "BUY"
+            return FAIR_BUY
+        if self.compare is not None and p <= self.compare:
+            return COMPARE
+        if self.chase is not None and p < self.do_not_buy:
+            return CHASE_RISK
         if self.do_not_buy is not None:
-            return "WAIT"
+            return CHASE_RISK
         return "확인 불가"
+
+    def attractiveness(self, price: int | None = None) -> float | None:
+        """같은 단지라도 가격이 오르면 매력이 줄어든다 (§2).
+
+        1.0(강력매수 선 이하) → 0.0(제외 선 이상) 사이로 떨어진다.
+        점수가 아니라 **가격에 따른 감쇠**라, 순위 계산에 그대로 곱한다.
+        """
+        if self.strong_buy is None or self.do_not_buy is None:
+            return None
+        p = price if price is not None else self.current
+        if p <= self.strong_buy:
+            return 1.0
+        if p >= self.do_not_buy:
+            return 0.0
+        span = self.do_not_buy - self.strong_buy
+        return max(0.0, min(1.0, 1.0 - (p - self.strong_buy) / span))
 
     @property
     def label(self) -> str:
         def f(v):
             return units.fmt_eok(v) if v is not None else "확인 불가"
-        return (f"≤{f(self.strong_buy)} STRONG BUY · "
-                f"≤{f(self.fair)} BUY · "
-                f"≥{f(self.do_not_buy)} DO NOT BUY  "
+        return (f"≤{f(self.strong_buy)} 강력매수 · ≤{f(self.fair)} 적정 · "
+                f"≤{f(self.compare)} 비교필요 · ≤{f(self.chase)} 추격주의 · "
+                f"≥{f(self.do_not_buy)} 제외  "
                 f"(현재 {units.fmt_eok(self.current)} → {self.verdict()})")
 
 
@@ -99,17 +143,22 @@ def price_bands(current_price: int, *, entry_position: float | None,
     unit = current_price / entry_position
     strong = int(unit * 0.15)
     fair = int(unit * 0.50)
+    compare = int(unit * 0.70)     # §2 비교 필요
+    chase = int(unit * 0.88)       # §2 추격매수 위험
     do_not = int(unit * 1.00)
 
     note = ""
     if alternatives_quality is not None:
         # 대안이 좋을수록 (0→1) 최대 5%까지 매수가를 낮춘다.
         shrink = 1.0 - 0.05 * max(0.0, min(1.0, alternatives_quality))
-        strong, fair, do_not = int(strong * shrink), int(fair * shrink), int(do_not * shrink)
+        strong, fair, compare, chase, do_not = (
+            int(strong * shrink), int(fair * shrink), int(compare * shrink),
+            int(chase * shrink), int(do_not * shrink))
         note = (f"같은 자기자본 대안의 질이 {alternatives_quality:.2f} 라 "
                 f"매수가를 {(1 - shrink):.1%} 낮췄습니다(§39 Competitive Buy Price)")
 
-    return PriceBands(strong, fair, do_not, current_price, note)
+    return PriceBands(strong, fair, do_not, current_price, note,
+                      compare=compare, chase=chase)
 
 
 @dataclass(frozen=True)
@@ -120,11 +169,21 @@ class Split:
     cash_rank: int | None = None
     temperature: str | None = None
     temperature_reason: str = ""
+    # §5 순수 투자매력 순위 — Gate 를 보지 않은 것. 연구·검증용이고
+    # 사용자 기본 화면에는 쓰지 않는다. 지우지 않는 이유는 두 가지다.
+    #   ① 규제가 풀렸을 때 다시 봐야 한다
+    #   ② Gate 가 좋은 후보를 너무 많이 죽이는지(§46 Winner Recall)를
+    #      이것과 비교해야 잴 수 있다
+    pure: list = field(default_factory=list)
+    gate_blocked: list[tuple[int, str]] = field(default_factory=list)
 
     @property
     def summary(self) -> str:
         head = (f"EXECUTABLE {len(self.executable)} · "
                 f"PRE-BREAKOUT WATCH {len(self.watch)}")
+        if self.gate_blocked:
+            head += (f"\n  토허 Gate 로 제외 {len(self.gate_blocked)}개 "
+                     f"(순수 매력 순위에는 남아 있습니다)")
         if self.temperature:
             head += f"\n  시장온도 {self.temperature} — {TEMPERATURE_LABEL[self.temperature]}"
         if self.cash_rank is not None:
@@ -136,19 +195,45 @@ def split(candidates, stages: dict[int, stage_mod.Verdict], *,
           cash: cash_mod.CashOption,
           expected_returns: dict[int, float] | None = None,
           risk_penalties: dict[int, float] | None = None,
+          gates: dict[int, object] | None = None,
           limit: int = 10) -> Split:
-    """후보를 두 화면으로 나누고 CASH 를 그 사이에 끼워 넣는다 (§3·§37·§46)."""
+    """후보를 두 화면으로 나누고 CASH 를 그 사이에 끼워 넣는다 (§3·§37·§46).
+
+    `gates` 는 complex_id → `regulation.gate.Decision`. **점수가 아니라
+    문이다**(§5) — 통과 못 한 후보는 기대수익이 1위라도 실행 목록에서
+    빠진다. 다만 `pure` 에는 남겨서 연구 데이터를 잃지 않는다.
+
+    gates 를 안 주면 Gate 를 적용하지 않는다(기존 호출부 호환). 그때는
+    토허가 반영되지 않았다는 뜻이므로 호출하는 쪽이 알고 있어야 한다.
+    """
     returns = expected_returns or {}
     penalties = risk_penalties or {}
+    gate_map = gates or {}
 
-    executable, watch = [], []
+    executable, watch, pure = [], [], []
     excluded: list[tuple[int, str]] = []
+    gate_blocked: list[tuple[int, str]] = []
 
     for c in candidates:
+        # §5 Hard Gate — 감점이 아니라 문. 점수 계산 **전에** 판정한다.
+        # 순서가 중요하다: 뒤에 두면 "점수가 높으니 봐주자" 가 가능해진다.
+        g = gate_map.get(c.complex_id)
+        blocked = g is not None and not getattr(g, "executable", True)
+
         v = stages.get(c.complex_id)
         if v is None:
             excluded.append((c.complex_id, "Stage 를 판정하지 못했습니다"))
             continue
+
+        # 순수 투자매력 순위에는 Gate 와 무관하게 담는다
+        if stage_mod.executable(v):
+            pure.append(c)
+
+        if blocked:
+            gate_blocked.append((c.complex_id, g.reason))
+            excluded.append((c.complex_id, f"[{g.label}] {g.reason}"))
+            continue
+
         if v.stage in stage_mod.EXCLUDED_FROM_EXECUTABLE:
             if stage_mod.watchable(v):
                 watch.append(c)
@@ -188,7 +273,7 @@ def split(candidates, stages: dict[int, stage_mod.Verdict], *,
     temperature, why = _temperature(candidates, executable)
 
     return Split(executable[:limit], watch[:limit], excluded, cash_rank,
-                 temperature, why)
+                 temperature, why, pure[:limit], gate_blocked)
 
 
 def _cash_rank(executable, cash: cash_mod.CashOption,

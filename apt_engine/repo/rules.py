@@ -19,7 +19,14 @@ TABLES = {
                ("lawd_cd", "emd_name", "designator", "target_scope", "target_use",
                 "effective_from", "effective_to", "residence_duty_months",
                 "jeonse_succession_allowed", "resale_restriction",
-                "source_name", "source_url", "last_verified", "note")),
+                "source_name", "source_url", "last_verified", "note",
+                # 018·019 — 국적 축과 적용대상. 외국인 토허를 내국인에게
+                # 적용하는 사고를 막으려면 이 값들이 CSV 로 들어와야 한다.
+                "rule_id", "zone_group", "buyer_scope", "nationality_scope",
+                "property_scope", "parcel_scope", "legal_dong_code",
+                "official_notice_no", "residential_threshold_sqm",
+                "commercial_threshold_sqm", "green_threshold_sqm",
+                "residence_grace_allowed", "status", "confidence")),
     "tax": ("tax_rule",
             ("tax_kind", "rule_key", "conditions_json", "bracket_min", "bracket_max",
              "rate", "progressive_deduction", "fixed_amount", "rate_formula",
@@ -197,12 +204,31 @@ TEMPLATES = {
     "permit": (
         "lawd_cd,emd_name,designator,target_scope,target_use,effective_from,effective_to,"
         "residence_duty_months,jeonse_succession_allowed,resale_restriction,"
-        "source_name,source_url,last_verified,note\n"
+        "source_name,source_url,last_verified,note,"
+        "rule_id,zone_group,buyer_scope,nationality_scope,property_scope,parcel_scope,"
+        "legal_dong_code,official_notice_no,residential_threshold_sqm,"
+        "commercial_threshold_sqm,green_threshold_sqm,residence_grace_allowed,"
+        "status,confidence\n"
         "# 예) 11680,대치동,서울특별시장,내국인,주거용,2026-03-01,2027-02-28,24,0,,"
-        "서울시 고시 제2026-XX호,https://...,2026-08-30,\n"
-        "# target_scope: 내국인 / 외국인 / 전체  ← 절대 섞지 말 것\n"
+        "서울시 고시 제2026-XX호,https://...,2026-08-30,,"
+        "LPZ_SEL_DAECHI,,ALL_BUYERS,,아파트,,1168010600,제2026-XX호,,,,0,ENACTED,CONFIRMED\n"
+        "#\n"
+        "# ⚠ target_scope 와 buyer_scope 를 반드시 함께 적는다.\n"
+        "#   target_scope: 내국인 / 외국인 / 전체            (기존 어휘)\n"
+        "#   buyer_scope : ALL_BUYERS / FOREIGN_ONLY /       (판정에 쓰는 어휘)\n"
+        "#                 CORPORATE_ONLY / SPECIFIC_BUYER_TYPE / UNKNOWN\n"
+        "#\n"
+        "#   **ALL_BUYERS 만 내국인 투자자의 Hard Gate 에 걸린다.**\n"
+        "#   외국인 대상 지정을 ALL_BUYERS 로 적으면 내국인이 그 지역\n"
+        "#   아파트를 하나도 못 사게 된다 — 가장 흔하고 가장 나쁜 실수다.\n"
+        "#\n"
         "# effective_to 는 필수. 무기한이면 먼 미래 날짜를 넣고 재확인 주기를 둔다\n"
-        "# jeonse_succession_allowed: 1=전세 끼고 매수 가능, 0=실거주 의무로 불가\n"),
+        "# jeonse_succession_allowed: 1=전세 끼고 매수 가능, 0=실거주 의무로 불가\n"
+        "# residence_duty_months 를 비우면 그 구역은 NEEDS_CHECK 로 막힌다\n"
+        "#   (비거주 가능이라고 판정하지 않는다)\n"
+        "# residence_grace_allowed: 1=유예 확인됨, 0/빈칸=확인 안 됨\n"
+        "# *_threshold_sqm: 허가 대상 면적(㎡). 주거 6 / 상업공업 15 / 녹지 20 등\n"
+        "# status: ENACTED(시행중) / ANNOUNCED / PROPOSED / EXPIRED\n"),
     "tax": (
         "tax_kind,rule_key,conditions_json,bracket_min,bracket_max,rate,"
         "progressive_deduction,fixed_amount,rate_formula,rate_decimals,max_amount,base_kind,"

@@ -1,73 +1,89 @@
 {% extends "apt_base.html" %}
-{% block title %}대시보드 · 아파트 투자분석{% endblock %}
+{% import "_macros.html" as ui %}
+{% block title %}데이터 현황{% endblock %}
+{% block pagetitle %}데이터 현황{% endblock %}
 {% block body %}
 
-<h1>대시보드</h1>
-<p class="sub">지금 엔진이 무엇을 알고 있고, 무엇을 모르는지.</p>
+<h1 class="page-title">데이터 현황</h1>
+<p class="page-sub">지금 엔진이 무엇을 알고 있고, 무엇을 모르는지.
+  여기 없는 것은 <b>0 이 아니라 확인 불가</b>로 처리됩니다.</p>
 
-<form class="inline card" action="/search" method="get">
-  <div style="flex:1;min-width:240px">
-    <label for="q">단지 검색</label>
-    <input type="text" id="q" name="q" placeholder="예: 동아1단지" style="width:100%">
+<form class="form" action="/search" method="get">
+  <div class="form__fields">
+    <div class="field field--wide">
+      <label class="field__label" for="q">단지 검색</label>
+      <input class="cds--text-input" type="text" id="q" name="q" placeholder="예: 동아1단지">
+    </div>
+    <div class="field">
+      <button class="cds--btn cds--btn--primary" type="submit">찾기</button>
+    </div>
   </div>
-  <button type="submit">찾기</button>
 </form>
 
 <h2>수집 현황</h2>
-<div class="grid g3">
-  <div class="card">
-    <div class="k">단지</div>
-    <p class="stat">{{ "{:,}".format(stats.complexes) }}<small>개</small></p>
-    <div class="note">기본정보 {{ "{:,}".format(stats.with_basis) }}개
-      {%- if stats.complexes %} ({{ (stats.with_basis / stats.complexes * 100) | round(0) | int }}%){% endif %}</div>
+<div class="grid-3">
+  <div class="surface metric">
+    <span class="metric__label">단지</span>
+    <span class="metric__value">{{ "{:,}".format(stats.complexes) }}<span class="small muted"> 개</span></span>
+    <span class="metric__note">기본정보 {{ "{:,}".format(stats.with_basis) }}개
+      {%- if stats.complexes %} ({{ (stats.with_basis / stats.complexes * 100) | round(0) | int }}%){% endif %}</span>
     {% if stats.by_sido %}
-      <div class="note" style="margin-top:6px">
+      <span class="metric__note">
         {% for s in stats.by_sido %}{{ s.sido }} {{ "{:,}".format(s.n) }}{% if not loop.last %} · {% endif %}{% endfor %}
-      </div>
+      </span>
     {% endif %}
   </div>
-  <div class="card">
-    <div class="k">실거래 (매매)</div>
-    <p class="stat">{{ "{:,}".format(stats.trades) }}<small>건</small></p>
-    <div class="note">
+  <div class="surface metric">
+    <span class="metric__label">실거래 (매매)</span>
+    <span class="metric__value">{{ "{:,}".format(stats.trades) }}<span class="small muted"> 건</span></span>
+    <span class="metric__note">
       {% if stats.months %}{{ stats.first_ymd[:4] }}.{{ stats.first_ymd[4:6] }}
         ~ {{ stats.last_ymd[:4] }}.{{ stats.last_ymd[4:6] }} · {{ stats.months }}개월
-      {% else %}<span class="unknown">기간 없음</span>{% endif %}
-    </div>
+      {% else %}{{ ui.value(none, reason='실거래가 없어 기간을 낼 수 없습니다') }}{% endif %}
+    </span>
   </div>
-  <div class="card">
-    <div class="k">전월세</div>
-    <p class="stat">{{ "{:,}".format(stats.jeonse) }}<small>건</small></p>
-    <div class="note">대표가격 스냅샷 {{ "{:,}".format(stats.snapshots) }}건</div>
+  <div class="surface metric">
+    <span class="metric__label">전월세</span>
+    <span class="metric__value">{{ "{:,}".format(stats.jeonse) }}<span class="small muted"> 건</span></span>
+    <span class="metric__note">대표가격 스냅샷 {{ "{:,}".format(stats.snapshots) }}건</span>
   </div>
 </div>
 
 {% if stats.months and stats.months < 240 %}
-<div class="banner">
-  <b>백테스트에는 기간이 모자랍니다.</b> 지금 {{ stats.months }}개월치인데,
-  겹치지 않는 검증 구간을 확보하려면 240개월(20년)이 필요합니다.
+{% set pct = (stats.months / 240 * 100) | round(0) | int %}
+<div class="notice notice--warn" style="margin-top:1.5rem">
+  <span class="notice__title">백테스트에는 기간이 모자랍니다.</span>
+  지금 <span class="num">{{ stats.months }}</span>개월치인데, 겹치지 않는 검증 구간을
+  확보하려면 240개월(20년)이 필요합니다.
   <code>collect trades --months 240</code> 이 도는 중이면 기다리면 됩니다.
+  <div class="progress" role="img" aria-label="수집 {{ stats.months }}개월 / 목표 240개월">
+    <span class="progress__fill" style="width:{{ pct }}%"></span>
+  </div>
+  <span class="progress__label">{{ pct }}% · {{ 240 - stats.months }}개월 남음</span>
 </div>
 {% endif %}
 
-<h2>매칭</h2>
-<div class="card">
+<h2 style="margin-top:2rem">매칭</h2>
+<div class="surface">
   {% if stats.unmatched_pct is not none %}
-    <div class="k">실거래 → 단지 매칭</div>
-    <p class="stat">{{ (100 - stats.unmatched_pct) | round(1) }}<small>% 매칭</small></p>
-    <div class="bar"><i style="width:{{ (100 - stats.unmatched_pct) | round(1) }}%"></i></div>
-    <div class="note" style="margin-top:8px">
+    {% set m = (100 - stats.unmatched_pct) | round(1) %}
+    <span class="metric__label">실거래 → 단지 매칭</span>
+    <span class="metric__value">{{ m }}<span class="small muted">% 매칭</span></span>
+    <div class="progress" role="img" aria-label="매칭률 {{ m }}%">
+      <span class="progress__fill" style="width:{{ m }}%"></span>
+    </div>
+    <span class="metric__note">
       미매칭 {{ "{:,}".format(stats.unmatched) }}건 —
       <a href="/unmatched">어떤 이름이 안 붙었는지 보기</a>
-    </div>
+    </span>
   {% else %}
-    <span class="unknown">실거래가 없어 매칭률을 낼 수 없습니다.</span>
+    {{ ui.value(none, reason='실거래가 없어 매칭률을 낼 수 없습니다') }}
   {% endif %}
 </div>
 
-<h2>규칙 입력 현황</h2>
-<div class="card scroll">
-  <table>
+<h2 style="margin-top:2rem">규칙 입력 현황</h2>
+<div class="table-scroll">
+  <table class="cds--data-table cds--data-table--sm">
     <thead><tr>
       <th>구분</th><th class="num">전체</th><th class="num">계산가능</th>
       <th class="num">원문확인</th><th>상태</th>
@@ -80,32 +96,33 @@
         <td class="num">{{ r.verified }}</td>
         <td class="num">{{ r.confirmed if r.confirmed is defined else "–" }}</td>
         <td>
-          {% if r.total == 0 %}<span class="tag unknown">미입력</span>
-          {% elif r.verified < r.total %}<span class="tag warn">일부 미검증</span>
-          {% else %}<span class="tag">사용 가능</span>{% endif %}
+          {% if r.total == 0 %}<span class="grade grade--unknown">미입력</span>
+          {% elif r.verified < r.total %}<span class="chip chip--warn">일부 미검증</span>
+          {% else %}<span class="chip chip--ok">사용 가능</span>{% endif %}
         </td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
-  <p class="note" style="margin:12px 0 0">
-    <b>계산가능</b> = <code>last_verified</code> 가 있어 엔진이 실제로 쓰는 규칙.
-    비어 있으면 그 항목은 0원이 아니라 <span class="unknown">확인 불가</span>로 남습니다.
-  </p>
 </div>
+<p class="field__hint" style="margin-top:.75rem">
+  <b>계산가능</b> = <code>last_verified</code> 가 있어 엔진이 실제로 쓰는 규칙.
+  비어 있으면 그 항목은 0원이 아니라
+  <span class="grade grade--unknown">확인 불가</span>로 남습니다.
+</p>
 
 {% if big %}
-<h2>1,000세대 이상 단지</h2>
-<div class="card scroll">
-  <table>
+<h2 style="margin-top:2rem">1,000세대 이상 단지</h2>
+<div class="table-scroll">
+  <table class="cds--data-table cds--data-table--sm">
     <thead><tr>
       <th>단지</th><th>지역</th><th class="num">세대수</th><th class="num">준공</th>
     </tr></thead>
     <tbody>
     {% for b in big %}
       <tr>
-        <td><a href="/complex/{{ b.id }}">{{ b.name }}</a></td>
-        <td class="note">{{ b.lawd_cd | sgg }} {{ b.emd_name or "" }}</td>
+        <td><a class="cds--link" href="/complex/{{ b.id }}">{{ b.name }}</a></td>
+        <td class="muted">{{ b.lawd_cd | sgg }} {{ b.emd_name or "" }}</td>
         <td class="num">{{ "{:,}".format(b.apt_households) }}</td>
         <td class="num">{{ b.approval_year or "–" }}</td>
       </tr>

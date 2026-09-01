@@ -1,0 +1,145 @@
+// ═══════════════════════════════════════════════════════════════════════
+// 아파트 투자분석 — IBM Carbon Design System 기반
+// ═══════════════════════════════════════════════════════════════════════
+//
+// Carbon 에서 가져오는 것: 토큰 구조 · 그리드 · 타이포 스케일 · 간격 ·
+//                          컴포넌트 동작 · 접근성 규칙
+// 우리가 정하는 것:        색 전부 (styles/_brand.scss)
+//
+// IBM 로고·상표·고유 문구는 쓰지 않는다.
+
+@use 'sass:map';
+@use 'brand' as brand;
+
+// ── Carbon 테마를 우리 색으로 재정의 ─────────────────────────────────
+//
+// $theme 맵을 넘기면 Carbon 이 그 값으로 모든 컴포넌트를 칠한다.
+// 컴포넌트마다 색을 덮어쓰는 것이 아니라 **토큰 한 겹만 바꾸는** 방식이라,
+// Carbon 이 업데이트돼도 우리 색이 유지된다.
+@use '@carbon/styles/scss/theme' as theme with (
+  $theme: (
+    background: brand.$gray-050,
+    background-hover: brand.$gray-100,
+    background-active: brand.$gray-200,
+    background-selected: brand.$brand-100,
+    background-inverse: brand.$brand-800,
+
+    layer-01: brand.$gray-000,
+    layer-02: brand.$gray-050,
+    layer-accent-01: brand.$gray-100,
+    layer-hover-01: brand.$gray-100,
+    layer-selected-01: brand.$brand-100,
+
+    field-01: brand.$gray-050,
+    field-02: brand.$gray-000,
+
+    border-subtle-00: brand.$gray-200,
+    border-subtle-01: brand.$gray-200,
+    border-strong-01: brand.$gray-300,
+    border-interactive: brand.$brand-700,
+
+    text-primary: brand.$gray-900,
+    text-secondary: brand.$gray-700,
+    text-placeholder: brand.$gray-500,
+    text-helper: brand.$gray-500,
+    text-on-color: brand.$gray-000,
+    text-inverse: brand.$gray-000,
+    text-error: brand.$danger-500,
+
+    link-primary: brand.$brand-700,
+    link-primary-hover: brand.$brand-800,
+
+    interactive: brand.$brand-700,
+    focus: brand.$brand-700,
+
+    button-primary: brand.$brand-700,
+    button-primary-hover: brand.$brand-800,
+    button-primary-active: brand.$brand-900,
+    button-secondary: brand.$gray-700,
+    button-secondary-hover: brand.$gray-900,
+    button-tertiary: brand.$brand-700,
+
+    support-error: brand.$danger-500,
+    support-success: brand.$ok-500,
+    support-warning: brand.$warn-500,
+    support-info: brand.$brand-600,
+
+    notification-background-error: brand.$danger-100,
+    notification-background-success: brand.$ok-100,
+    notification-background-warning: brand.$warn-100,
+    notification-background-info: brand.$brand-100,
+
+    icon-primary: brand.$gray-900,
+    icon-secondary: brand.$gray-700,
+    icon-on-color: brand.$gray-000,
+  )
+);
+
+// ── Carbon 코어 ──────────────────────────────────────────────────────
+//
+// 필요한 것만 가져온다. 전체 import 는 500KB 가 넘는데 우리는 그중
+// 일부만 쓴다 — 느린 회선에서 첫 화면이 늦어지는 값을 치를 이유가 없다.
+@use '@carbon/styles/scss/reset';
+@use '@carbon/styles/scss/spacing' as *;
+@use '@carbon/styles/scss/type' as *;
+@use '@carbon/styles/scss/breakpoint' as *;
+@use '@carbon/styles/scss/motion' as *;
+@use '@carbon/styles/scss/grid';
+
+// layout 은 :root 에 --cds-layout-size-height-* 를 발행한다. Carbon 의 버튼과
+// 입력은 높이·좌우 패딩을 전부 그 변수로 계산하기 때문에, 이걸 빼면
+// 버튼이 글자 크기 그대로 납작하게 나온다 (컴포넌트 CSS 는 멀쩡한데
+// 변수가 비어 있어서 padding 이 0 이 된다).
+@use '@carbon/styles/scss/layout';
+
+@use '@carbon/styles/scss/components/button';
+@use '@carbon/styles/scss/components/text-input';
+@use '@carbon/styles/scss/components/select';
+@use '@carbon/styles/scss/components/checkbox';
+@use '@carbon/styles/scss/components/tag';
+@use '@carbon/styles/scss/components/tile';
+@use '@carbon/styles/scss/components/data-table';
+@use '@carbon/styles/scss/components/notification';
+@use '@carbon/styles/scss/components/tabs';
+@use '@carbon/styles/scss/components/skeleton-styles';
+@use '@carbon/styles/scss/components/tooltip';
+@use '@carbon/styles/scss/components/toggle';
+@use '@carbon/styles/scss/components/link';
+@use '@carbon/styles/scss/components/ui-shell';
+
+@use 'app/base';
+@use 'app/type' as ko-type;
+@use 'app/shell';
+@use 'app/data';
+@use 'app/blocks';
+@use 'app/states';
+
+// ── 우리 색을 실제로 발행한다 ────────────────────────────────────────
+//
+// `@use ... with ($theme: ...)` 는 Sass 변수만 바꾼다. Carbon 컴포넌트 CSS 는
+// `var(--cds-button-primary, #0f62fe)` 처럼 **커스텀 프로퍼티 + IBM 색 폴백**
+// 으로 쓰기 때문에, 이 블록이 없으면 폴백이 이겨서 화면이 IBM 파랑으로 나온다.
+// :root 에 발행해야 위 $theme 맵이 실제로 적용된다.
+:root {
+  @include theme.theme();
+
+  // 한글 기준 타입 스케일. Carbon 타입 모듈도 :root 에 같은 토큰을
+  // 발행하므로 반드시 그 뒤(= 이 파일 맨 끝)에서 덮어써야 한다.
+  @include ko-type.korean-tokens;
+
+  // theme() 는 **기본 테마 → 컴포넌트 토큰** 순으로 발행한다. 버튼·알림처럼
+  // 컴포넌트 토큰 층에 있는 값은 위 $theme 맵에 적어도 뒤에서 IBM 기본색으로
+  // 다시 칠해진다. 그래서 이 10개만 마지막에 한 번 더 못박는다.
+  //
+  // 여기 없는 색을 여기에 추가하지 말 것 — 색은 _brand.scss 한 곳에서 정한다.
+  --cds-button-primary: #{brand.$brand-700};
+  --cds-button-primary-hover: #{brand.$brand-800};
+  --cds-button-primary-active: #{brand.$brand-900};
+  --cds-button-secondary: #{brand.$gray-700};
+  --cds-button-secondary-hover: #{brand.$gray-900};
+  --cds-button-tertiary: #{brand.$brand-700};
+  --cds-notification-background-error: #{brand.$danger-100};
+  --cds-notification-background-success: #{brand.$ok-100};
+  --cds-notification-background-warning: #{brand.$warn-100};
+  --cds-notification-background-info: #{brand.$brand-100};
+}

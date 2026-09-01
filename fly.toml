@@ -1,0 +1,41 @@
+# fly.io 배포 설정. 도쿄(nrt)를 쓰는 이유는 한국에서 가장 가까워서다.
+#
+#   fly launch --no-deploy          # 앱 생성 (이 파일을 그대로 씀)
+#   fly volumes create aptdata --region nrt --size 10
+#   fly deploy
+#   fly ssh sftp shell              # DB 를 /data/apt_invest.db 로 업로드
+#
+# 볼륨 크기는 수집이 끝난 DB 크기 + 여유. 10GB 로 시작하고 모자라면 늘린다.
+app = "apt-invest"
+primary_region = "nrt"
+
+[build]
+
+[env]
+  APT_PUBLIC = "1"
+  APT_DB_PATH = "/data/apt_invest.db"
+  PORT = "8080"
+
+[mounts]
+  source = "aptdata"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "suspend"    # 아무도 안 보면 재운다 (요금)
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.http_options.response.headers]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[http_service.checks]]
+  path = "/healthz"
+  interval = "30s"
+  timeout = "5s"
+
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1

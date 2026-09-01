@@ -1,0 +1,89 @@
+// 빈 상태 · 오류 · 로딩 · 잠금 (§7)
+//
+// 이 프로젝트에서 **지금 가장 자주 보이는 화면**이다. 실거래가 27/240개월이라
+// 대부분의 화면이 비어 있다. 그래서 여기를 제일 공들인다.
+//
+// 원칙: 빈 화면에 "결과 없음" 만 띄우지 않는다. 왜 없는지와 무엇을 하면
+// 되는지를 같이 준다. 사용자가 할 수 있는 게 없는 화면은 실패한 화면이다.
+@use '../brand' as brand;
+@use '@carbon/styles/scss/theme' as *;
+@use '@carbon/styles/scss/spacing' as *;
+@use '@carbon/styles/scss/type' as *;
+
+.state {
+  border: 1px solid $border-subtle-01;
+  border-radius: brand.$radius;
+  box-shadow: brand.$shadow-card;
+  background: $layer-01;
+  padding: $spacing-07 $spacing-06;
+  text-align: left;
+  max-width: 72ch;
+}
+.state__icon {
+  font-size: 28px;
+  line-height: 1;
+  margin-bottom: $spacing-04;
+  display: block;
+}
+.state__title {
+  @include type-style('productive-heading-03');
+  margin: 0 0 $spacing-03;
+}
+.state__body {
+  @include type-style('body-01');
+  color: $text-secondary;
+  margin: 0 0 $spacing-05;
+}
+.state__actions { display: flex; gap: $spacing-03; flex-wrap: wrap; }
+
+// 왜 비었는지 — 이유 목록
+.reasons {
+  margin: 0 0 $spacing-05;
+  padding: 0 0 0 $spacing-05;
+  @include type-style('body-compact-01');
+  color: $text-secondary;
+}
+.reasons li { margin-bottom: $spacing-02; }
+.reasons code {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  background: $layer-accent-01;
+  padding: 1px 5px;
+  border: 1px solid $border-subtle-01;
+}
+
+// 진행률 — 수집이 얼마나 됐나
+.progress {
+  height: 8px;
+  border-radius: 999px;
+  background: $layer-accent-01;
+  border: 1px solid $border-subtle-01;
+  overflow: hidden;
+  margin: $spacing-03 0;
+}
+.progress__fill { height: 100%; background: brand.$brand-700; display: block; border-radius: 999px; }
+.progress__label {
+  @include type-style('label-01');
+  color: $text-secondary;
+  font-variant-numeric: tabular-nums;
+}
+
+// 로딩 — Carbon skeleton 을 쓰되 회전 애니메이션은 최소로
+.skeleton-row {
+  height: 16px;
+  background: $layer-accent-01;
+  margin-bottom: $spacing-03;
+}
+.skeleton-row--short { width: 40%; }
+
+// 잠금 — 백테스트 학습 전에는 순위를 보여주지 않는다
+.lock {
+  border: 1px solid rgba(138,90,0,.35);
+  border-radius: brand.$radius;
+  background: brand.$warn-100;
+  padding: $spacing-05;
+}
+.lock__title {
+  @include type-style('productive-heading-02');
+  color: brand.$warn-500;
+  margin: 0 0 $spacing-03;
+}

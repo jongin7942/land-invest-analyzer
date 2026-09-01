@@ -1,0 +1,244 @@
+// 왼쪽 메뉴 · 상단 바 · 레이아웃
+@use '../brand' as brand;
+@use '@carbon/styles/scss/theme' as *;
+@use '@carbon/styles/scss/spacing' as *;
+@use '@carbon/styles/scss/type' as *;
+@use '@carbon/styles/scss/breakpoint' as *;
+
+$nav-w: 216px;
+$nav-w-mini: 64px;
+$topbar-h: 60px;
+
+.skip {
+  position: absolute;
+  left: -9999px;
+  &:focus {
+    left: $spacing-05; top: $spacing-05; z-index: 9999;
+    background: #fff; padding: $spacing-03 $spacing-05;
+    border: 2px solid brand.$brand-700;
+  }
+}
+
+// ── 왼쪽 메뉴 ────────────────────────────────────────────────────────
+//
+// 가로 메뉴에서 세로로 옮겼다. 화면이 늘어날수록 가로 메뉴는 이름을
+// 줄여야 하는데, 세로는 이름을 온전히 쓰면서 아이콘으로 위치를 기억시킨다.
+.sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: $nav-w;
+  background: brand.$brand-800;
+  color: rgba(255,255,255,.82);
+  display: flex;
+  flex-direction: column;
+  z-index: 20;
+  transition: width .12s linear;
+}
+.app--mini .sidebar { width: $nav-w-mini; }
+
+.sidebar__brand {
+  display: flex;
+  align-items: center;
+  gap: $spacing-04;
+  height: $topbar-h;
+  padding: 0 $spacing-05;
+  color: #fff;
+  text-decoration: none;
+  flex: 0 0 auto;
+}
+.sidebar__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px; height: 32px;
+  flex: 0 0 32px;
+  background: rgba(255,255,255,.12);
+  border-radius: 8px;
+}
+.sidebar__brandname {
+  @include type-style('productive-heading-01');
+  white-space: nowrap;
+}
+
+.sidebar__nav { padding: $spacing-05 $spacing-03; display: grid; gap: 2px; }
+
+.sidebar__link {
+  display: flex;
+  align-items: center;
+  gap: $spacing-04;
+  padding: $spacing-04 $spacing-04;
+  color: rgba(255,255,255,.78);
+  text-decoration: none;
+  border-radius: 8px;
+  white-space: nowrap;
+  @include type-style('body-compact-01');
+
+  .icon { flex: 0 0 20px; }
+
+  &:hover { background: rgba(255,255,255,.09); color: #fff; }
+  &[aria-current='page'] {
+    background: rgba(255,255,255,.14);
+    color: #fff;
+    font-weight: 600;
+  }
+  &:focus-visible { outline: 2px solid #fff; outline-offset: -2px; }
+}
+
+.sidebar__collapse {
+  margin-top: auto;
+  padding: $spacing-03;
+  border-top: 1px solid rgba(255,255,255,.12);
+
+  button {
+    display: flex;
+    align-items: center;
+    gap: $spacing-04;
+    width: 100%;
+    padding: $spacing-04;
+    background: none;
+    border: 0;
+    border-radius: 8px;
+    color: rgba(255,255,255,.68);
+    cursor: pointer;
+    font: inherit;
+    @include type-style('label-01');
+    white-space: nowrap;
+
+    .icon { flex: 0 0 20px; transform: rotate(180deg); }
+    &:hover { background: rgba(255,255,255,.09); color: #fff; }
+  }
+}
+.app--mini .sidebar__collapse .icon { transform: none; }
+
+// 접었을 때 — 라벨만 숨기고 아이콘 위치는 그대로 둔다
+.app--mini {
+  .sidebar__label, .sidebar__brandname { display: none; }
+  .sidebar__brand, .sidebar__link, .sidebar__collapse button {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+  }
+}
+
+// ── 본문 쪽 ──────────────────────────────────────────────────────────
+.shell {
+  margin-left: $nav-w;
+  min-height: 100vh;
+  transition: margin-left .12s linear;
+}
+.app--mini .shell { margin-left: $nav-w-mini; }
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 15;
+  height: $topbar-h;
+  background: brand.$gray-000;
+  border-bottom: 1px solid $border-subtle-01;
+  display: flex;
+  align-items: center;
+  gap: $spacing-05;
+  padding: 0 $spacing-06;
+}
+.topbar__title {
+  @include type-style('productive-heading-03');
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.topbar__right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: $spacing-05;
+}
+
+// 데이터 기준일 — 화면의 숫자가 어느 시점인지. 한 곳에서만 만든다.
+.asof {
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-02;
+  @include type-style('label-01');
+  color: $text-secondary;
+  border: 1px solid $border-subtle-01;
+  border-radius: 999px;
+  padding: 5px $spacing-04;
+  white-space: nowrap;
+  .icon { color: brand.$ok-500; }
+}
+
+.mode-switch { display: flex; align-items: center; gap: 0; }
+.mode-switch a {
+  @include type-style('label-01');
+  color: $text-secondary;
+  text-decoration: none;
+  padding: 6px $spacing-04;
+  border: 1px solid $border-subtle-01;
+  white-space: nowrap;
+
+  &:first-child { border-radius: 8px 0 0 8px; }
+  &:last-child { border-radius: 0 8px 8px 0; border-left: 0; }
+  &[aria-current='true'] {
+    background: brand.$brand-700;
+    color: #fff;
+    border-color: brand.$brand-700;
+    font-weight: 600;
+  }
+  &:focus-visible { outline: 2px solid brand.$brand-700; outline-offset: 2px; }
+}
+
+.app-main {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: $spacing-06 $spacing-06 $spacing-09;
+}
+
+// ── 모바일 ───────────────────────────────────────────────────────────
+//
+// 세로 메뉴를 그대로 두면 폭의 절반을 먹는다. 아래쪽 탭바로 바꾼다 —
+// 엄지가 닿는 곳에 있어야 한 손으로 쓸 수 있다.
+@include breakpoint-down(lg) {
+  .sidebar {
+    inset: auto 0 0 0;
+    width: 100%;
+    height: 56px;
+    flex-direction: row;
+    border-top: 1px solid rgba(255,255,255,.12);
+  }
+  .sidebar__brand, .sidebar__collapse { display: none; }
+  .sidebar__nav {
+    display: flex;
+    flex: 1;
+    padding: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+    &::-webkit-scrollbar { display: none; }
+  }
+  .sidebar__link {
+    flex-direction: column;
+    gap: 2px;
+    justify-content: center;
+    border-radius: 0;
+    padding: $spacing-02 $spacing-02;
+    // 5개가 폭을 정확히 나눠 갖게 한다. auto 로 두면 글자 수에 따라
+    // 칸이 달라지고, 마지막 하나가 화면 밖으로 밀린다.
+    flex: 1 1 0;
+    min-width: 0;
+    @include type-style('label-01');
+    font-size: 11px;
+  }
+  .sidebar__link .sidebar__label {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  // 진단용 화면은 폰 탭바에서 뺀다 (데이터 현황 안의 링크로 들어간다)
+  .sidebar__link--desktop { display: none; }
+  .shell, .app--mini .shell { margin-left: 0; }
+  .app-main { padding: $spacing-05 $spacing-04 (56px + 24px); }
+  .topbar { padding: 0 $spacing-04; gap: $spacing-04; }
+  .topbar__title { @include type-style('productive-heading-02'); }
+  .asof { display: none; }   // 화면 폭이 아까우면 기준일은 본문에서 본다
+}

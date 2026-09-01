@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>{{ site_name }}</title>
+<link rel="stylesheet"
+      href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+</head>
+<body class="app">
+<main class="app-main" style="max-width:420px;margin:12vh auto">
+  <div class="surface">
+    <h1 class="page-title" style="font-size:1.375rem">{{ site_name }}</h1>
+    <p class="page-sub" style="margin-bottom:1.25rem">
+      허락한 분만 볼 수 있게 해 두었습니다.
+      전달받은 코드를 넣어 주세요.
+    </p>
+    {% if tried %}
+      <div class="notice notice--danger">
+        코드가 맞지 않습니다. 링크를 보낸 사람에게 다시 받아 주세요 —
+        지난 코드가 취소됐을 수 있습니다.
+      </div>
+    {% endif %}
+    <form method="get">
+      <label class="field__label" for="code">접속 코드</label>
+      <input class="cds--text-input" type="password" id="code" name="code"
+             autocomplete="off" autofocus style="width:100%">
+      <button class="cds--btn cds--btn--primary" type="submit"
+              style="width:100%;justify-content:center;margin-top:1rem">들어가기</button>
+    </form>
+  </div>
+</main>
+</body>
+</html>

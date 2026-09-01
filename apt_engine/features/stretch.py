@@ -345,3 +345,58 @@ def price_to_jeonse_stretch(price: int | None, jeonse_ratio: float | None,
              formula="(과거 전세가율 중앙값 − 현재) ÷ 과거 중앙값 ÷ 20%",
              intermediates={"현재": jeonse_ratio, "과거": base},
              grade="CONFIRMED"))
+
+
+# ── §20 상대 가격 선반영 ──────────────────────────────────────────────
+#
+# 가격 부담은 두 종류다. 합치면 판단이 뒤집힌다.
+#
+#   절대 선반영  이 단지 **자기 역사** 대비 얼마나 올랐나 (price_stretch)
+#   상대 선반영  **주변 대장/비슷한 상품** 대비 얼마나 비싼가  ← 여기
+#
+# 자기 역사에서는 많이 올랐지만 주변 대비 여전히 쌀 수 있다. 그 경우
+# 절대 선반영만 보면 "너무 올랐다" 고 빼버리는데, 실제로는 따라잡는
+# 중일 수 있다. 반대로 자기 역사로는 안 올랐는데 주변 대비 비싸면
+# 그건 구조적으로 비싼 것이지 저평가가 아니다.
+
+def relative_stretch(*, price: int | None, peer_median: int | None,
+                     normal_gap_pct: float | None = None,
+                     peer_n: int = 0) -> Feature:
+    """주변 비교군 대비 가격 부담.
+
+    `normal_gap_pct` 는 **정상적으로 유지되는 가격차**다. 상품성이 달라
+    원래 10% 싼 것이 정상이라면, 10% 싼 상태는 저평가가 아니라 제자리다.
+    이걸 안 빼면 구조적 가격차를 전부 상승여력으로 세게 된다(§21·§22).
+
+    값의 뜻: 양수면 비교군 대비 비싸다, 음수면 싸다.
+    """
+    if price is None or not peer_median:
+        return Feature.missing(
+            "relative_stretch",
+            "비교군 중위가격이 없어 상대 가격부담을 낼 수 없습니다")
+    if peer_n < 3:
+        return Feature.missing(
+            "relative_stretch",
+            f"비교군이 {peer_n}개뿐이라 중위가격을 믿을 수 없습니다 (3개 이상 필요)")
+
+    raw = price / peer_median - 1.0
+    normal = normal_gap_pct if normal_gap_pct is not None else 0.0
+    value = raw - normal
+
+    detail = {
+        "관측 가격차": f"{raw:+.1%}",
+        "정상 가격차": f"{normal:+.1%}" if normal_gap_pct is not None else "미확인(0으로 봄)",
+        "정상 대비": f"{value:+.1%}",
+        "비교군 수": peer_n,
+        "뜻": "주변 비슷한 상품과 견줘 지금 비싼가 싼가",
+    }
+    if normal_gap_pct is None:
+        detail["주의"] = ("정상 가격차를 모르면 상품성 차이까지 저평가로 "
+                          "세게 됩니다. 구조적 가격차를 확인하세요(§21)")
+    # 비교군이 많을수록 믿을 만하다. 정상 가격차를 모르면 깎는다.
+    conf = min(1.0, 0.35 + 0.08 * peer_n) * (1.0 if normal_gap_pct is not None else 0.6)
+    return Feature(key="relative_stretch", value=value, unit="",
+                   confidence=conf, status=Status.OK, detail=detail,
+                   calc=Calc("relative_stretch",
+                             "현재가/비교군중위 - 1 - 정상가격차",
+                             {"비교군": peer_n}))
