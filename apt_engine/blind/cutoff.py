@@ -82,6 +82,14 @@ DATED_TABLES: dict[str, tuple[str, ...]] = {
     "transmission_state": ("as_of",),
     "stage_state": ("as_of",),
     "universe_coverage": ("as_of",),
+    # Phase 10 — 돈의 흐름. 소득·고용 통계는 **발표 시차**가 있어서, 그
+    # 시점에 알 수 있었던 것만 읽어야 한다. 2026년 1월 백테스트가 2026년
+    # 3월에 발표된 2025년 고용통계를 보면 그건 미래를 본 것이다.
+    "region_income": ("as_of_ym",),
+    "migration_flow": ("as_of_ym",),
+    # 차량 이동시간은 점수에 안 들어가지만(§38) 시점 컬럼을 두는 편이
+    # 안전하다 — 나중에 누가 쓰더라도 미래 측정치를 못 읽는다.
+    "drive_time": ("measured_on",),
 }
 
 # 컷오프와 무관한 테이블(시점 개념이 없는 마스터·참조 데이터).
