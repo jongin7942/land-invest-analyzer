@@ -1,6 +1,7 @@
 {% extends "apt_base.html" %}
 {% import "_macros.html" as ui %}
-{% block title %}단지 검색 · 아파트 투자분석{% endblock %}
+{% block title %}단지 검색{% endblock %}
+{% block pagetitle %}단지 검색{% endblock %}
 {% block body %}
 
 <h1 class="page-title">단지 검색</h1>
@@ -41,19 +42,21 @@
     <div class="table-scroll">
       <table class="cds--data-table cds--data-table--sm">
         <thead><tr>
-          <th>단지</th><th>지역</th><th class="num">세대수</th>
-          <th class="num">준공</th><th></th>
+          <th>단지</th><th>지역</th>
+          <th class="num col-optional">세대수</th>
+          <th class="num col-optional">준공</th>
+          <th><span class="sr-only">비교</span></th>
         </tr></thead>
         <tbody>
         {% for r in rows %}
           <tr>
             <td><a class="cds--link" href="/complex/{{ r.id }}">{{ r.name }}</a></td>
             <td class="muted">{{ r.lawd_cd | sgg }} {{ r.emd_name or "" }}</td>
-            <td class="num">
+            <td class="num col-optional">
               {% if r.apt_households %}{{ "{:,}".format(r.apt_households) }}
               {% else %}{{ ui.value(none, reason='K-apt 기본정보가 없습니다') }}{% endif %}
             </td>
-            <td class="num">{{ r.approval_year or "–" }}</td>
+            <td class="num col-optional">{{ r.approval_year or "–" }}</td>
             <td>
               {% if r.id in watch_ids %}
                 <form method="post" action="/watchlist/remove" style="display:inline">

@@ -51,16 +51,20 @@
   </a>
 
   <nav class="sidebar__nav" aria-label="주요 메뉴">
+    {# 마지막 값 = 핸드폰 하단 탭바에도 넣을지.
+       390px 에 6개를 넣으면 마지막 하나가 잘리는데, 가로로 스크롤된다는
+       것을 아무도 모른다. 진단용 화면(미매칭)은 폰에서 빼고 '데이터 현황'
+       안의 링크로 들어가게 둔다. #}
     {% set nav = [
-      ('/',           'home',    '투자처 찾기'),
-      ('/compare',    'table',   '아파트 비교'),
-      ('/search',     'search',  '단지 검색'),
-      ('/conclusion', 'check',   '투자결론'),
-      ('/status',     'clock',   '데이터 현황'),
-      ('/unmatched',  'doc',     '미매칭'),
+      ('/',           'home',    '투자처 찾기',  true),
+      ('/search',     'search',  '단지 검색',   true),
+      ('/compare',    'table',   '아파트 비교',  true),
+      ('/conclusion', 'check',   '투자결론',    true),
+      ('/status',     'clock',   '데이터 현황',  true),
+      ('/unmatched',  'doc',     '미매칭',      false),
     ] %}
-    {% for href, name, label in nav %}
-      <a href="{{ href }}" class="sidebar__link"
+    {% for href, name, label, on_phone in nav %}
+      <a href="{{ href }}" class="sidebar__link{{ '' if on_phone else ' sidebar__link--desktop' }}"
          {% if request.path == href %}aria-current="page"{% endif %}>
         {{ ico.icon(name) }}<span class="sidebar__label">{{ label }}</span>
       </a>

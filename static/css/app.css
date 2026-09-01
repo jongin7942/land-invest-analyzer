@@ -12745,12 +12745,23 @@ a {
     gap: 2px;
     justify-content: center;
     border-radius: 0;
-    padding: 0.25rem 0.75rem;
-    flex: 1 0 auto;
+    padding: 0.25rem 0.25rem;
+    flex: 1 1 0;
+    min-width: 0;
     font-size: var(--cds-label-01-font-size, 0.75rem);
     font-weight: var(--cds-label-01-font-weight, 400);
     line-height: var(--cds-label-01-line-height, 1.33333);
     letter-spacing: var(--cds-label-01-letter-spacing, 0.32px);
+    font-size: 11px;
+  }
+  .sidebar__link .sidebar__label {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .sidebar__link--desktop {
+    display: none;
   }
   .shell, .app--mini .shell {
     margin-left: 0;
@@ -14027,6 +14038,59 @@ a {
   border: 0;
 }
 
+@media (pointer: coarse) {
+  .cds--data-table td a,
+  .ranktable td a:not(.icon-btn),
+  .compare td a {
+    display: inline-block;
+    padding: 10px 0;
+  }
+  .bullets a, .reasons a, .field__hint a, p a {
+    padding: 2px 3px;
+    margin: 0 -3px;
+  }
+  .mode-switch a {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+  .cds--text-input, .cds--select-input {
+    min-height: 44px;
+  }
+  .cds--checkbox {
+    width: 22px;
+    height: 22px;
+  }
+  .cds--checkbox-wrapper {
+    min-height: 44px;
+  }
+  .cds--checkbox-label {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+  }
+  .evidence > summary {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+  .icon-btn {
+    width: 44px;
+    height: 44px;
+  }
+  .tablefoot__pages a, .tablefoot__pages span {
+    min-width: 44px;
+    height: 44px;
+  }
+}
+@media (max-width: 41.98rem) {
+  .col-optional {
+    display: none;
+  }
+  .table-scroll .cds--data-table {
+    min-width: 0;
+  }
+}
 .state {
   border: 1px solid var(--cds-border-subtle-01, #e0e4e9);
   border-radius: 12px;

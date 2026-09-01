@@ -220,10 +220,22 @@ $topbar-h: 60px;
     gap: 2px;
     justify-content: center;
     border-radius: 0;
-    padding: $spacing-02 $spacing-04;
-    flex: 1 0 auto;
+    padding: $spacing-02 $spacing-02;
+    // 5개가 폭을 정확히 나눠 갖게 한다. auto 로 두면 글자 수에 따라
+    // 칸이 달라지고, 마지막 하나가 화면 밖으로 밀린다.
+    flex: 1 1 0;
+    min-width: 0;
     @include type-style('label-01');
+    font-size: 11px;
   }
+  .sidebar__link .sidebar__label {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  // 진단용 화면은 폰 탭바에서 뺀다 (데이터 현황 안의 링크로 들어간다)
+  .sidebar__link--desktop { display: none; }
   .shell, .app--mini .shell { margin-left: 0; }
   .app-main { padding: $spacing-05 $spacing-04 (56px + 24px); }
   .topbar { padding: 0 $spacing-04; gap: $spacing-04; }

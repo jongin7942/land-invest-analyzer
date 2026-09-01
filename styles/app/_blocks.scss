@@ -573,3 +573,51 @@
   padding: 0; margin: -1px; overflow: hidden;
   clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
+
+// ── 손가락으로 누르는 화면 ───────────────────────────────────────────
+//
+// 마우스 포인터는 1px 을 찍지만 손가락은 못 찍는다. iOS·안드로이드 모두
+// 최소 44px 을 권한다. 표 안의 링크가 25px, 체크박스가 16px 이었다.
+//
+// `pointer: coarse` 로 **터치 기기에서만** 키운다. 화면 폭으로 판단하면
+// 창을 좁힌 데스크톱까지 헐거워지고, 큰 태블릿은 손가락인데도 안 걸린다.
+@media (pointer: coarse) {
+  // 표 안의 링크 — 글자는 그대로 두고 위아래 여백으로 누를 곳을 넓힌다
+  .cds--data-table td a,
+  .ranktable td a:not(.icon-btn),
+  .compare td a {
+    display: inline-block;
+    padding: 10px 0;
+  }
+
+  // 문장 속 링크는 44px 로 만들 수 없다(줄 간격이 무너진다).
+  // 대신 좌우로 조금 넓혀 빗나감을 줄인다.
+  .bullets a, .reasons a, .field__hint a, p a { padding: 2px 3px; margin: 0 -3px; }
+
+  .mode-switch a { min-height: 44px; display: inline-flex; align-items: center; }
+
+  .cds--text-input, .cds--select-input { min-height: 44px; }
+
+  // 체크박스는 상자 자체를 키우고, 라벨 줄 전체를 누를 수 있게 한다
+  .cds--checkbox { width: 22px; height: 22px; }
+  .cds--checkbox-wrapper { min-height: 44px; }
+  .cds--checkbox-label { display: flex; align-items: center; min-height: 44px; }
+
+  .evidence > summary { min-height: 44px; display: flex; align-items: center; }
+
+  .icon-btn { width: 44px; height: 44px; }
+
+  .tablefoot__pages a, .tablefoot__pages span { min-width: 44px; height: 44px; }
+}
+
+// 폰에서 접는 열
+//
+// 표가 가로로 스크롤되면 **오른쪽 끝의 버튼을 아무도 못 찾는다.**
+// 검색 결과의 '비교에 담기' 가 그랬다 — 이 화면의 주 동작인데 화면
+// 밖에 있었다. 참고용 열(세대수·준공)을 접어서 동작을 화면 안으로 넣는다.
+// 접힌 값은 단지 상세화면에 그대로 있다.
+@include breakpoint-down(md) {
+  .col-optional { display: none; }
+  // 참고 열을 접었으니 남은 열은 짜부라뜨리지 말고 폭을 나눠 갖게 한다
+  .table-scroll .cds--data-table { min-width: 0; }
+}
