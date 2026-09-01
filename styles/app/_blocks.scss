@@ -16,6 +16,7 @@
   @include type-style('body-compact-01');
   border: 1px solid $border-subtle-01;
   border-left: 3px solid brand.$brand-700;
+  border-radius: brand.$radius-sm;
   background: brand.$brand-100;
   padding: $spacing-04 $spacing-05;
   margin-bottom: $spacing-05;
@@ -31,6 +32,7 @@
 // ── 순위 배지 ────────────────────────────────────────────────────────
 .rank {
   @include type-style('label-01');
+  border-radius: 6px;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   display: inline-flex;
@@ -52,6 +54,7 @@
 // ── 작은 라벨칩 ──────────────────────────────────────────────────────
 .chip {
   @include type-style('label-01');
+  border-radius: 999px;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -100,7 +103,9 @@
 .result {
   background: $layer-01;
   border: 1px solid $border-subtle-01;
-  padding: $spacing-05;
+  border-radius: brand.$radius;
+  box-shadow: brand.$shadow-card;
+  padding: $spacing-06;
   margin-bottom: $spacing-05;
 }
 .result__head {
@@ -127,7 +132,9 @@
 .form {
   background: $layer-01;
   border: 1px solid $border-subtle-01;
-  padding: $spacing-05;
+  border-radius: brand.$radius;
+  box-shadow: brand.$shadow-card;
+  padding: $spacing-06;
   margin-bottom: $spacing-06;
 }
 .form__fields {
@@ -190,9 +197,18 @@
 //
 // 표가 넘칠 때 page body 가 가로로 밀리면 안 된다. 표 안에서만 스크롤한다.
 .table-scroll {
+  max-width: 100%;
   overflow-x: auto;
+  // ⚠ overflow-x:auto 만으로는 부족하다. 스크롤 컨테이너의 넘침 영역이
+  //   조상까지 전파돼서, 표는 안에서 잘 잘리는데 **페이지 전체가 가로로
+  //   스크롤된다** (오른쪽에 빈 여백만 생긴다). contain:paint 로 여기서
+  //   끊는다 — 안쪽이 이 상자 밖으로 그려지지 않는다고 못박는 것이라
+  //   의미도 정확히 그 뜻이다.
+  contain: paint;
   -webkit-overflow-scrolling: touch;
   border: 1px solid $border-subtle-01;
+  border-radius: brand.$radius;
+  box-shadow: brand.$shadow-card;
   background: $layer-01;
 }
 .table-scroll .cds--data-table { min-width: 100%; }
@@ -249,4 +265,311 @@
 
 @include breakpoint-down(md) {
   .money { flex-direction: column; align-items: flex-start; gap: 0; }
+}
+
+// ── 조건 요약 줄 ─────────────────────────────────────────────────────
+//
+// "내가 무슨 조건으로 본 결과인가" 를 결과 바로 위에 둔다. 조건을 폼에만
+// 두면 스크롤을 내린 뒤에는 무슨 조건이었는지 잊는다.
+.terms {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex-wrap: wrap;
+  background: $layer-01;
+  border: 1px solid $border-subtle-01;
+  border-radius: brand.$radius;
+  box-shadow: brand.$shadow-card;
+  padding: $spacing-05 $spacing-06;
+  margin-bottom: $spacing-06;
+}
+.terms__title {
+  @include type-style('productive-heading-02');
+  flex: 0 0 100%;
+  margin-bottom: $spacing-05;
+}
+.terms__item {
+  display: flex;
+  align-items: center;
+  gap: $spacing-04;
+  padding-right: $spacing-06;
+  margin-right: $spacing-06;
+  border-right: 1px solid $border-subtle-01;
+
+  &:last-of-type { border-right: 0; }
+}
+.terms__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px; height: 36px;
+  flex: 0 0 36px;
+  border-radius: 999px;
+  background: brand.$brand-100;
+  color: brand.$brand-700;
+}
+.terms__label { @include type-style('label-01'); color: $text-secondary; display: block; }
+.terms__value {
+  @include type-style('productive-heading-01');
+  display: block;
+  font-variant-numeric: tabular-nums;
+}
+.terms__action { margin-left: auto; }
+
+@include breakpoint-down(md) {
+  .terms { display: grid; grid-template-columns: 1fr 1fr; gap: $spacing-05; }
+  .terms__item { border-right: 0; padding: 0; margin: 0; }
+  .terms__action { grid-column: 1 / -1; margin-left: 0; }
+}
+
+// ── 요약 지표 카드 ───────────────────────────────────────────────────
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: $spacing-05;
+  margin-bottom: $spacing-06;
+}
+.stat {
+  display: flex;
+  align-items: flex-start;
+  gap: $spacing-04;
+  background: $layer-01;
+  border: 1px solid $border-subtle-01;
+  border-radius: brand.$radius;
+  box-shadow: brand.$shadow-card;
+  padding: $spacing-05 $spacing-06;
+}
+.stat__body { min-width: 0; flex: 1; }
+.stat__label { @include type-style('label-01'); color: $text-secondary; display: block; }
+.stat__value {
+  @include type-style('productive-heading-03');
+  font-variant-numeric: tabular-nums;
+  display: block;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stat__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px; height: 38px;
+  flex: 0 0 38px;
+  border-radius: 999px;
+  background: brand.$gray-100;
+  color: $text-secondary;
+}
+.stat--good .stat__icon { background: brand.$ok-100;   color: brand.$ok-500; }
+.stat--rise .stat__icon { background: brand.$rise-100; color: brand.$rise-500; }
+.stat--rise .stat__value { color: brand.$rise-500; }
+.stat--warn .stat__icon { background: brand.$warn-100; color: brand.$warn-500; }
+.stat--brand .stat__icon { background: brand.$brand-100; color: brand.$brand-700; }
+
+@include breakpoint-down(lg) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@include breakpoint-down(sm) { .stats { grid-template-columns: minmax(0, 1fr); } }
+
+// ── 본문 + 오른쪽 패널 ───────────────────────────────────────────────
+.with-rail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: $spacing-06;
+  align-items: start;
+}
+// 그리드 칸은 기본이 min-width:auto 라 안쪽 표가 칸을 밀어낸다.
+// 이걸 안 잡으면 표의 가로 스크롤이 안 걸리고 페이지 전체가 밀린다.
+.with-rail > * { min-width: 0; }
+.rail { position: sticky; top: calc(60px + 1.5rem); display: grid; gap: $spacing-05; }
+
+@include breakpoint-down(xlg) {
+  .with-rail { grid-template-columns: 1fr; }
+  .rail { position: static; }
+}
+
+// ── 순위표 ───────────────────────────────────────────────────────────
+.ranktable {
+  width: 100%;
+  // 열이 10개다. 폭이 모자라면 짜부라뜨리지 말고 **가로로 스크롤**한다 —
+  // 짜부라지면 '8.07억 이상' 이 두 줄로 접히고 단지명이 다섯 줄이 된다.
+  min-width: 800px;
+  border-collapse: collapse;
+  @include type-style('body-compact-01');
+
+  // 열이 9개다. 좌우 여백을 크게 주면 마지막 열이 화면 밖으로 밀린다.
+  th, td {
+    padding: $spacing-04 $spacing-03;
+    border-bottom: 1px solid $border-subtle-01;
+    text-align: left;
+    vertical-align: middle;
+  }
+  // 첫 칸과 끝 칸만 바깥 여백을 준다
+  th:first-child, td:first-child { padding-left: $spacing-05; }
+  th:last-child, td:last-child { padding-right: $spacing-05; }
+  thead th {
+    @include type-style('label-01');
+    color: $text-secondary;
+    font-weight: 600;
+    background: $layer-02;
+    white-space: nowrap;
+  }
+  td.num, th.num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;   // '8.07억 이상' 이 두 줄로 접히면 안 된다
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr:hover td { background: $layer-02; }
+}
+// 1위 줄은 배경으로 표시한다 — 글씨를 키우면 표의 리듬이 깨진다
+.ranktable tbody tr.is-top td { background: brand.$brand-100; }
+.ranktable tbody tr.is-top:hover td { background: brand.$brand-200; }
+
+// 단지 칸 — 이름 한 줄, 위치 한 줄. 두 줄을 넘기지 않는다.
+// 넘치면 줄바꿈이 아니라 말줄임으로 자른다 (전체는 링크를 눌러 본다).
+.ranktable td:nth-child(2) { min-width: 168px; max-width: 220px; }
+.rank-name {
+  font-weight: 600;
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rank-region {
+  @include type-style('label-01');
+  color: $text-secondary;
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+// 등급 — 색만 쓰지 않는다. 말이 먼저고 색은 거들 뿐이다.
+.rate {
+  @include type-style('label-01');
+  font-weight: 600;
+  white-space: nowrap;
+}
+.rate--high { color: brand.$rise-500; }
+.rate--mid  { color: $text-secondary; }
+.rate--low  { color: brand.$fall-500; }
+.rate-pill {
+  @include type-style('label-01');
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 2px $spacing-03;
+  white-space: nowrap;
+  border: 1px solid;
+}
+.rate-pill--high { color: brand.$ok-500;   background: brand.$ok-100;   border-color: rgba(27,107,69,.3); }
+.rate-pill--mid  { color: $text-secondary; background: brand.$gray-100; border-color: brand.$gray-300; }
+.rate-pill--low  { color: brand.$warn-500; background: brand.$warn-100; border-color: rgba(138,90,0,.3); }
+
+// 신뢰도 막대 + 숫자
+// span 은 기본이 inline 이라 height 가 안 먹는다 — 막대가 사라진다
+.meter { display: inline-block; min-width: 62px; width: 62px; }
+.meter__bar {
+  display: block;
+  height: 6px;
+  border-radius: 999px;
+  background: brand.$gray-200;
+  overflow: hidden;
+}
+.meter__fill { display: block; height: 100%; border-radius: 999px; background: brand.$brand-700; }
+.meter__text {
+  @include type-style('label-01');
+  color: $text-secondary;
+  font-variant-numeric: tabular-nums;
+  display: block;
+  text-align: right;
+  margin-top: 2px;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px; height: 32px;
+  border-radius: brand.$radius-sm;
+  border: 1px solid $border-subtle-01;
+  color: $text-secondary;
+  text-decoration: none;
+
+  &:hover { background: $layer-02; color: brand.$brand-700; border-color: brand.$brand-300; }
+  &:focus-visible { outline: 2px solid brand.$brand-700; outline-offset: 1px; }
+}
+
+// 표 아래 줄 — 총 개수 / 페이지 이동
+.tablefoot {
+  display: flex;
+  align-items: center;
+  gap: $spacing-05;
+  padding: $spacing-05 $spacing-06;
+  border-top: 1px solid $border-subtle-01;
+  @include type-style('label-01');
+  color: $text-secondary;
+}
+.tablefoot__pages { margin-left: auto; display: flex; gap: $spacing-02; }
+.tablefoot__pages a, .tablefoot__pages span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px; height: 30px;
+  padding: 0 $spacing-03;
+  border: 1px solid $border-subtle-01;
+  border-radius: brand.$radius-sm;
+  text-decoration: none;
+  color: $text-secondary;
+  font-variant-numeric: tabular-nums;
+}
+.tablefoot__pages a:hover { background: $layer-02; }
+.tablefoot__pages [aria-current='page'] {
+  background: brand.$brand-700; color: #fff; border-color: brand.$brand-700; font-weight: 600;
+}
+
+// ── 오른쪽 패널 안쪽 ─────────────────────────────────────────────────
+.rail__section + .rail__section {
+  margin-top: $spacing-05;
+  padding-top: $spacing-05;
+  border-top: 1px solid $border-subtle-01;
+}
+.rail__label {
+  @include type-style('productive-heading-01');
+  margin: 0 0 $spacing-03;
+}
+.rail__big {
+  @include type-style('productive-heading-04');
+  color: brand.$brand-700;
+  font-variant-numeric: tabular-nums;
+}
+.rail__head { display: flex; align-items: baseline; gap: $spacing-04; flex-wrap: wrap; }
+.rail__aside { margin-left: auto; text-align: right; }
+
+// 추이 차트 (SVG 직접 그린다 — 라이브러리를 싣지 않는다)
+.chart { width: 100%; height: auto; display: block; }
+.chart__legend {
+  display: flex;
+  gap: $spacing-05;
+  @include type-style('label-01');
+  color: $text-secondary;
+  margin-bottom: $spacing-03;
+}
+.chart__key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  &::before {
+    content: '';
+    width: 14px; height: 3px;
+    border-radius: 2px;
+    background: currentColor;
+  }
+}
+.chart__key--sale { color: brand.$rise-500; }
+.chart__key--jeonse { color: brand.$fall-500; }
+
+.terms__input { width: 108px; margin-top: 2px; }
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }

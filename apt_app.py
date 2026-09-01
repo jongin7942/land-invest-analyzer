@@ -79,6 +79,26 @@ def _watch_ids() -> list[int]:
 
 
 @app.context_processor
+def _inject_asof():
+    """상단 바의 '데이터 기준' — 실거래 마지막 신고일.
+
+    화면마다 다른 날짜를 쓰면 사용자가 어느 시점 이야기인지 잃어버린다.
+    여기 한 곳에서만 만든다. 실거래가 없으면 아무것도 표시하지 않는다 —
+    '오늘' 로 채우면 오늘 데이터인 것처럼 보인다.
+    """
+    try:
+        with ro_conn() as conn:
+            row = conn.execute("SELECT MAX(deal_ymd) FROM trade").fetchone()
+    except sqlite3.Error:
+        return {"data_asof": None}
+    ymd = row[0] if row else None
+    if not ymd or len(str(ymd)) < 8:
+        return {"data_asof": None}
+    ymd = str(ymd)
+    return {"data_asof": f"{ymd[:4]}.{ymd[4:6]}.{ymd[6:8]}"}
+
+
+@app.context_processor
 def _inject_watch():
     ids = _watch_ids()
     return {"watch_ids": ids, "watch_max": WATCH_MAX}
@@ -105,6 +125,16 @@ def _set_watch(ids: list[int], target: str):
     resp = make_response(redirect(target, code=303))
     resp.set_cookie(WATCH_COOKIE, ",".join(str(i) for i in ids[:WATCH_MAX]),
                     max_age=60 * 60 * 24 * 30, samesite="Lax", path="/")
+    return resp
+
+
+@app.route("/nav-toggle", methods=["POST"])
+def nav_toggle():
+    """왼쪽 메뉴 접기/펴기. 쿠키에만 남는 개인 설정이다."""
+    mini = request.cookies.get("nav") != "mini"
+    resp = make_response(redirect(_safe_next(request.form.get("next")), code=303))
+    resp.set_cookie("nav", "mini" if mini else "wide",
+                    max_age=60 * 60 * 24 * 180, samesite="Lax", path="/")
     return resp
 
 
@@ -251,7 +281,9 @@ def home():
                                    lock=lock)
         view = _rank_view(conn, cash_in, house_count, horizon, limit) \
             if cash_in else None
-    return render_template("apt_home.html", form=form, result=view,
+        rail = (_rail(conn, view["rows"][0])
+                if view and view.get("rows") else None)
+    return render_template("apt_home.html", form=form, result=view, rail=rail,
                            lock=None, unlocked=lock if override else None)
 
 
@@ -340,6 +372,40 @@ def _rank_view(conn, cash_in, house_count, horizon, limit):
     }
 
 
+# ── 표에 들어가는 등급 ────────────────────────────────────────────────
+#
+# 새 점수를 만들지 않는다. 이미 계산된 **모델 점수를 말로 바꿔서 보여줄 뿐**이다.
+# 여기서 따로 산식을 만들면 상세화면의 숫자와 표의 등급이 어긋나고,
+# 사용자는 어느 쪽이 맞는지 알 방법이 없다.
+#
+# 모델 점수는 0.0~1.0 이다. 경계는 3등분보다 살짝 위로 잡았다 —
+# 절반쯤 되는 값을 '높음' 이라고 부르면 등급이 아무 말도 안 하게 된다.
+RATING_COLUMNS = [
+    ("value",    "저평가",    ("저평가", "보통", "주의")),
+    ("momentum", "상승 여력", ("높음", "보통", "낮음")),
+    ("jeonse",   "하락 방어", ("높음", "보통", "낮음")),
+]
+RATING_HIGH = 0.66
+RATING_MID = 0.40
+
+
+def _ratings(c) -> list[dict]:
+    """모델 점수 → 표에 넣을 등급. 못 구한 모델은 '확인 불가' 로 남는다."""
+    out = []
+    for model, label, (hi, mid, lo) in RATING_COLUMNS:
+        score = c.consensus.scores.get(model)
+        if score is None or not score.known or score.value is None:
+            out.append({"key": model, "label": label, "level": None,
+                        "text": None, "value": None})
+            continue
+        v = score.value
+        level = "high" if v >= RATING_HIGH else ("mid" if v >= RATING_MID else "low")
+        out.append({"key": model, "label": label, "level": level,
+                    "text": {"high": hi, "mid": mid, "low": lo}[level],
+                    "value": v})
+    return out
+
+
 def _card(c, rank, meta, house_count):
     """카드 하나에 들어갈 것만 추린다 — 이유 / 주의 / 매수가 구간 / 업사이드."""
     from apt_engine.ranking import explain as explain_mod
@@ -385,6 +451,47 @@ def _card(c, rank, meta, house_count):
         "priced": market["시장이 반영한 것"],
         "coverage": c.features.coverage,
         "house_count": house_count,
+        "ratings": _ratings(c),
+        # 보유기간 뒤의 세후수익은 이 엔진이 아직 내지 않는다. 0 이나
+        # 추정치를 넣지 않고 비워 둔다 — 표에서 '확인 불가' 로 나온다.
+        "after_tax_return": None,
+    }
+
+
+# ── 오른쪽 패널: "왜 1위인가요?" ──────────────────────────────────────
+#
+# 1위 하나를 자세히 푼다. §6 이 요구한 것 — 종합점수만 크게 보여주지 않고
+# 점수를 올린 요인·내린 요인·원본 데이터를 같이 둔다.
+#
+# 새로 계산하는 것은 **없다.** 이미 나온 카드 값과 스냅샷 시계열을
+# 옮겨 담을 뿐이다.
+
+def _price_series(conn, complex_id: int, band: str, months: int = 72) -> dict:
+    """실거래가·전세가 추이. 차트는 SVG 로 그리므로 값만 넘긴다."""
+    sale = conn.execute(
+        "SELECT as_of_ym, representative_price FROM price_snapshot "
+        "WHERE complex_id=? AND area_band=? ORDER BY as_of_ym DESC LIMIT ?",
+        (complex_id, band, months)).fetchall()
+    jeonse = conn.execute(
+        "SELECT as_of_ym, representative_deposit FROM jeonse_snapshot "
+        "WHERE complex_id=? AND area_band=? ORDER BY as_of_ym DESC LIMIT ?",
+        (complex_id, band, months)).fetchall()
+    return {
+        "sale": [(r[0], r[1]) for r in reversed(sale)],
+        "jeonse": [(r[0], r[1]) for r in reversed(jeonse)],
+    }
+
+
+def _rail(conn, row) -> dict:
+    """1위 카드 하나를 오른쪽 패널용으로 푼다."""
+    series = _price_series(conn, row["id"], row["band"])
+    # 평당가 — 전용면적 기준이 아니라 공급면적 기준 관행값이라 우리는
+    # 내지 않는다. 잘못 쓰면 다른 사이트 숫자와 안 맞는데 왜 다른지
+    # 설명할 근거가 없다.
+    return {
+        "row": row,
+        "series": series,
+        "has_series": bool(series["sale"]),
     }
 
 

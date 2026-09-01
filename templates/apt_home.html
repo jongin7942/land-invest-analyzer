@@ -1,6 +1,8 @@
 {% extends "apt_base.html" %}
 {% import "_macros.html" as ui %}
-{% block title %}아파트 투자분석{% endblock %}
+{% import "_icons.html" as ico %}
+{% block title %}투자처 찾기{% endblock %}
+{% block pagetitle %}수도권 아파트 투자 추천{% endblock %}
 {% block body %}
 
 {% if lock %}
@@ -21,7 +23,7 @@
   </p>
 </div>
 
-<h2 style="margin-top:2rem">풀리는 조건</h2>
+<h2>풀리는 조건</h2>
 <div class="surface">
   <table class="kv">
     <tr>
@@ -76,7 +78,7 @@
   </table>
 </div>
 
-<div class="notice" style="margin-top:2rem">
+<div class="notice" style="margin-top:1.5rem">
   <span class="notice__title">그때까지 쓸 수 있는 것</span>
   <a href="/search">단지 검색</a>에서 이름으로 찾아 대표가격·전세가율을 보고,
   매수가를 넣어 실투자금을 계산할 수 있습니다.
@@ -91,8 +93,43 @@
 
 {% else %}
 
-<h1 class="page-title">얼마로, 몇 채째 사시겠습니까</h1>
-<p class="page-sub">두 가지만 넣으면 순위가 나옵니다.</p>
+{# ═══ 나의 투자 조건 ═══════════════════════════════════════════════ #}
+<form class="terms" method="get" id="terms">
+  <span class="terms__title">나의 투자 조건</span>
+
+  <label class="terms__item" for="cash">
+    <span class="terms__icon">{{ ico.icon('won') }}</span>
+    <span>
+      <span class="terms__label">투자금 (억)</span>
+      <input class="cds--text-input terms__input" type="text" id="cash" name="cash"
+             value="{{ form.cash }}" placeholder="3" inputmode="decimal" autofocus>
+    </span>
+  </label>
+
+  <label class="terms__item" for="house_count">
+    <span class="terms__icon">{{ ico.icon('user') }}</span>
+    <span>
+      <span class="terms__label">취득 후 주택수</span>
+      <input class="cds--text-input terms__input" type="number" id="house_count"
+             name="house_count" value="{{ form.house_count }}" min="1" max="5">
+    </span>
+  </label>
+
+  <label class="terms__item" for="horizon">
+    <span class="terms__icon">{{ ico.icon('calendar') }}</span>
+    <span>
+      <span class="terms__label">보유기간 (년)</span>
+      <input class="cds--text-input terms__input" type="number" id="horizon"
+             name="horizon" value="{{ form.horizon }}" min="1" max="10">
+    </span>
+  </label>
+
+  {% if unlocked %}<input type="hidden" name="unlock" value="1">{% endif %}
+  {% if mode == MODE_EXPERT %}<input type="hidden" name="mode" value="expert">{% endif %}
+  <div class="terms__action">
+    <button class="cds--btn cds--btn--primary" type="submit">조건 적용</button>
+  </div>
+</form>
 
 {% if unlocked %}
 <div class="notice notice--danger">
@@ -101,31 +138,6 @@
   <a href="/"><b>잠금 화면으로 돌아가기</b></a>
 </div>
 {% endif %}
-
-<form class="form" method="get">
-  <div class="form__fields">
-    <div class="field">
-      <label class="field__label" for="cash">투자금 (억)</label>
-      <input class="cds--text-input" type="text" id="cash" name="cash"
-             value="{{ form.cash }}" placeholder="3" inputmode="decimal" autofocus>
-    </div>
-    <div class="field">
-      <label class="field__label" for="house_count">취득 후 주택수</label>
-      <input class="cds--text-input" type="number" id="house_count" name="house_count"
-             value="{{ form.house_count }}" min="1" max="5">
-    </div>
-    <div class="field">
-      <label class="field__label" for="horizon">보유기간 (년)</label>
-      <input class="cds--text-input" type="number" id="horizon" name="horizon"
-             value="{{ form.horizon }}" min="1" max="10">
-    </div>
-    {% if unlocked %}<input type="hidden" name="unlock" value="1">{% endif %}
-    {% if mode == MODE_EXPERT %}<input type="hidden" name="mode" value="expert">{% endif %}
-    <div class="field">
-      <button class="cds--btn cds--btn--primary" type="submit">순위 보기</button>
-    </div>
-  </div>
-</form>
 
 {% if not result %}
   {{ ui.empty_state(
@@ -150,194 +162,280 @@
   </div>
   {% endif %}
 
-  <p class="small muted">
-    {{ result.summary }} · 시장국면 {{ result.regime or "확인 불가" }}
+  {% set top = result.rows[0] if result.rows else None %}
+
+  <h2 style="margin-top:0">
+    {% if form.cash %}투자금 {{ form.cash }}억{% endif %} 최적 투자처
+    TOP {{ result.total or 0 }}
+  </h2>
+  <p class="page-sub" style="margin-bottom:1.25rem">
+    대출·세금·공급·상승여력·하락위험을 반영한 결과입니다.
+    · {{ result.summary }} · 시장국면 {{ result.regime or "확인 불가" }}
   </p>
+
+  {# ── 요약 지표 ─────────────────────────────────────────────────── #}
+  <div class="stats">
+    <div class="stat stat--brand">
+      <div class="stat__body">
+        <span class="stat__label">추천 1위</span>
+        <span class="stat__value">
+          {% if result.cash_recommended %}현금 보유 / 대기
+          {% elif top %}{{ top.name }}
+          {% else %}<span class="grade grade--unknown">없음</span>{% endif %}
+        </span>
+      </div>
+      <span class="stat__icon">{{ ico.icon('trophy') }}</span>
+    </div>
+
+    <div class="stat">
+      <div class="stat__body">
+        <span class="stat__label">필요 현금 (1위)</span>
+        <span class="stat__value">
+          {% if top and top.equity_no_loan is not none %}{{ top.equity_no_loan | eok }}
+          {% else %}{{ ui.value(none, reason='매수 부대비용 규칙이 부족합니다') }}{% endif %}
+        </span>
+      </div>
+      <span class="stat__icon">{{ ico.icon('wallet') }}</span>
+    </div>
+
+    <div class="stat">
+      <div class="stat__body">
+        <span class="stat__label">{{ form.horizon }}년 기대수익</span>
+        <span class="stat__value">
+          {# 세후 기대수익은 이 엔진이 아직 내지 않는다. 추정치를 넣으면
+             그게 화면에서 가장 큰 숫자가 되어 전부를 좌우한다. #}
+          {{ ui.value(none, reason='세후 기대수익은 아직 계산하지 않습니다 — 가중치 학습과 세금 규칙이 먼저입니다') }}
+        </span>
+      </div>
+      <span class="stat__icon">{{ ico.icon('trend') }}</span>
+    </div>
+
+    <div class="stat {% if top and top.confidence >= 70 %}stat--good{% elif top %}stat--warn{% endif %}">
+      <div class="stat__body">
+        <span class="stat__label">데이터 신뢰도 (1위)</span>
+        <span class="stat__value">
+          {% if not top %}—
+          {% elif top.confidence >= 70 %}높음
+          {% elif top.confidence >= 40 %}보통
+          {% else %}낮음{% endif %}
+          {% if top %}<span class="small muted">{{ top.confidence | round(0) | int }}/100</span>{% endif %}
+        </span>
+      </div>
+      <span class="stat__icon">{{ ico.icon('shield') }}</span>
+    </div>
+  </div>
 
   {% if result.cash_recommended %}
   {# §12 억지로 TOP10 을 만들지 않는다 — 현금이 이기면 현금이 1순위다 #}
-  <div class="result" style="border-left:3px solid var(--cds-support-warning)">
-    <div class="result__head">
-      <span class="rank rank--top">1</span>
-      <span class="result__name">현금 보유 / 대기</span>
-    </div>
-    <p style="margin:0">{{ result.cash_reason }}</p>
-    <p class="small muted" style="margin:.5rem 0 0">억지로 아파트를 추천하지 않습니다.</p>
+  <div class="notice notice--warn">
+    <span class="notice__title">1순위는 현금 보유 / 대기입니다.</span>
+    {{ result.cash_reason }} — 억지로 아파트를 추천하지 않습니다.
   </div>
   {% endif %}
 
-  {% if result.diagnosis %}
-  <div class="surface" style="margin-bottom:1.5rem">
-    <h2>후보가 0개인 이유</h2>
-    <ul class="reasons">
-      {% for r in result.diagnosis.reasons %}<li>{{ r | safe }}</li>{% endfor %}
-    </ul>
-    <table class="kv">
-      <tr><th>스냅샷이 있는 달</th>
-          <td>
-            {% set ms = result.diagnosis.snapshot_months %}
-            {% if not ms %}없음
-            {% elif ms | length <= 6 %}{{ ms | join(", ") }}
-            {% else %}
-              {# 120개를 한 줄로 쏟으면 아무도 안 읽는다. 범위만 보이고
-                 전체는 펼쳐서 본다 — 빠진 달을 찾을 때는 목록이 필요하다. #}
-              <span class="num">{{ ms[0] }}</span> ~ <span class="num">{{ ms[-1] }}</span>
-              · <span class="num">{{ ms | length }}</span>개월
-              {% call ui.evidence('전체 목록 보기') %}
-                <p class="small" style="word-break:break-all">{{ ms | join(", ") }}</p>
-              {% endcall %}
-            {% endif %}
-          </td></tr>
-      <tr><th>관측 가능 시점</th><td>{{ result.diagnosis.observable }}</td></tr>
-      <tr><th>후보 모집단</th><td><span class="num">{{ result.diagnosis.universe }}</span>개</td></tr>
-      {% if result.diagnosis.dropped %}
-      <tr><th>단계별 탈락</th>
-          <td>{% for k, v in result.diagnosis.dropped.items() %}{{ k }}
-              <span class="num">{{ v }}</span>개{% if not loop.last %} · {% endif %}{% endfor %}</td></tr>
-      {% endif %}
-    </table>
-    {% if result.diagnosis.dropped_examples %}
-      {% call ui.evidence('탈락 사유 예시', open=(mode == MODE_EXPERT)) %}
-        <ul class="bullets">
-          {% for stage, reason in result.diagnosis.dropped_examples %}
-            <li><span class="chip">{{ stage }}</span> {{ reason }}</li>
+  <div class="with-rail">
+    <div>
+      {% if result.rows %}
+      {# ── 순위표 ─────────────────────────────────────────────── #}
+      <div class="table-scroll">
+        <table class="ranktable">
+          <thead>
+            <tr>
+              <th class="num">순위</th>
+              <th>단지</th>
+              <th class="num">추천 매수가</th>
+              <th class="num">필요 현금</th>
+              <th>저평가</th>
+              <th>상승 여력</th>
+              <th>하락 방어</th>
+              <th class="num">{{ form.horizon }}년 세후수익</th>
+              <th>신뢰도</th>
+              <th><span class="sr-only">상세</span></th>
+            </tr>
+          </thead>
+          <tbody>
+          {% for r in result.rows %}
+            <tr {% if r.rank == 1 %}class="is-top"{% endif %}>
+              <td class="num"><span class="rank {% if r.rank <= 3 %}rank--top{% endif %}">{{ r.rank }}</span></td>
+              <td>
+                <a class="rank-name" href="/complex/{{ r.id }}?price={{ r.price }}&house_count={{ r.house_count }}{% if mode == MODE_EXPERT %}&mode=expert{% endif %}">{{ r.name }}</a>
+                <span class="rank-region"
+                      title="{{ r.region }} · 전용 {{ r.band | band }}">{{ r.region }} · {{ r.band | band }}</span>
+              </td>
+              <td class="num">
+                {% if r.strong_buy %}{{ r.strong_buy }}
+                {% else %}{{ ui.value(none, reason='매수가 앵커가 부족합니다') }}{% endif %}
+              </td>
+              <td class="num">
+                {% if r.equity_no_loan is none %}{{ ui.value(none, reason='매수 부대비용 규칙이 부족합니다') }}
+                {% else %}{{ r.equity_no_loan | eok }}{% if r.capital_unknown %}<span class="stale"> 이상</span>{% endif %}{% endif %}
+              </td>
+              {% for rating in r.ratings %}
+                <td>{{ ui.rate(rating, pill=loop.first) }}</td>
+              {% endfor %}
+              <td class="num">
+                {{ ui.value(r.after_tax_return, reason='세후 수익은 아직 계산하지 않습니다') }}
+              </td>
+              <td>{{ ui.meter(r.confidence) }}</td>
+              <td>
+                <a class="icon-btn" href="/complex/{{ r.id }}?price={{ r.price }}&house_count={{ r.house_count }}{% if mode == MODE_EXPERT %}&mode=expert{% endif %}"
+                   title="{{ r.name }} 상세 분석">{{ ico.icon('doc', 18) }}</a>
+              </td>
+            </tr>
           {% endfor %}
-        </ul>
-      {% endcall %}
-    {% endif %}
-  </div>
-  {% endif %}
-
-  {% for r in result.rows %}
-  <article class="result">
-    <div class="result__head">
-      <span class="rank {% if r.rank <= 3 %}rank--top{% endif %}">{{ r.rank }}</span>
-      <span class="result__name">{{ r.name }}</span>
-      <span class="result__meta">{{ r.region }}
-        {%- if r.households %} · {{ "{:,}".format(r.households) }}세대{% endif %}
-        {%- if r.year %} · {{ r.year }}년{% endif %}
-        · 전용 {{ r.band | band }}</span>
-      <span class="result__scores">
-        <span class="chip">점수 {{ r.score | round(0) | int }}</span>
-        <span class="chip {% if r.confidence < 50 %}chip--warn{% endif %}">근거 {{ r.confidence | round(0) | int }}</span>
-      </span>
-    </div>
-
-    <div class="grid-3">
-      <div class="metric">
-        <span class="metric__label">현재 대표가격</span>
-        <span class="metric__value">{{ r.price | eok }}</span>
-        <span class="metric__note">{{ ui.grade('CONFIRMED') }} 실거래 기준</span>
-      </div>
-      <div class="metric">
-        <span class="metric__label">대출 없이 필요한 현금</span>
-        <span class="metric__value">
-          {% if r.equity_no_loan is none %}{{ ui.value(none, reason='매수 부대비용을 구하지 못했습니다') }}
-          {% else %}{{ r.equity_no_loan | eok }}{% endif %}
-        </span>
-        {% if r.mortgage_unknown %}
-          <span class="metric__note">
-            대출 반영 시 <b>{{ r.equity | eok }}</b>까지 줄지만,
-            <span class="grade grade--unknown">한도 {{ r.mortgage_unknown | length }}개 확인 불가</span>라
-            실제로는 더 큽니다
-          </span>
-        {% elif r.equity is not none and r.equity != r.equity_no_loan %}
-          <span class="metric__note">대출 반영 시 {{ r.equity | eok }}</span>
-        {% endif %}
-      </div>
-      <div class="metric">
-        <span class="metric__label">사도 되는 가격</span>
-        {% if r.strong_buy %}
-          <span class="metric__value" style="font-size:1rem;line-height:1.4">
-            <b>{{ r.strong_buy }}</b> 이하면 적극
-          </span>
-          <span class="metric__note">
-            {{ r.fair_buy }} 까지 무난 · {{ r.wait }} 넘으면 대기
-          </span>
-          {% if r.verdict %}<span class="chip" style="margin-top:.25rem">{{ r.verdict }}</span>{% endif %}
-        {% else %}
-          <span class="metric__value" style="font-size:1rem">
-            {{ ui.value(none, reason='매수가 앵커가 부족합니다') }}
-          </span>
-        {% endif %}
-      </div>
-    </div>
-
-    <div class="grid-3" style="margin-top:1rem">
-      <div>
-        <span class="metric__label">좋은 이유</span>
-        <ul class="bullets">
-          {% for w in r.why_buy %}
-            <li>{{ w["이유"] }} <span class="muted small">(기여 {{ w["기여"] }})</span></li>
-          {% else %}
-            <li><span class="grade grade--unknown">확인된 이유 없음</span></li>
-          {% endfor %}
-        </ul>
-      </div>
-      <div>
-        <span class="metric__label">주의할 점</span>
-        <ul class="bullets">
-          {% for w in r.why_not %}
-            <li>{{ w["이유"] }}{% if w["설명"] %} <span class="muted small">— {{ w["설명"] }}</span>{% endif %}</li>
-          {% else %}
-            <li class="muted">확인된 위험 없음 (확인 못 한 위험은 별개입니다)</li>
-          {% endfor %}
-        </ul>
-      </div>
-      <div>
-        <span class="metric__label">업사이드 — 아직 반영 안 된 것</span>
-        <ul class="bullets">
-          {% for u in r.upside %}<li>{{ u }}</li>
-          {% else %}<li class="muted">없음</li>{% endfor %}
-        </ul>
-        {% if r.peak %}<span class="metric__note">과거 고점 {{ r.peak }}</span>{% endif %}
-      </div>
-    </div>
-
-    {% if mode == MODE_EXPERT %}
-      {% call ui.evidence('이 점수가 어떻게 나왔나', open=false) %}
-        <table class="kv">
-          <tr><th>종합점수</th><td><span class="num">{{ r.score | round(2) }}</span></td></tr>
-          <tr><th>근거 충분도</th><td><span class="num">{{ r.confidence | round(2) }}</span>
-              <span class="muted small">— 점수와 섞지 않습니다(§10)</span></td></tr>
-          <tr><th>Kill 사유</th><td>{{ r.kill }}</td></tr>
-          <tr><th>데이터 커버리지</th>
-              <td><span class="num">{{ (r.coverage * 100) | round(0) | int }}</span>%</td></tr>
-          <tr><th>가중치 상태</th>
-              <td>{{ result.weights_label }}
-              {% if result.heuristic %}<span class="chip chip--warn">학습 전</span>{% endif %}</td></tr>
+          </tbody>
         </table>
-      {% endcall %}
-    {% endif %}
 
-    <div class="row" style="margin-top:1rem;align-items:center">
-      <a class="cds--btn cds--btn--tertiary"
-         href="/complex/{{ r.id }}?price={{ r.price }}&house_count={{ r.house_count }}{% if mode == MODE_EXPERT %}&mode=expert{% endif %}">
-        이 단지 정확히 계산 →
-      </a>
-      <span class="small muted">
-        Kill {{ r.kill }} · 데이터 커버리지 {{ (r.coverage * 100) | round(0) | int }}%
-      </span>
+        <div class="tablefoot">
+          <span>총 {{ result.total }}개 단지</span>
+          {% set qbase = 'cash=' ~ form.cash ~ '&house_count=' ~ form.house_count ~ '&horizon=' ~ form.horizon ~ (('&unlock=1') if unlocked else '') ~ (('&mode=expert') if mode == MODE_EXPERT else '') %}
+          <span class="tablefoot__pages">
+            {% for n in [10, 30] %}
+              {% if form.limit == n %}
+                <span aria-current="page">{{ n }}개</span>
+              {% else %}
+                <a href="?{{ qbase }}&limit={{ n }}">{{ n }}개</a>
+              {% endif %}
+            {% endfor %}
+          </span>
+        </div>
+      </div>
+
+      <p class="field__hint" style="margin-top:.75rem">
+        <b>저평가·상승 여력·하락 방어</b>는 새로 만든 점수가 아니라 이미 계산된
+        모델 점수를 말로 바꾼 것입니다. 칸에 마우스를 올리면 원래 점수가 보입니다.
+        <b>세후수익</b>은 아직 내지 않습니다 — 가중치 학습과 세금 규칙이 먼저입니다.
+      </p>
+      {% endif %}
+
+      {% if result.diagnosis %}
+      <div class="surface" style="margin-top:1.5rem">
+        <h2 style="margin-top:0">후보가 0개인 이유</h2>
+        <ul class="reasons">
+          {% for r in result.diagnosis.reasons %}<li>{{ r | safe }}</li>{% endfor %}
+        </ul>
+        <table class="kv">
+          <tr><th>스냅샷이 있는 달</th>
+              <td>
+                {% set ms = result.diagnosis.snapshot_months %}
+                {% if not ms %}없음
+                {% elif ms | length <= 6 %}{{ ms | join(", ") }}
+                {% else %}
+                  <span class="num">{{ ms[0] }}</span> ~ <span class="num">{{ ms[-1] }}</span>
+                  · <span class="num">{{ ms | length }}</span>개월
+                  {% call ui.evidence('전체 목록 보기') %}
+                    <p class="small" style="word-break:break-all">{{ ms | join(", ") }}</p>
+                  {% endcall %}
+                {% endif %}
+              </td></tr>
+          <tr><th>관측 가능 시점</th><td>{{ result.diagnosis.observable }}</td></tr>
+          <tr><th>후보 모집단</th><td><span class="num">{{ result.diagnosis.universe }}</span>개</td></tr>
+          {% if result.diagnosis.dropped %}
+          <tr><th>단계별 탈락</th>
+              <td>{% for k, v in result.diagnosis.dropped.items() %}{{ k }}
+                  <span class="num">{{ v }}</span>개{% if not loop.last %} · {% endif %}{% endfor %}</td></tr>
+          {% endif %}
+        </table>
+        {% if result.diagnosis.dropped_examples %}
+          {% call ui.evidence('탈락 사유 예시', open=(mode == MODE_EXPERT)) %}
+            <ul class="bullets">
+              {% for stage, reason in result.diagnosis.dropped_examples %}
+                <li><span class="chip">{{ stage }}</span> {{ reason }}</li>
+              {% endfor %}
+            </ul>
+          {% endcall %}
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {% if not result.rows and not result.diagnosis and not result.cash_recommended %}
+        {{ ui.empty_state(
+             '○', '조건에 맞는 단지가 없습니다',
+             '투자금으로 실제로 살 수 있으면서, 지금 사는 것이 다른 대안보다 나은 단지를
+              찾지 못했습니다. 억지로 순위를 만들지 않습니다.',
+             reasons=['투자금을 올리면 후보가 늘어납니다',
+                      '실거래 수집이 진행 중이면 후보 모집단 자체가 아직 작습니다'],
+             actions=[('/status', '데이터 현황 보기')]) }}
+      {% endif %}
     </div>
-  </article>
-  {% endfor %}
 
-  {% if not result.rows and not result.diagnosis and not result.cash_recommended %}
-    {{ ui.empty_state(
-         '○', '조건에 맞는 단지가 없습니다',
-         '투자금으로 실제로 살 수 있으면서, 지금 사는 것이 다른 대안보다 나은 단지를
-          찾지 못했습니다. 억지로 순위를 만들지 않습니다.',
-         reasons=['투자금을 올리면 후보가 늘어납니다',
-                  '실거래 수집이 진행 중이면 후보 모집단 자체가 아직 작습니다'],
-         actions=[('/status', '데이터 현황 보기')]) }}
-  {% endif %}
+    {# ── 오른쪽: 왜 1위인가요? ────────────────────────────────── #}
+    <aside class="rail">
+      {% if top %}
+      <div class="surface">
+        <h2 class="card-title" style="margin-bottom:1rem">왜 1위인가요?</h2>
 
-  {% set qbase = 'cash=' ~ form.cash ~ '&house_count=' ~ form.house_count ~ '&horizon=' ~ form.horizon ~ (('&mode=expert') if mode == MODE_EXPERT else '') %}
-  {% if result.rows and result.total > result.rows | length %}
-    <p class="pager"><a href="?{{ qbase }}&limit=30">11~30위 더 보기 →</a></p>
-  {% elif result.rows and form.limit > 10 %}
-    <p class="pager"><a href="?{{ qbase }}&limit=10">← 상위 10개만 보기</a></p>
-  {% endif %}
+        <div class="rail__section">
+          <p class="rail__label">핵심 투자 논리</p>
+          <ul class="bullets">
+            {% for w in top.why_buy %}
+              <li>{{ w["이유"] }} <span class="muted small">(기여 {{ w["기여"] }})</span></li>
+            {% else %}
+              <li><span class="grade grade--unknown">확인된 이유 없음</span></li>
+            {% endfor %}
+          </ul>
+        </div>
+
+        <div class="rail__section">
+          <p class="rail__label">추천 매수가</p>
+          <div class="rail__head">
+            <span class="rail__big">
+              {% if top.strong_buy %}{{ top.strong_buy }}
+              {% else %}{{ ui.value(none, reason='매수가 앵커가 부족합니다') }}{% endif %}
+            </span>
+            <span class="rail__aside small muted">
+              현재 대표가격<br><b class="num">{{ top.price | eok }}</b>
+            </span>
+          </div>
+          {% if top.fair_buy %}
+            <p class="small muted" style="margin:.5rem 0 0">
+              {{ top.fair_buy }} 까지 무난 · {{ top.wait }} 넘으면 대기
+            </p>
+          {% endif %}
+        </div>
+
+        <div class="rail__section">
+          <p class="rail__label">
+            가장 큰 위험
+            {% if top.kill %}<span class="chip chip--warn">{{ top.kill }}</span>{% endif %}
+          </p>
+          <ul class="bullets">
+            {% for w in top.why_not %}
+              <li>{{ w["이유"] }}{% if w["설명"] %} <span class="muted small">— {{ w["설명"] }}</span>{% endif %}</li>
+            {% else %}
+              <li class="muted">확인된 위험 없음 (확인 못 한 위험은 별개입니다)</li>
+            {% endfor %}
+          </ul>
+        </div>
+
+        {% if rail and rail.has_series %}
+        <div class="rail__section">
+          <p class="rail__label">실거래가 · 전세가 추이</p>
+          {{ ui.trend_chart(rail.series.sale, rail.series.jeonse) }}
+        </div>
+        {% endif %}
+
+        <div class="rail__section">
+          <a class="cds--btn cds--btn--primary" style="width:100%;justify-content:center"
+             href="/complex/{{ top.id }}?price={{ top.price }}&house_count={{ top.house_count }}{% if mode == MODE_EXPERT %}&mode=expert{% endif %}">
+            상세 분석 보기 {{ ico.icon('external', 16) }}
+          </a>
+        </div>
+
+        <div class="rail__section">
+          <p class="small muted" style="margin:0">
+            국토교통부 실거래가 · 공급계획<br>
+            데이터 기준 {{ data_asof or '확인 불가' }}
+            · 데이터 커버리지 {{ (top.coverage * 100) | round(0) | int }}%
+          </p>
+          <p class="small muted" style="margin:.5rem 0 0">
+            매물 호가는 섞지 않습니다 — 여기 값은 전부 실제 체결된 거래입니다.
+          </p>
+        </div>
+      </div>
+      {% endif %}
+    </aside>
+  </div>
 
 {% endif %}
 

@@ -94,7 +94,15 @@ p {
 .surface {
   background: $layer-01;
   border: 1px solid $border-subtle-01;
+  border-radius: brand.$radius;
+  box-shadow: brand.$shadow-card;
   padding: $spacing-06;
+}
+
+// 카드 안에서 제목 바로 아래 붙는 설명
+.card-title {
+  @include type-style('productive-heading-02');
+  margin: 0 0 $spacing-05;
 }
 
 .stack > * + * { margin-top: $spacing-05; }

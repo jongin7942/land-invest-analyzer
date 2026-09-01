@@ -15,38 +15,77 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
 {% block head %}{% endblock %}
 </head>
-<body>
+<body class="app{% if request.cookies.get('nav') == 'mini' %} app--mini{% endif %}">
 
-<header class="app-header">
-  <a class="app-header__name" href="/">아파트 투자분석</a>
+{% import "_icons.html" as ico %}
 
-  <nav class="app-nav" aria-label="주요 메뉴">
-    {% set nav = [('/', '순위'), ('/search', '단지 검색'), ('/compare', '비교'),
-                  ('/conclusion', '투자결론'), ('/status', '데이터 현황'),
-                  ('/unmatched', '미매칭')] %}
-    {% for href, label in nav %}
-      <a href="{{ href }}"
-         {% if request.path == href %}aria-current="page"{% endif %}>{{ label }}</a>
+<a class="skip" href="#main">본문으로 건너뛰기</a>
+
+{# ── 왼쪽 메뉴 ───────────────────────────────────────────────────────
+   가로 메뉴에서 세로로 옮겼다. 화면이 늘어날수록 가로 메뉴는 이름을
+   줄여야 하는데, 세로는 이름을 온전히 쓰면서 아이콘으로 위치를 기억시킨다. #}
+<aside class="sidebar">
+  <a class="sidebar__brand" href="/" aria-label="아파트 투자분석 홈">
+    <span class="sidebar__mark" aria-hidden="true">{{ ico.icon('compare', 24) }}</span>
+    <span class="sidebar__brandname">아파트 투자분석</span>
+  </a>
+
+  <nav class="sidebar__nav" aria-label="주요 메뉴">
+    {% set nav = [
+      ('/',           'home',    '투자처 찾기'),
+      ('/compare',    'table',   '아파트 비교'),
+      ('/search',     'search',  '단지 검색'),
+      ('/conclusion', 'check',   '투자결론'),
+      ('/status',     'clock',   '데이터 현황'),
+      ('/unmatched',  'doc',     '미매칭'),
+    ] %}
+    {% for href, name, label in nav %}
+      <a href="{{ href }}" class="sidebar__link"
+         {% if request.path == href %}aria-current="page"{% endif %}>
+        {{ ico.icon(name) }}<span class="sidebar__label">{{ label }}</span>
+      </a>
     {% endfor %}
   </nav>
 
-  {# 보기 모드 (§3) — 라우트를 나누지 않는다. 같은 데이터를 두 방식으로
-     보여주는 것이라 URL 을 나누면 링크 공유와 새로고침이 어긋난다. #}
-  <div class="mode-switch" role="group" aria-label="보기 모드">
-    {% set qs = request.args.to_dict() %}
-    {% for value, label, hint in [('easy', '쉬운 비교', '결론만 쉽게'),
-                                  ('expert', '전문가 분석', '근거까지 전부')] %}
-      {% set _ = qs.update({'mode': value}) %}
-      <a href="{{ request.path }}?{{ qs|urlencode }}"
-         aria-current="{{ 'true' if mode == value else 'false' }}"
-         title="{{ hint }}">{{ label }}</a>
-    {% endfor %}
-  </div>
-</header>
+  <form class="sidebar__collapse" method="post" action="/nav-toggle">
+    <input type="hidden" name="next" value="{{ request.full_path }}">
+    <button type="submit">
+      {{ ico.icon('chevron') }}<span class="sidebar__label">메뉴 접기</span>
+    </button>
+  </form>
+</aside>
 
-<main class="app-main" id="main">
-  {% block body %}{% endblock %}
-</main>
+<div class="shell">
+  {# ── 상단 바 ───────────────────────────────────────────────────── #}
+  <header class="topbar">
+    <h1 class="topbar__title">{% block pagetitle %}{{ self.title() }}{% endblock %}</h1>
+
+    <div class="topbar__right">
+      {% if data_asof %}
+        <span class="asof" title="이 화면의 숫자가 어느 시점 데이터인지">
+          {{ ico.icon('check', 16) }} 데이터 기준 {{ data_asof }}
+        </span>
+      {% endif %}
+
+      {# 보기 모드 (§3) — 라우트를 나누지 않는다. 같은 데이터를 두 방식으로
+         보여주는 것이라 URL 을 나누면 링크 공유와 새로고침이 어긋난다. #}
+      <div class="mode-switch" role="group" aria-label="보기 모드">
+        {% set qs = request.args.to_dict() %}
+        {% for value, label, hint in [('easy', '쉬운 비교', '결론만 쉽게'),
+                                      ('expert', '전문가 분석', '근거까지 전부')] %}
+          {% set _ = qs.update({'mode': value}) %}
+          <a href="{{ request.path }}?{{ qs|urlencode }}"
+             aria-current="{{ 'true' if mode == value else 'false' }}"
+             title="{{ hint }}">{{ label }}</a>
+        {% endfor %}
+      </div>
+    </div>
+  </header>
+
+  <main class="app-main" id="main">
+    {% block body %}{% endblock %}
+  </main>
+</div>
 
 </body>
 </html>

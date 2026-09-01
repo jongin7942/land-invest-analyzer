@@ -12,6 +12,8 @@
 
 .state {
   border: 1px solid $border-subtle-01;
+  border-radius: brand.$radius;
+  box-shadow: brand.$shadow-card;
   background: $layer-01;
   padding: $spacing-07 $spacing-06;
   text-align: left;
@@ -51,13 +53,14 @@
 
 // 진행률 — 수집이 얼마나 됐나
 .progress {
-  height: 6px;
+  height: 8px;
+  border-radius: 999px;
   background: $layer-accent-01;
   border: 1px solid $border-subtle-01;
   overflow: hidden;
   margin: $spacing-03 0;
 }
-.progress__fill { height: 100%; background: brand.$brand-700; display: block; }
+.progress__fill { height: 100%; background: brand.$brand-700; display: block; border-radius: 999px; }
 .progress__label {
   @include type-style('label-01');
   color: $text-secondary;
@@ -74,7 +77,8 @@
 
 // 잠금 — 백테스트 학습 전에는 순위를 보여주지 않는다
 .lock {
-  border: 1px solid brand.$warn-500;
+  border: 1px solid rgba(138,90,0,.35);
+  border-radius: brand.$radius;
   background: brand.$warn-100;
   padding: $spacing-05;
 }

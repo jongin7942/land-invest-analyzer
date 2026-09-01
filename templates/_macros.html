@@ -133,3 +133,85 @@
     </span>
   {%- endif -%}
 {% endmacro %}
+
+{# ── 추이 차트 (§5) ────────────────────────────────────────────────────
+   SVG 를 직접 그린다. 차트 라이브러리를 싣지 않는 이유는 두 가지다 —
+   선 두 개를 그리려고 100KB 를 받을 이유가 없고, 이 앱은 종인님 PC 에서
+   로컬로 도는데 CDN 이 막히면 차트 자리가 빈칸으로 남는다.
+
+   ⚠ y축을 0 에서 시작하지 않는다. 부동산 가격은 0 근처로 안 가서
+     0 부터 그리면 변화가 안 보인다. **대신 축 눈금에 실제 값을 적어**
+     기울기만 보고 오해하지 않게 한다. #}
+{% macro trend_chart(sale, jeonse, height=170) %}
+  {%- set pts = (sale or []) + (jeonse or []) -%}
+  {%- if not sale -%}
+    <p class="small muted" style="margin:0">추이를 그릴 스냅샷이 없습니다.</p>
+  {%- else -%}
+    {%- set vals = pts | map(attribute=1) | list -%}
+    {%- set lo = vals | min -%}
+    {%- set hi = vals | max -%}
+    {%- set span = (hi - lo) if hi > lo else 1 -%}
+    {%- set w = 320 -%}
+    {%- set h = height -%}
+    {%- set pad = 26 -%}
+    <div class="chart__legend">
+      <span class="chart__key chart__key--sale">실거래가</span>
+      {% if jeonse %}<span class="chart__key chart__key--jeonse">전세가</span>{% endif %}
+    </div>
+    <svg class="chart" viewBox="0 0 {{ w }} {{ h }}" role="img"
+         aria-label="실거래가와 전세가 추이. {{ sale[0][0] }}부터 {{ sale[-1][0] }}까지,
+                     실거래가 {{ sale[0][1] | eok }}에서 {{ sale[-1][1] | eok }}로 변화">
+      {# 가로 눈금 3개 — 값을 적어야 기울기만 보고 오해하지 않는다 #}
+      {% for f in [0, 0.5, 1.0] %}
+        {% set y = pad + (1 - f) * (h - pad * 2) %}
+        <line x1="0" y1="{{ y }}" x2="{{ w }}" y2="{{ y }}"
+              stroke="#e0e4e9" stroke-width="1"/>
+        <text x="0" y="{{ y - 4 }}" font-size="9" fill="#6b7684">
+          {{ (lo + span * f) | round(0) | int | eok }}
+        </text>
+      {% endfor %}
+      {% for series, colour in [(sale, '#c62828'), (jeonse, '#1565c0')] %}
+        {% if series and series | length > 1 %}
+          {%- set n = series | length -%}
+          <polyline fill="none" stroke="{{ colour }}" stroke-width="2"
+                    stroke-linejoin="round" stroke-linecap="round"
+                    points="{% for ym, v in series %}{{ (loop.index0 / (n - 1) * w) | round(1) }},{{ (pad + (1 - (v - lo) / span) * (h - pad * 2)) | round(1) }} {% endfor %}"/>
+        {% endif %}
+      {% endfor %}
+      <text x="0" y="{{ h - 4 }}" font-size="9" fill="#6b7684">{{ sale[0][0] }}</text>
+      <text x="{{ w }}" y="{{ h - 4 }}" font-size="9" fill="#6b7684"
+            text-anchor="end">{{ sale[-1][0] }}</text>
+    </svg>
+  {%- endif -%}
+{% endmacro %}
+
+
+{# ── 등급 한 칸 (순위표) ─────────────────────────────────────────── #}
+{% macro rate(r, pill=false) %}
+  {%- if r.level is none -%}
+    <span class="grade grade--unknown"
+          title="이 모델을 계산할 데이터가 부족합니다">확인 불가</span>
+  {%- elif pill -%}
+    <span class="rate-pill rate-pill--{{ r.level }}"
+          title="{{ r.label }} 모델 점수 {{ '%.2f'|format(r.value) }}">{{ r.text }}</span>
+  {%- else -%}
+    <span class="rate rate--{{ r.level }}"
+          title="{{ r.label }} 모델 점수 {{ '%.2f'|format(r.value) }}">{{ r.text }}</span>
+  {%- endif -%}
+{% endmacro %}
+
+
+{# ── 신뢰도 막대 ──────────────────────────────────────────────────── #}
+{% macro meter(v, of=100) %}
+  {%- if v is none -%}
+    <span class="grade grade--unknown">확인 불가</span>
+  {%- else -%}
+    {%- set pct = ((v / of) * 100) | round(0) | int -%}
+    <span class="meter">
+      <span class="meter__bar" role="img" aria-label="신뢰도 {{ v | round(0) | int }}점">
+        <span class="meter__fill" style="width:{{ [[pct, 0] | max, 100] | min }}%"></span>
+      </span>
+      <span class="meter__text">{{ v | round(0) | int }}/{{ of }}</span>
+    </span>
+  {%- endif -%}
+{% endmacro %}

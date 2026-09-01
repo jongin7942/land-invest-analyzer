@@ -11,6 +11,7 @@
 // 색과 라벨 둘 다로 구분한다 — 색만으로 구분하면 색각 이상인 사람이 못 읽는다.
 .grade {
   @include type-style('label-01');
+  border-radius: 999px;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -129,6 +130,7 @@
 // 근거 펼치기
 .evidence {
   border: 1px solid $border-subtle-01;
+  border-radius: brand.$radius-sm;
   background: $layer-02;
   margin-top: $spacing-03;
 }
@@ -159,7 +161,11 @@
 }
 
 // ── 비교표 (PC 가로 비교) ────────────────────────────────────────────
-.compare-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.compare-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  contain: paint;   // 넘침 영역이 조상으로 전파되는 것을 막는다 (_blocks 참고)
+}
 
 .compare {
   width: 100%;
