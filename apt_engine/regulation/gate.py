@@ -53,16 +53,48 @@ CORPORATE_ONLY = "CORPORATE_ONLY"
 SPECIFIC_BUYER_TYPE = "SPECIFIC_BUYER_TYPE"
 SCOPE_UNKNOWN = "UNKNOWN"
 
+# ── 부동산 유형 (지시서 §2) ───────────────────────────────────────────
+APARTMENT = "APARTMENT"
+ROW_HOUSE = "ROW_HOUSE"              # 연립주택
+MULTI_FAMILY = "MULTI_FAMILY_HOUSE"  # 다세대주택
+
+# 규칙이 어떤 물건에 걸리는가
+APARTMENT_ONLY = "APARTMENT_ONLY"
+APT_AND_SAME_COMPLEX = "APARTMENT_AND_SAME_COMPLEX_MULTI_HOUSING"
+
+# ── 실거주 계획 ───────────────────────────────────────────────────────
+NON_OCCUPANCY = "NON_OCCUPANCY"
+OCCUPANCY = "OCCUPANCY"
+
+# 주거지역 허가대상 면적. **초과** 다 — 6㎡ 와 같으면 대상이 아니다.
+# 이 한 글자('이상' vs '초과')로 6㎡ 짜리가 막히거나 안 막힌다.
+DEFAULT_RESIDENTIAL_THRESHOLD = 6.0
+
 # Gate 판정
 PASS = "PASS"                    # 살 수 있다
 PASS_WITH_PERMIT = "PASS_WITH_PERMIT"   # 허가를 받으면 살 수 있다
 BLOCKED = "BLOCKED"              # 살 수 없다 — 실행 목록에서 뺀다
 NEEDS_CHECK = "NEEDS_CHECK"      # 확인해야 안다 — 뺀다. '아마 될 것' 으로 두지 않는다
 
-# 커버리지
+# ── 커버리지 (지시서 §4) ──────────────────────────────────────────────
+#
+# **두 겹으로 나눈다.** 한 겹으로 두면 둘 중 하나가 손해를 본다.
+#
+#   광역(시·구) 아파트 지정   BROAD_APARTMENT    — 다 넣었으면 COMPLETE
+#   필지 단위 지정            PARCEL_SPECIFIC    — 재건축·모아타운 등
+#
+# 광역을 다 넣었는데도 필지 미수집 때문에 전부 NEEDS_CHECK 로 두면
+# 군포·안양 만안구처럼 **지정된 적 없는 곳까지 확정 추천이 막힌다.**
+# 반대로 필지 미수집을 무시하면 재건축 구역을 놓친다.
+#
+# 그래서 광역으로 PASS/BLOCK 을 정하고, 필지 미수집은 **경고로 덧붙인다.**
 COMPLETE = "COMPLETE"
 PARTIAL = "PARTIAL"
 INCOMPLETE = "INCOMPLETE"
+
+BROAD_APARTMENT = "BROAD_APARTMENT"
+PARCEL_SPECIFIC = "PARCEL_SPECIFIC"
+PARCEL_WARNING = "PARCEL_SPECIFIC_LAND_PERMIT_COVERAGE_INCOMPLETE"
 
 
 def applies_to_buyer(target_scope: str | None,
@@ -252,6 +284,45 @@ class Rule:
     property_scope: str | None = None
     parcel_recheck_required: bool = True
     source_url: str | None = None
+    residential_threshold_sqm: float | None = None
+
+
+def matches_property(rule: Rule, *, property_type: str,
+                     same_complex_has_apartment: bool | None) -> bool | None:
+    """이 규칙이 이 물건에 걸리는가 (지시서 §2·§3).
+
+    True 걸린다 · False 안 걸린다 · None 확인해야 안다
+
+    **행정구역 전체의 모든 부동산에 적용하지 않는다.** 광역 지정이라도
+    대상은 아파트(와 같은 단지의 연립·다세대)뿐이다. 일반 연립·다세대
+    전체로 확대하면 대상이 아닌 물건을 막게 된다.
+    """
+    scope = (rule.property_scope or "").strip()
+    if not scope:
+        return None      # 대상이 뭔지 모르면 통과시키지도 막지도 않는다
+
+    # 고시문을 그대로 옮긴 한글 서술도 받는다.
+    # 외국인 수도권 지정은 '단독/다가구/아파트/연립/다세대' 처럼 들어온다.
+    korean = "아파트" in scope
+    apt_covered = scope in (APARTMENT_ONLY, APT_AND_SAME_COMPLEX) or korean
+
+    if property_type == APARTMENT:
+        return apt_covered
+
+    if property_type in (ROW_HOUSE, MULTI_FAMILY):
+        word = "연립" if property_type == ROW_HOUSE else "다세대"
+        if korean:
+            # 한글 고시가 그 유형을 직접 적어 두면 같은 단지 조건 없이 걸린다
+            return word in scope
+        if scope != APT_AND_SAME_COMPLEX:
+            return False
+        if same_complex_has_apartment is True:
+            return True
+        if same_complex_has_apartment is False:
+            return False
+        return None      # 같은 단지에 아파트가 있는지 모른다
+
+    return False
 
 
 def evaluate(rules: list[Rule], *, nationality: str | None, purpose: str,
@@ -383,12 +454,193 @@ def buyer_scope_of(row) -> str:
     return LEGACY_SCOPE.get(row["target_scope"], SCOPE_UNKNOWN)
 
 
+# ── 물건 단위 판정 (지시서 §3) ────────────────────────────────────────
+
+@dataclass(frozen=True)
+class Candidate:
+    """판정 대상 물건."""
+    lawd_cd: str
+    property_type: str = APARTMENT
+    land_share_sqm: float | None = None          # 주거지역 토지지분
+    same_complex_has_apartment: bool | None = None
+
+
+def evaluate_candidate(rules: list[Rule], candidate: Candidate, *,
+                       nationality: str | None, occupancy_plan: str | None,
+                       contract_date: str,
+                       coverage_status: str = INCOMPLETE,
+                       parcel_coverage: str = INCOMPLETE) -> Decision:
+    """주소·물건·계약일·매수자를 모두 놓고 판정한다.
+
+    순서가 판정을 좌우한다.
+
+      1. 계약일에 유효한 규칙만 남긴다   ← 만료된 지정을 적용하지 않는다
+      2. 매수자에게 적용되는 것만        ← FOREIGN_ONLY × 내국인은 여기서 빠진다
+      3. 이 물건 유형에 걸리는 것만      ← 일반 연립·다세대는 여기서 빠진다
+      4. 토지지분 6㎡ **초과** 인가       ← 6㎡ 는 대상이 아니다
+      5. 비거주 투자면 BLOCK
+      6. 실거주 계획 미입력이면 NEEDS_CHECK
+      7. 실거주 예정이면 PASS_WITH_PERMIT
+
+    중복 규칙은 **지우지 않고 가장 엄격한 것**을 적용한다(§5).
+    서울에는 광역 아파트 지정과 재건축 구역 지정이 겹칠 수 있다.
+    """
+    if occupancy_plan not in (NON_OCCUPANCY, OCCUPANCY, None):
+        raise ValueError(f"실거주 계획 값이 이상합니다: {occupancy_plan!r}")
+
+    # 1. 계약일 기준 유효
+    live = [r for r in rules
+            if (not r.effective_from or r.effective_from <= contract_date)
+            and (not r.effective_to or r.effective_to >= contract_date)]
+    expired = [r for r in rules if r not in live]
+
+    # 2. 매수자
+    applicable, undecidable = [], []
+    for r in live:
+        hit = applies_to_buyer(r.target_scope, nationality)
+        if hit is True:
+            applicable.append(r)
+        elif hit is None:
+            undecidable.append(r)
+    not_applied = tuple(r for r in live
+                        if applies_to_buyer(r.target_scope, nationality) is False)
+
+    if undecidable:
+        return Decision(
+            NEEDS_CHECK, INVEST if occupancy_plan == NON_OCCUPANCY else LIVE_IN,
+            "매수자 국적을 몰라 판정할 수 없습니다" if nationality is None
+            else "적용 대상을 판정할 수 없는 규칙이 있습니다",
+            nationality=nationality, coverage_status=coverage_status,
+            not_applicable=not_applied, check_code="NATIONALITY_UNKNOWN",
+            rule_id=undecidable[0].rule_id)
+
+    purpose = INVEST if occupancy_plan == NON_OCCUPANCY else LIVE_IN
+
+    # 3. 물건 유형
+    matched, unsure = [], []
+    for r in applicable:
+        hit = matches_property(
+            r, property_type=candidate.property_type,
+            same_complex_has_apartment=candidate.same_complex_has_apartment)
+        if hit is True:
+            matched.append(r)
+        elif hit is None:
+            unsure.append(r)
+
+    if unsure:
+        return Decision(
+            NEEDS_CHECK, purpose,
+            "같은 단지에 아파트가 있는지 확인해야 이 규칙이 걸리는지 알 수 있습니다",
+            nationality=nationality, coverage_status=coverage_status,
+            not_applicable=not_applied, rule_id=unsure[0].rule_id,
+            check_code="SAME_COMPLEX_APARTMENT_STATUS_UNKNOWN")
+
+    if not matched:
+        # 규칙이 아예 없었나, 아니면 나/내 물건에 안 걸렸나.
+        why = ("이 매수자·이 물건에 걸리는 토지거래허가 규칙이 없습니다"
+               if live else "이 지역·이 시점에 유효한 토지거래허가 규칙이 없습니다")
+        if expired and not live:
+            # 만료된 지정이 있었다. **자동 통과시키지 않는다** — 연장·재지정
+            # 여부를 확인해야 한다(§6 테스트 13).
+            return Decision(
+                NEEDS_CHECK, purpose,
+                f"직전 지정이 {expired[0].effective_to} 로 끝났습니다. "
+                f"연장·재지정 여부를 확인해야 합니다.",
+                nationality=nationality, coverage_status=coverage_status,
+                not_applicable=not_applied, rule_id=expired[0].rule_id,
+                check_code="DESIGNATION_EXPIRED_RECHECK")
+        if coverage_status == COMPLETE:
+            # 광역 지정을 다 확인했고 여기엔 없다 → PASS.
+            # 다만 필지 단위를 아직 못 봤으면 그 사실을 **경고로 붙인다** —
+            # 판정을 뒤집지는 않는다(§4).
+            note = ""
+            code = None
+            if parcel_coverage != COMPLETE:
+                note = (" 다만 재건축·모아타운 같은 필지 단위 지정은 "
+                        "아직 확인하지 못했습니다.")
+                code = PARCEL_WARNING
+            return Decision(PASS, purpose, why + note, nationality=nationality,
+                            designated=False, coverage_status=coverage_status,
+                            not_applicable=not_applied, check_code=code)
+        return Decision(NEEDS_CHECK, purpose,
+                        why + " (광역 지정 목록을 아직 다 확인하지 못했습니다)",
+                        nationality=nationality, coverage_status=coverage_status,
+                        not_applicable=not_applied,
+                        check_code="COVERAGE_INCOMPLETE")
+
+    # 4. 토지지분 — **초과** 여야 대상이다
+    if candidate.land_share_sqm is None:
+        return Decision(
+            NEEDS_CHECK, purpose,
+            "주거지역 토지지분을 확인하지 못했습니다. "
+            "6㎡ 초과라야 허가 대상이라 지분 없이는 판정할 수 없습니다.",
+            nationality=nationality, coverage_status=coverage_status,
+            not_applicable=not_applied, rule_id=matched[0].rule_id,
+            designated=True, check_code="LAND_SHARE_AREA_MISSING")
+
+    threshold = next((r.residential_threshold_sqm for r in matched
+                      if r.residential_threshold_sqm is not None),
+                     DEFAULT_RESIDENTIAL_THRESHOLD)
+    if candidate.land_share_sqm <= threshold:
+        return Decision(
+            PASS, purpose,
+            f"토지지분 {candidate.land_share_sqm}㎡ 로 허가대상 기준"
+            f"({threshold}㎡ 초과)에 못 미칩니다",
+            nationality=nationality, coverage_status=coverage_status,
+            not_applicable=not_applied, designated=True,
+            rule_id=matched[0].rule_id)
+
+    # 5~7. 가장 엄격한 실거주 의무를 적용한다 (중복 규칙, §5)
+    duties = [r.residence_duty_months for r in matched
+              if r.residence_duty_months is not None]
+    if len(duties) < len(matched):
+        return Decision(
+            NEEDS_CHECK, purpose,
+            "실거주 의무 기간이 확인되지 않은 규칙이 있습니다. "
+            "비거주 가능이라고 판정하지 않습니다.",
+            nationality=nationality, coverage_status=coverage_status,
+            not_applicable=not_applied, designated=True,
+            rule_id=matched[0].rule_id, check_code="RULE_INCOMPLETE")
+    duty = max(duties) if duties else 0
+    strictest = next(r for r in matched if r.residence_duty_months == duty)
+    recheck = any(r.parcel_recheck_required for r in matched)
+
+    if duty > 0 and occupancy_plan == NON_OCCUPANCY:
+        return Decision(
+            BLOCKED, INVEST,
+            f"토지거래허가구역이고 실거주 의무 {duty}개월이 있습니다. "
+            f"비거주 투자로는 매수할 수 없습니다.",
+            nationality=nationality, target_scope=strictest.target_scope,
+            coverage_status=coverage_status, rule_id=strictest.rule_id,
+            designated=True, residence_duty_months=duty,
+            parcel_recheck_required=recheck, not_applicable=not_applied)
+
+    if occupancy_plan is None:
+        return Decision(
+            NEEDS_CHECK, purpose,
+            f"토지거래허가구역입니다(실거주 의무 {duty}개월). "
+            f"실거주 계획을 입력해야 매수 가능 여부를 판정할 수 있습니다.",
+            nationality=nationality, coverage_status=coverage_status,
+            rule_id=strictest.rule_id, designated=True,
+            residence_duty_months=duty, not_applicable=not_applied,
+            parcel_recheck_required=recheck, check_code="OCCUPANCY_PLAN_MISSING")
+
+    return Decision(
+        PASS_WITH_PERMIT, purpose,
+        f"토지거래허가를 받으면 매수할 수 있습니다 (실거주 의무 {duty}개월)",
+        nationality=nationality, target_scope=strictest.target_scope,
+        coverage_status=coverage_status, rule_id=strictest.rule_id,
+        designated=True, residence_duty_months=duty,
+        parcel_recheck_required=recheck, not_applicable=not_applied)
+
+
 def load_rules(conn, *, lawd_cd: str, as_of: str) -> list[Rule]:
     """그 시점에 유효한 규칙만 읽는다. 만료된 지정은 적용하지 않는다."""
     rows = conn.execute(
         "SELECT rule_id, target_scope, buyer_scope, nationality_scope,"
         "       residence_duty_months, status, effective_from, effective_to,"
-        "       property_scope, parcel_recheck_required, source_url "
+        "       property_scope, parcel_recheck_required, source_url,"
+        "       residential_threshold_sqm "
         "FROM land_permit_zone "
         "WHERE lawd_cd = ? AND effective_from <= ? AND effective_to >= ?",
         (lawd_cd, as_of, as_of)).fetchall()
@@ -399,10 +651,13 @@ def load_rules(conn, *, lawd_cd: str, as_of: str) -> list[Rule]:
                  effective_to=r["effective_to"],
                  property_scope=r["property_scope"],
                  parcel_recheck_required=bool(r["parcel_recheck_required"]),
-                 source_url=r["source_url"]) for r in rows]
+                 source_url=r["source_url"],
+                 residential_threshold_sqm=r["residential_threshold_sqm"])
+            for r in rows]
 
 
 def coverage_of(conn, *, sido: str, target_scope: str = ALL_BUYERS) -> str:
+    """그 지역·그 대상의 수집 상태. 없으면 INCOMPLETE — 안 넣은 것이다."""
     row = conn.execute(
         "SELECT coverage_status FROM permit_coverage "
         "WHERE sido = ? AND target_scope = ?", (sido, target_scope)).fetchone()
@@ -423,8 +678,13 @@ def evaluate_at(conn, *, lawd_cd: str, sido: str, as_of: str,
 
 __all__ = ["Decision", "Rule", "decide", "decide_at", "evaluate", "evaluate_at",
            "load_rules", "coverage_of", "applies_to_buyer", "buyer_scope_of",
+           "Candidate", "evaluate_candidate", "matches_property",
+           "APARTMENT", "ROW_HOUSE", "MULTI_FAMILY",
+           "APARTMENT_ONLY", "APT_AND_SAME_COMPLEX",
+           "NON_OCCUPANCY", "OCCUPANCY",
            "PASS", "PASS_WITH_PERMIT", "BLOCKED", "NEEDS_CHECK",
            "LIVE_IN", "INVEST", "PURPOSES",
            "KOREAN", "FOREIGN", "ALL_BUYERS", "FOREIGN_ONLY", "CORPORATE_ONLY",
            "SPECIFIC_BUYER_TYPE", "SCOPE_UNKNOWN",
-           "COMPLETE", "PARTIAL", "INCOMPLETE"]
+           "COMPLETE", "PARTIAL", "INCOMPLETE",
+           "BROAD_APARTMENT", "PARCEL_SPECIFIC", "PARCEL_WARNING"]
