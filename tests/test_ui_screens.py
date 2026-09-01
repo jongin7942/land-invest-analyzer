@@ -235,3 +235,85 @@ def test_전문가_모드는_산식과_출처를_더_보여준다(ui):
 def test_모르는_모드는_기본값으로_되돌린다(ui):
     assert ui.get("/?mode=zzz").status_code == 200
     assert ui.get("/?mode=").status_code == 200
+
+
+# ── 링크 공유 (공개 모드) ─────────────────────────────────────────────
+#
+# 내 PC 에서 내가 보는 것과 남에게 링크로 보내는 것은 다르다.
+# 공개했을 때 새어 나가면 안 되는 것들을 여기서 못박는다.
+
+@pytest.fixture
+def public(tmp_db, monkeypatch):
+    """APT_PUBLIC=1 로 켠 앱."""
+    mig.migrate(tmp_db)
+    with get_conn(tmp_db) as conn:
+        repo.sync_regions(conn)
+        _seed(conn)
+    import config
+    import apt_app
+    monkeypatch.setattr(config, "APT_DB_PATH", tmp_db)
+    monkeypatch.setattr(apt_app.config, "APT_DB_PATH", tmp_db)
+    monkeypatch.setattr(apt_app, "PUBLIC", True)
+    apt_app.app.testing = True
+    return apt_app.app.test_client()
+
+
+def test_공개_모드에서는_잠금_우회가_안_된다(public):
+    """`?unlock=1` 은 '이 순위는 투자 판단 근거가 아닙니다' 라고 스스로
+    밝히는 화면이다. 링크를 받은 사람이 주소에 파라미터를 붙여서 거기
+    닿을 수 있으면, 우리가 안 된다고 적어 둔 것을 주소창으로 우회할 수
+    있게 두는 셈이다."""
+    html = body(public.get("/?unlock=1&cash=3"))
+    assert "잠금을 우회한 상태입니다" not in html
+    assert "순위는 아직 잠겨 있습니다" in html
+
+
+def test_공개_모드는_검색엔진_색인을_막는다(public):
+    """이 화면의 숫자는 수집 진행도에 따라 바뀐다. 검색결과에 옛날 순위가
+    남으면 그게 사실처럼 읽힌다."""
+    r = public.get("/")
+    assert "noindex" in r.headers.get("X-Robots-Tag", "")
+
+
+def test_공개_여부와_무관하게_보안_헤더가_붙는다(ui):
+    r = ui.get("/")
+    assert r.headers["X-Content-Type-Options"] == "nosniff"
+    assert r.headers["X-Frame-Options"] == "SAMEORIGIN"
+
+
+def test_상태확인은_DB까지_열어_본다(ui):
+    r = ui.get("/healthz")
+    assert r.status_code == 200 and r.get_json()["ok"] is True
+
+
+def test_접속_코드를_걸면_코드_없이는_못_본다(tmp_db, monkeypatch):
+    mig.migrate(tmp_db)
+    with get_conn(tmp_db) as conn:
+        repo.sync_regions(conn)
+        _seed(conn)
+    import config
+    import apt_app
+    monkeypatch.setattr(config, "APT_DB_PATH", tmp_db)
+    monkeypatch.setattr(apt_app.config, "APT_DB_PATH", tmp_db)
+    monkeypatch.setattr(apt_app, "ACCESS_CODE", "열려라참깨")
+    apt_app.app.testing = True
+    c = apt_app.app.test_client()
+
+    assert c.get("/").status_code == 401
+    assert c.get("/?code=틀린코드").status_code == 401
+    # 상태확인은 코드 없이도 열려야 한다 — 배포한 곳이 죽었는지 봐야 한다
+    assert c.get("/healthz").status_code == 200
+
+    # 맞는 코드로 들어오면 쿠키로 옮기고 주소에서 코드를 지운다
+    r = c.get("/?code=열려라참깨&cash=3")
+    assert r.status_code == 303
+    assert "code=" not in r.headers["Location"]
+    assert "cash=3" in r.headers["Location"]
+    assert c.get("/").status_code == 200      # 쿠키로 계속 열린다
+
+
+def test_링크_미리보기_태그가_붙는다(ui):
+    """카카오톡은 og: 태그로 카드를 만든다. 없으면 주소만 덩그러니 나간다."""
+    html = body(ui.get("/"))
+    assert 'property="og:title"' in html
+    assert 'property="og:description"' in html

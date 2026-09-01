@@ -16,8 +16,11 @@ CLI 로만 되던 것(`price` · `cash` · `rule status` · `report`)을 브라�
 """
 from __future__ import annotations
 
+import os
+import secrets
 import sqlite3
 from datetime import date
+from urllib.parse import urlencode
 
 from flask import Flask, make_response, redirect, render_template, request
 
@@ -28,7 +31,26 @@ from apt_engine.repo import apt as repo
 from apt_engine.repo import rules as rule_repo
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
-PORT = 5001
+PORT = int(os.getenv("PORT") or 5001)
+
+# ── 공개 모드 ─────────────────────────────────────────────────────────
+#
+# 링크를 밖으로 공유할 때 켠다(APT_PUBLIC=1). 켜면 두 가지가 달라진다.
+#
+#   ① 잠금 우회(`?unlock=1`)를 막는다.
+#      우회 화면은 "가중치가 임시값이라 투자 판단 근거가 아닙니다" 라고
+#      스스로 밝히는 화면이다. 링크를 받은 사람이 주소에 파라미터 하나를
+#      붙여서 그 화면에 닿을 수 있으면, 우리가 안 된다고 적어 둔 것을
+#      주소창으로 우회할 수 있게 두는 셈이다. 내 PC 에서 내가 보는 것과
+#      남에게 보내는 것은 다르다.
+#
+#   ② 접속 코드를 요구할 수 있다(APT_ACCESS_CODE).
+#      카톡 링크는 전달되고 캡처된다. 코드는 '보안' 이라기보다
+#      **검색엔진과 무작위 접속을 걸러내는 문턱**이다.
+PUBLIC = (os.getenv("APT_PUBLIC") or "").strip().lower() in ("1", "true", "yes")
+ACCESS_CODE = (os.getenv("APT_ACCESS_CODE") or "").strip()
+SITE_NAME = (os.getenv("APT_SITE_NAME") or "수도권 아파트 투자분석").strip()
+SITE_URL = (os.getenv("APT_SITE_URL") or "").strip().rstrip("/")
 
 # ── 보기 모드 (§3) ────────────────────────────────────────────────────
 #
@@ -159,6 +181,62 @@ def watchlist_clear():
     return _set_watch([], _safe_next(request.form.get("next")))
 
 
+@app.after_request
+def _harden(resp):
+    """공개했을 때 최소한으로 필요한 헤더.
+
+    이 앱은 남의 글을 렌더하지 않으므로 XSS 표면이 좁지만, 링크가 밖으로
+    나가면 프레임에 끼워 넣거나(clickjacking) 검색엔진에 색인되는 것은
+    막아야 한다. 색인은 특히 — 이 화면의 숫자는 수집 진행도에 따라
+    바뀌는데, 검색결과에 옛날 순위가 남으면 그게 사실처럼 읽힌다.
+    """
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    resp.headers.setdefault("Referrer-Policy", "same-origin")
+    if PUBLIC:
+        resp.headers.setdefault("X-Robots-Tag", "noindex, nofollow")
+    return resp
+
+
+@app.before_request
+def _gate():
+    """접속 코드. 코드를 안 걸었으면 아무것도 하지 않는다."""
+    if not ACCESS_CODE or request.path.startswith("/static/") \
+            or request.path == "/healthz":
+        return None
+    given = request.args.get("code") or request.cookies.get("code") or ""
+    # compare_digest 는 **ASCII 문자열만** 받는다. 한글 코드를 넣으면
+    # 비교가 아니라 TypeError 로 앱이 죽는다. bytes 로 넘겨야 한다.
+    if secrets.compare_digest(given.encode("utf-8"), ACCESS_CODE.encode("utf-8")):
+        # 주소로 들어왔으면 쿠키에 옮긴다 — 링크에 코드가 계속 붙어 다니면
+        # 그 주소가 그대로 다시 공유되고, 화면 캡처에도 남는다.
+        if request.args.get("code") and not request.cookies.get("code"):
+            keep = {k: v for k, v in request.args.items(multi=True) if k != "code"}
+            target = request.path + (("?" + urlencode(keep, doseq=True)) if keep else "")
+            resp = make_response(redirect(target, code=303))
+            resp.set_cookie("code", ACCESS_CODE, max_age=60 * 60 * 24 * 30,
+                            samesite="Lax", path="/", httponly=True)
+            return resp
+        return None
+    return render_template("apt_gate.html", site_name=SITE_NAME), 401
+
+
+@app.route("/healthz")
+def healthz():
+    """배포한 곳이 살아 있는지 확인하는 용도. DB 까지 실제로 열어 본다."""
+    try:
+        with ro_conn() as conn:
+            conn.execute("SELECT 1").fetchone()
+    except sqlite3.Error as e:
+        return {"ok": False, "error": str(e)}, 503
+    return {"ok": True}
+
+
+@app.context_processor
+def _inject_site():
+    return {"SITE_NAME": SITE_NAME, "SITE_URL": SITE_URL, "PUBLIC": PUBLIC}
+
+
 # ── DB ────────────────────────────────────────────────────────────────
 
 def ro_conn() -> sqlite3.Connection:
@@ -273,7 +351,8 @@ def home():
     form = {"cash": cash_in, "house_count": house_count,
             "horizon": horizon, "limit": limit}
 
-    override = request.args.get("unlock") == "1"
+    # 공개 모드에서는 잠금 우회를 받지 않는다 — 위 PUBLIC 주석 참고.
+    override = request.args.get("unlock") == "1" and not PUBLIC
     with ro_conn() as conn:
         lock = _lock_state(conn)
         if lock and not override:
