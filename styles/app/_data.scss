@@ -207,6 +207,59 @@
 
 // ── 모바일: 가로표 → 세로 카드 ───────────────────────────────────────
 @include breakpoint-down(md) {
+
+  // ── 폰: 검색·목록 표를 세로 카드로 ─────────────────────────────────
+  // 열이 4개를 넘으면 375px 에서 오른쪽이 잘린다. 가로 스크롤이 되긴 하지만
+  // 스크롤된다는 사실 자체가 안 보여서, 담기 버튼이 있는 줄 모르고 지나친다.
+  .stacked-scroll { overflow: visible; }
+  .stacked, .stacked thead, .stacked tbody, .stacked tr,
+  .stacked th, .stacked td { display: block; }
+
+  .stacked thead { display: none; }
+
+  // Carbon 은 .cds--data-table--sm tr 에 height:2rem 을 준다. display:block 으로
+  // 바꾼 채 그 높이가 남아 있으면 카드가 32px 로 잘려 행끼리 겹친다.
+  .stacked tbody tr {
+    height: auto;
+    border: 1px solid $border-subtle-01;
+    border-radius: 4px;
+    margin-bottom: $spacing-05;
+    background: $layer-01;
+    padding: $spacing-03 $spacing-05;
+  }
+  .stacked td, .stacked th { height: auto; }
+
+  // 첫 칸(단지명)은 카드 제목이다. 라벨을 붙이지 않는다.
+  .stacked td:first-child {
+    font-size: 1rem;
+    font-weight: 600;
+    padding: $spacing-03 0;
+    border-bottom: 1px solid $border-subtle-01;
+    &::before { content: none; }
+  }
+
+  .stacked td {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: $spacing-04;
+    text-align: right;
+    padding: $spacing-03 0;
+    border: 0;
+    &::before {
+      content: attr(data-label);
+      font-weight: 600;
+      text-align: left;
+      color: $text-secondary;
+      flex: 0 0 auto;
+    }
+    // 라벨이 없는 칸(버튼 등)은 한 줄을 다 쓴다
+    &:not([data-label]) { display: block; text-align: left; }
+    &:not([data-label])::before { content: none; }
+  }
+  // 담기 버튼은 폰에서 손가락으로 누를 만큼 넓게
+  .stacked td .cds--btn { width: 100%; justify-content: center; }
+
   .compare-scroll { overflow: visible; }
   .compare, .compare thead, .compare tbody, .compare tr,
   .compare th, .compare td { display: block; }

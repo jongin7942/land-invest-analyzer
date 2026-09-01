@@ -39,24 +39,27 @@
 {% if q %}
   {% if rows %}
     <p class="small muted">{{ rows | length }}개 찾았습니다{% if rows | length == 50 %} (상위 50개){% endif %}.</p>
-    <div class="table-scroll">
-      <table class="cds--data-table cds--data-table--sm">
+    {# 폰에서는 .stacked 가 이 표를 세로 카드로 바꾼다. 열이 5개라 375px 에서
+       오른쪽(담기 버튼)이 잘리는데, 가로로 스크롤된다는 걸 아무도 모른다.
+       세대수·준공은 폰에서도 보여준다 — 카드로 쌓으면 자리가 남는다. #}
+    <div class="table-scroll stacked-scroll">
+      <table class="cds--data-table cds--data-table--sm stacked">
         <thead><tr>
           <th>단지</th><th>지역</th>
-          <th class="num col-optional">세대수</th>
-          <th class="num col-optional">준공</th>
+          <th class="num">세대수</th>
+          <th class="num">준공</th>
           <th><span class="sr-only">비교</span></th>
         </tr></thead>
         <tbody>
         {% for r in rows %}
           <tr>
             <td><a class="cds--link" href="/complex/{{ r.id }}">{{ r.name }}</a></td>
-            <td class="muted">{{ r.lawd_cd | sgg }} {{ r.emd_name or "" }}</td>
-            <td class="num col-optional">
+            <td class="muted" data-label="지역">{{ r.lawd_cd | sgg }} {{ r.emd_name or "" }}</td>
+            <td class="num" data-label="세대수">
               {% if r.apt_households %}{{ "{:,}".format(r.apt_households) }}
               {% else %}{{ ui.value(none, reason='K-apt 기본정보가 없습니다') }}{% endif %}
             </td>
-            <td class="num col-optional">{{ r.approval_year or "–" }}</td>
+            <td class="num" data-label="준공">{{ r.approval_year or "–" }}</td>
             <td>
               {% if r.id in watch_ids %}
                 <form method="post" action="/watchlist/remove" style="display:inline">
