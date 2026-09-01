@@ -58,6 +58,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sqlite3
 import sys
 
@@ -2154,6 +2155,77 @@ def cmd_rank(args):
           f"HEURISTIC 은 후보를 좁히는 용도이며, 백테스트가 학습값으로 교체합니다(§74).")
 
 
+def cmd_invite(args):
+    """초대 관리.
+
+    공용 비번 하나를 단톡방에 뿌리는 것과 다르다 — 사람마다 코드를 따로
+    주기 때문에, 하나가 새어 나가면 **그 하나만** 끊을 수 있다.
+    """
+    from apt_engine import access
+
+    url = (args.url or os.getenv("APT_SITE_URL") or "").strip()
+
+    def show(inv, prefix=""):
+        print(f"{prefix}{inv.name:<12} {inv.code}")
+        if url:
+            print(f"{prefix}{access.link(url, inv.code)}")
+
+    with access.connect() as conn:
+        if args.action == "add":
+            if not args.name:
+                print("이름이 필요합니다: invite add 철수")
+                return
+            try:
+                inv = access.add(conn, args.name, args.note)
+            except ValueError as e:
+                print(f"✗ {e}")
+                return
+            print(f"✓ '{inv.name}' 초대를 만들었습니다.")
+            show(inv, "  ")
+            if not url:
+                print("\n  공유 주소를 같이 주면 바로 보낼 링크를 만들어 줍니다:")
+                print("    invite add 철수 --url https://xxx.trycloudflare.com")
+            return
+
+        if args.action in ("revoke", "restore"):
+            if not args.name:
+                print(f"이름이 필요합니다: invite {args.action} 철수")
+                return
+            fn = access.revoke if args.action == "revoke" else access.restore
+            done = fn(conn, args.name)
+            word = "끊었습니다" if args.action == "revoke" else "다시 열었습니다"
+            print(f"✓ '{args.name}' 을 {word}." if done
+                  else f"✗ '{args.name}' 을 찾지 못했습니다 (이미 그 상태일 수 있습니다)")
+            return
+
+        rows = access.list_all(conn)
+        if not rows:
+            print("초대한 사람이 없습니다.")
+            print("  지금은 잠겨 있지 않습니다 — 주소를 아는 사람은 누구나 들어옵니다.")
+            print("  invite add 철수  로 한 명이라도 초대하면 그때부터 잠깁니다.")
+            return
+
+        if args.action == "links":
+            if not url:
+                print("공유 주소가 필요합니다: invite links --url https://xxx.trycloudflare.com")
+                return
+            for inv in rows:
+                if inv.active:
+                    print(f"{inv.name}\n{access.link(url, inv.code)}\n")
+            return
+
+        live = sum(1 for r in rows if r.active)
+        print(f"초대 {len(rows)}명 (열림 {live} · 끊음 {len(rows) - live})\n")
+        print(f"{'이름':<12} {'코드':<14} {'방문':>4}  {'마지막':<18} 상태")
+        for inv in rows:
+            seen = (inv.last_seen or "")[:16].replace("T", " ") or "-"
+            state = "열림" if inv.active else "끊음"
+            print(f"{inv.name:<12} {inv.code:<14} {inv.visits:>4}  {seen:<18} {state}"
+                  + (f"  ({inv.note})" if inv.note else ""))
+        if not any(r.visits for r in rows):
+            print("\n아직 아무도 안 들어왔습니다.")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="python -m apt_engine.cli",
@@ -2546,6 +2618,12 @@ def build_parser() -> argparse.ArgumentParser:
     ld.add_argument("--band", help="전용면적 밴드 (기본 84)")
     ld.add_argument("--limit", type=int, help="단지 수 제한 (시험용)")
 
+    iv = sub.add_parser("invite", help="허락한 사람만 화면을 보게 한다 (사람마다 코드)")
+    iv.add_argument("action", choices=["add", "list", "revoke", "restore", "links"])
+    iv.add_argument("name", nargs="?", help="누구에게 준 코드인지 (예: 철수)")
+    iv.add_argument("--note", help="메모 (예: 고등학교 친구)")
+    iv.add_argument("--url", help="공유 주소. 넣으면 바로 보낼 링크를 만들어 준다")
+
     sub.add_parser("validate", help="요구사항 26 검증 규칙 실행")
 
     re_ = sub.add_parser("report", help="진단 리포트")
@@ -2565,6 +2643,7 @@ HANDLERS = {
     "ladder": cmd_ladder, "relative": cmd_relative,
     "transit": cmd_transit, "supply": cmd_supply, "geocode": cmd_geocode,
     "catalyst": cmd_catalyst, "redev": cmd_redev,
+    "invite": cmd_invite,
     "today": cmd_today, "leaders": cmd_leaders, "backtest": cmd_backtest, "validate": cmd_validate, "report": cmd_report,
 }
 

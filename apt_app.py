@@ -25,6 +25,7 @@ from urllib.parse import urlencode
 from flask import Flask, make_response, redirect, render_template, request
 
 import config
+from apt_engine import access
 from apt_engine import area as area_mod
 from apt_engine import regions, units
 from apt_engine.repo import apt as repo
@@ -47,7 +48,19 @@ PORT = int(os.getenv("PORT") or 5001)
 #   ② 접속 코드를 요구할 수 있다(APT_ACCESS_CODE).
 #      카톡 링크는 전달되고 캡처된다. 코드는 '보안' 이라기보다
 #      **검색엔진과 무작위 접속을 걸러내는 문턱**이다.
-PUBLIC = (os.getenv("APT_PUBLIC") or "").strip().lower() in ("1", "true", "yes")
+def _flag(name: str) -> bool:
+    return (os.getenv(name) or "").strip().lower() in ("1", "true", "yes")
+
+
+PUBLIC = _flag("APT_PUBLIC")
+
+# 공개 상태에서도 잠금 우회를 열어 두고 싶을 때(APT_ALLOW_UNLOCK=1).
+#
+# 기본은 꺼짐이다. 다만 **막을 방법만 있고 열 방법이 없으면** 안 된다 —
+# 아는 사람 몇 명에게 보여주면서 "지금 배관까지는 돈다" 를 보이고 싶은
+# 경우가 있고, 그건 소유자가 판단할 일이다. 열어도 화면의 빨간 경고
+# 배너는 그대로 나간다.
+ALLOW_UNLOCK = _flag("APT_ALLOW_UNLOCK")
 ACCESS_CODE = (os.getenv("APT_ACCESS_CODE") or "").strip()
 SITE_NAME = (os.getenv("APT_SITE_NAME") or "수도권 아파트 투자분석").strip()
 SITE_URL = (os.getenv("APT_SITE_URL") or "").strip().rstrip("/")
@@ -198,27 +211,75 @@ def _harden(resp):
     return resp
 
 
+OPEN_PATHS = ("/healthz",)
+
+
+def _invited(code: str):
+    """초대 코드가 살아 있는지. 초대 목록이 비어 있으면 None 을 준다.
+
+    초대 파일이 없거나 깨져도 화면이 죽으면 안 된다 — 잠금은 걸리되
+    500 이 아니라 '코드를 넣어 주세요' 로 나가야 한다.
+    """
+    try:
+        with access.connect() as conn:
+            return access.check(conn, code)
+    except sqlite3.Error:
+        return None
+
+
+def _locked_by_invites() -> bool:
+    """초대를 한 번이라도 만들었으면 잠긴 것으로 본다.
+
+    '열려 있는 초대가 있나' 로 판단하면 **마지막 한 명을 끊는 순간
+    잠금이 사라진다.** 모두를 내보내려던 행동이 모두를 들여보내는
+    결과가 되므로, 끊은 것까지 세어서 잠금을 유지한다.
+    """
+    try:
+        with access.connect() as conn:
+            return access.any_invites(conn)
+    except sqlite3.Error:
+        return False
+
+
 @app.before_request
 def _gate():
-    """접속 코드. 코드를 안 걸었으면 아무것도 하지 않는다."""
-    if not ACCESS_CODE or request.path.startswith("/static/") \
-            or request.path == "/healthz":
+    """허락한 사람만 들어오게 한다.
+
+    두 가지를 받는다.
+      · 사람마다 따로 준 **초대 코드** (권장 — 한 명만 끊을 수 있다)
+      · 모두가 같이 쓰는 APT_ACCESS_CODE (간단히 열고 싶을 때)
+
+    둘 다 없으면 잠그지 않는다 — 내 PC 에서 혼자 보는 평소 상태다.
+    """
+    if request.path.startswith("/static/") or request.path in OPEN_PATHS:
         return None
+
     given = request.args.get("code") or request.cookies.get("code") or ""
-    # compare_digest 는 **ASCII 문자열만** 받는다. 한글 코드를 넣으면
-    # 비교가 아니라 TypeError 로 앱이 죽는다. bytes 로 넘겨야 한다.
-    if secrets.compare_digest(given.encode("utf-8"), ACCESS_CODE.encode("utf-8")):
-        # 주소로 들어왔으면 쿠키에 옮긴다 — 링크에 코드가 계속 붙어 다니면
-        # 그 주소가 그대로 다시 공유되고, 화면 캡처에도 남는다.
-        if request.args.get("code") and not request.cookies.get("code"):
-            keep = {k: v for k, v in request.args.items(multi=True) if k != "code"}
-            target = request.path + (("?" + urlencode(keep, doseq=True)) if keep else "")
-            resp = make_response(redirect(target, code=303))
-            resp.set_cookie("code", ACCESS_CODE, max_age=60 * 60 * 24 * 30,
-                            samesite="Lax", path="/", httponly=True)
-            return resp
+    invites = _locked_by_invites()
+    if not ACCESS_CODE and not invites:
         return None
-    return render_template("apt_gate.html", site_name=SITE_NAME), 401
+
+    ok = bool(given) and (
+        (invites and _invited(given) is not None)
+        # compare_digest 는 **ASCII 문자열만** 받는다. 한글 코드를 넣으면
+        # 비교가 아니라 TypeError 로 앱이 죽는다. bytes 로 넘겨야 한다.
+        or (bool(ACCESS_CODE) and secrets.compare_digest(
+            given.encode("utf-8"), ACCESS_CODE.encode("utf-8")))
+    )
+    if not ok:
+        return render_template("apt_gate.html", site_name=SITE_NAME,
+                               tried=bool(given)), 401
+
+    # 주소로 들어왔으면 쿠키에 옮긴다 — 링크에 코드가 계속 붙어 다니면
+    # 그 주소가 그대로 다시 공유되고, 화면 캡처에도 남는다.
+    if request.args.get("code") and not request.cookies.get("code"):
+        keep = {k: v for k, v in request.args.items(multi=True) if k != "code"}
+        target = request.path + (("?" + urlencode(keep, doseq=True)) if keep else "")
+        resp = make_response(redirect(target, code=303))
+        resp.set_cookie("code", given, max_age=60 * 60 * 24 * 30,
+                        samesite="Lax", path="/", httponly=True)
+        return resp
+    return None
 
 
 @app.route("/healthz")
@@ -352,7 +413,7 @@ def home():
             "horizon": horizon, "limit": limit}
 
     # 공개 모드에서는 잠금 우회를 받지 않는다 — 위 PUBLIC 주석 참고.
-    override = request.args.get("unlock") == "1" and not PUBLIC
+    override = request.args.get("unlock") == "1" and (not PUBLIC or ALLOW_UNLOCK)
     with ro_conn() as conn:
         lock = _lock_state(conn)
         if lock and not override:

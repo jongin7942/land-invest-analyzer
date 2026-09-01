@@ -317,3 +317,112 @@ def test_링크_미리보기_태그가_붙는다(ui):
     html = body(ui.get("/"))
     assert 'property="og:title"' in html
     assert 'property="og:description"' in html
+
+
+# ── 초대: 허락한 사람만 ───────────────────────────────────────────────
+#
+# 공용 비번 하나와 다른 점은 **한 명만 끊을 수 있다**는 것이다.
+# 그게 실제로 되는지가 이 블록의 전부다.
+
+@pytest.fixture
+def invited(tmp_db, tmp_path, monkeypatch):
+    """초대 목록이 있는 앱 + 철수·영희 두 명."""
+    from apt_engine import access
+    mig.migrate(tmp_db)
+    with get_conn(tmp_db) as conn:
+        repo.sync_regions(conn)
+        _seed(conn)
+
+    inv_db = str(tmp_path / "access.db")
+    monkeypatch.setenv("APT_ACCESS_DB", inv_db)
+
+    import config
+    import apt_app
+    monkeypatch.setattr(config, "APT_DB_PATH", tmp_db)
+    monkeypatch.setattr(apt_app.config, "APT_DB_PATH", tmp_db)
+    monkeypatch.setattr(apt_app, "ACCESS_CODE", "")   # 초대만으로 잠근다
+    apt_app.app.testing = True
+
+    with access.connect(inv_db) as conn:
+        codes = {n: access.add(conn, n).code for n in ("철수", "영희")}
+    return apt_app.app.test_client(), codes, inv_db
+
+
+def test_초대_없이는_못_들어온다(invited):
+    client, codes, _ = invited
+    assert client.get("/").status_code == 401
+    assert client.get("/?code=아무거나").status_code == 401
+
+
+def test_초대받은_사람은_들어온다(invited):
+    client, codes, _ = invited
+    r = client.get(f"/?code={codes['철수']}")
+    assert r.status_code == 303              # 코드를 쿠키로 옮기고 주소에서 지운다
+    assert "code=" not in r.headers["Location"]
+    assert client.get("/").status_code == 200   # 쿠키로 계속 열린다
+
+
+def test_한_명만_끊으면_그_사람만_막힌다(invited):
+    """공용 비번이었다면 전부 바꾸고 전부에게 다시 보내야 한다."""
+    from apt_engine import access
+    client, codes, inv_db = invited
+    with access.connect(inv_db) as conn:
+        assert access.revoke(conn, "철수")
+
+    fresh = lambda: __import__("apt_app").app.test_client()
+    a, b = fresh(), fresh()
+    assert a.get(f"/?code={codes['철수']}").status_code == 401   # 끊긴 사람
+    assert b.get(f"/?code={codes['영희']}").status_code == 303   # 나머지는 그대로
+
+
+def test_끊긴_사람은_쿠키가_남아_있어도_막힌다(invited):
+    """이미 들어와 본 사람의 브라우저에는 쿠키가 남는다. 끊었는데 쿠키로
+    계속 들어와지면 끊은 것이 아니다."""
+    from apt_engine import access
+    client, codes, inv_db = invited
+    client.get(f"/?code={codes['철수']}")
+    assert client.get("/").status_code == 200
+
+    with access.connect(inv_db) as conn:
+        access.revoke(conn, "철수")
+    assert client.get("/").status_code == 401
+
+
+def test_방문이_기록된다(invited):
+    """아무도 안 본 링크와 다섯 명이 본 링크가 구분돼야 한다."""
+    from apt_engine import access
+    client, codes, inv_db = invited
+    client.get(f"/?code={codes['영희']}")
+    with access.connect(inv_db) as conn:
+        rows = {i.name: i for i in access.list_all(conn)}
+    assert rows["영희"].visits >= 1 and rows["영희"].last_seen
+    assert rows["철수"].visits == 0
+
+
+def test_같은_이름을_덮어쓰지_않는다(tmp_path):
+    """덮어쓰면 먼저 보낸 링크가 조용히 죽고, 상대는 왜 안 되는지 모른다."""
+    from apt_engine import access
+    with access.connect(str(tmp_path / "a.db")) as conn:
+        first = access.add(conn, "철수")
+        with pytest.raises(ValueError):
+            access.add(conn, "철수")
+        assert access.check(conn, first.code) is not None
+
+
+def test_초대가_없으면_잠그지_않는다(ui):
+    """내 PC 에서 혼자 보는 평소 상태 — 코드를 물어보면 안 된다."""
+    assert ui.get("/").status_code == 200
+
+
+def test_전부_끊으면_아무도_못_들어온다(invited):
+    """마지막 한 명을 끊었을 때 잠금이 사라지면, 모두를 내보내려던 행동이
+    **모두를 들여보내는** 결과가 된다. 끊는 것과 잠금을 푸는 것은 다르다."""
+    from apt_engine import access
+    client, codes, inv_db = invited
+    with access.connect(inv_db) as conn:
+        for name in ("철수", "영희"):
+            access.revoke(conn, name)
+
+    assert client.get("/").status_code == 401
+    for code in codes.values():
+        assert client.get(f"/?code={code}").status_code == 401

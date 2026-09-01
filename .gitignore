@@ -10,3 +10,9 @@ codef_token.json
 *.db-shm
 logs/
 node_modules/
+
+# 초대 코드 — 사람마다 다른 접속 링크. 절대 커밋하지 않는다.
+access.db
+access.db-wal
+access.db-shm
+cloudflared.exe
