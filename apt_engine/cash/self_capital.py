@@ -102,6 +102,7 @@ def compute(conn: sqlite3.Connection, *, price: int, as_of: str | date,
             requested_mortgage: int | None = None,
             bank_quote: int | None = None,
             lender_type: str = mortgage_mod.DEFAULT_LENDER,
+            agent_vat_registered: bool | None = None,
             disposal_condition: bool = False,
             use_mortgage: bool = True,
             jeonse_deposit: int | None = None,
@@ -146,7 +147,8 @@ def compute(conn: sqlite3.Connection, *, price: int, as_of: str | date,
     # ── 중개보수 + 부가세 ──
     fee, vat, ev = cost_mod.brokerage(
         conn, price=price, as_of=day, region=region,
-        negotiated_rate=negotiated_brokerage_rate, allow_unverified=allow_unverified)
+        negotiated_rate=negotiated_brokerage_rate, allow_unverified=allow_unverified,
+        agent_vat_registered=agent_vat_registered)
     items += [fee, vat]
     evidence.extend(ev)
 

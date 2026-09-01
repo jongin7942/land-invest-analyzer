@@ -107,6 +107,10 @@ TIMELESS_TABLES = frozenset({
     "catalyst",
     # Phase 8 — 실험 메타. 시점 개념이 없다.
     "backtest_run", "backtest_pick",
+    # Phase 11 — 토허를 어디까지 수집했나. '우리 작업 진행도' 지
+    # 시장 관측이 아니라서 시점 컬럼이 없다. (규칙 자체인
+    # land_permit_zone 은 effective_from/to 로 그 시점 유효분만 읽는다)
+    "permit_coverage",
     # Phase 9 — 마스터·큐레이션. complex_type 은 '지속 격차' 라 특정 시점 값이 아니고,
     # control_pair 는 회귀 검사 전용이라 결정 경로에서 읽히지 않는다.
     "complex_type", "feature_registry", "control_pair",

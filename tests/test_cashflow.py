@@ -86,7 +86,10 @@ def full_rules(conn):
 def make_capital(conn, *, price_eok=6, **kw):
     return capital_mod.compute(
         conn, price=units.from_eok(price_eok), as_of=TODAY, lawd_cd=LAWD,
-        exclusive_area_m2=84, region="인천", **kw)
+        exclusive_area_m2=84, region="인천", **kw,
+        # 이 파일은 현금흐름을 보는 것이라 실투자금이 확정돼야 한다.
+        # 과세유형을 안 넘기면 부가세가 '확인 불가' 라 IRR 이 안 나온다(§5·§10).
+        agent_vat_registered=True)
 
 
 # ── 상환 스케줄 ────────────────────────────────────────────────────────
@@ -245,7 +248,7 @@ class TestTimeline:
             cap = make_capital(conn)
             tl = timeline_mod.build(conn, capital=cap, as_of=TODAY, holding_years=5,
                                     sale_price=None, holding_cost_override=1_500_000,
-                                    region="인천", lawd_cd=LAWD)
+                                    region="인천", lawd_cd=LAWD, agent_vat_registered=True)
         assert tl.irr is None
         assert any("지어내지 않습니다" in u for u in tl.unknown)
 
@@ -255,7 +258,7 @@ class TestTimeline:
             cap = make_capital(conn)
             tl = timeline_mod.build(conn, capital=cap, as_of=TODAY, holding_years=5,
                                     sale_price=units.from_eok(8),
-                                    region="인천", lawd_cd=LAWD)   # 보유세 미입력
+                                    region="인천", lawd_cd=LAWD, agent_vat_registered=True)   # 보유세 미입력
         assert all(f.net is None for f in tl.years)
         assert tl.irr is None
         assert any("보유세" in u for u in tl.unknown)
@@ -269,7 +272,7 @@ class TestTimeline:
                 conn, capital=cap, as_of=TODAY, holding_years=5,
                 sale_price=units.from_eok(8), occupancy="실거주",
                 holding_cost_override=1_500_000, interest_rate=0.045,
-                region="인천", lawd_cd=LAWD)
+                region="인천", lawd_cd=LAWD, agent_vat_registered=True)
         assert tl.initial_equity is not None
         assert tl.peak_equity > tl.initial_equity      # 매년 돈이 더 들어간다
 
@@ -281,7 +284,7 @@ class TestTimeline:
                 conn, capital=cap, as_of=TODAY, holding_years=5,
                 sale_price=units.from_eok(8), occupancy="임대",
                 monthly_rent=3_000_000, holding_cost_override=1_500_000,
-                region="인천", lawd_cd=LAWD)
+                region="인천", lawd_cd=LAWD, agent_vat_registered=True)
         # 매년 순유입이라 누계가 줄기만 한다 → 최대는 t=0
         assert tl.peak_equity == tl.initial_equity
 
@@ -292,7 +295,7 @@ class TestTimeline:
             tl = timeline_mod.build(
                 conn, capital=cap, as_of=TODAY, holding_years=5,
                 sale_price=units.from_eok(9), holding_cost_override=1_000_000,
-                region="인천", lawd_cd=LAWD)
+                region="인천", lawd_cd=LAWD, agent_vat_registered=True)
         assert tl.irr is not None
         assert tl.net_profit == int(round(sum(tl.flows)))
         # 이분법은 금리 구간을 1e-7 까지 좁힌다. 금액 단위로 환산하면 몇십 원 오차다.
@@ -306,7 +309,7 @@ class TestTimeline:
             tl = timeline_mod.build(
                 conn, capital=cap, as_of=TODAY, holding_years=5,
                 sale_price=units.from_eok(9), holding_cost_override=1_000_000,
-                region="인천", lawd_cd=LAWD)
+                region="인천", lawd_cd=LAWD, agent_vat_registered=True)
         assert tl.profit_per_100m == int(round(
             tl.net_profit / (tl.peak_equity / 100_000_000)))
 
@@ -326,7 +329,7 @@ class TestTimeline:
             tl = timeline_mod.build(
                 conn, capital=cap, as_of=TODAY, holding_years=5,
                 sale_price=units.from_eok(8), occupancy="전세승계",
-                holding_cost_override=1_000_000, region="인천", lawd_cd=LAWD)
+                holding_cost_override=1_000_000, region="인천", lawd_cd=LAWD, agent_vat_registered=True)
         assert all(f.rental_income == 0 for f in tl.years)
         returned = next(i for i in tl.exit_items if i.name == "전세보증금 반환")
         assert returned.amount == units.from_eok(3)
@@ -339,7 +342,7 @@ class TestTimeline:
             tl = timeline_mod.build(
                 conn, capital=cap, as_of=TODAY, holding_years=5,
                 sale_price=units.from_eok(8), occupancy="실거주",
-                holding_cost_override=1_000_000, region="인천", lawd_cd=LAWD)
+                holding_cost_override=1_000_000, region="인천", lawd_cd=LAWD, agent_vat_registered=True)
         assert all(f.rental_income == 0 for f in tl.years)
         assert any("추정하지 않았으니" in n for n in tl.notes)
 
@@ -351,7 +354,7 @@ class TestTimeline:
             tl = timeline_mod.build(
                 conn, capital=cap, as_of=TODAY, holding_years=5,
                 sale_price=units.from_eok(8), holding_cost_override=1_000_000,
-                interest_rate=0.045, region="인천", lawd_cd=LAWD)
+                interest_rate=0.045, region="인천", lawd_cd=LAWD, agent_vat_registered=True)
         repay = next(i for i in tl.exit_items if i.name == "대출 잔액 상환")
         assert repay.amount == tl.schedule.balance_after(5)
         assert repay.amount < cap.available_mortgage      # 5년간 원금을 갚았다
@@ -364,11 +367,11 @@ class TestTimeline:
             short = timeline_mod.build(
                 conn, capital=cap, as_of=TODAY, holding_years=2,
                 sale_price=units.from_eok(8), holding_cost_override=1_000_000,
-                interest_rate=0.045, region="인천", lawd_cd=LAWD)
+                interest_rate=0.045, region="인천", lawd_cd=LAWD, agent_vat_registered=True)
             long = timeline_mod.build(
                 conn, capital=cap, as_of=TODAY, holding_years=10,
                 sale_price=units.from_eok(8), holding_cost_override=1_000_000,
-                interest_rate=0.045, region="인천", lawd_cd=LAWD)
+                interest_rate=0.045, region="인천", lawd_cd=LAWD, agent_vat_registered=True)
         assert (long.schedule.interest_through(10)
                 > short.schedule.interest_through(2))
 
@@ -378,10 +381,10 @@ class TestTimeline:
             cap = make_capital(conn, use_mortgage=False)
             with pytest.raises(ValueError, match="거주 형태"):
                 timeline_mod.build(conn, capital=cap, as_of=TODAY, holding_years=5,
-                                   sale_price=None, occupancy="월세살이")
+                                   sale_price=None, occupancy="월세살이", agent_vat_registered=True)
             with pytest.raises(ValueError, match="보유기간"):
                 timeline_mod.build(conn, capital=cap, as_of=TODAY, holding_years=0,
-                                   sale_price=None)
+                                   sale_price=None, agent_vat_registered=True)
 
     def test_결과는_SCENARIO_등급이다(self, db):
         with get_conn(db) as conn:
@@ -390,7 +393,7 @@ class TestTimeline:
             tl = timeline_mod.build(
                 conn, capital=cap, as_of=TODAY, holding_years=5,
                 sale_price=units.from_eok(8), holding_cost_override=1_000_000,
-                region="인천", lawd_cd=LAWD)
+                region="인천", lawd_cd=LAWD, agent_vat_registered=True)
         assert tl.calc.grade == "SCENARIO"
 
 
@@ -402,7 +405,7 @@ class TestScenario:
         return scen_mod.band(conn, capital=cap, as_of=TODAY, holding_years=5,
                              base_sale_price=units.from_eok(8),
                              holding_cost_override=1_500_000, interest_rate=0.045,
-                             region="인천", lawd_cd=LAWD, **kw)
+                             region="인천", lawd_cd=LAWD, **kw, agent_vat_registered=True)
 
     def test_IRR_은_하나가_아니라_구간이다(self, db):
         with get_conn(db) as conn:
@@ -457,7 +460,7 @@ class TestStress:
         return scen_mod.stress(conn, capital=cap, as_of=TODAY, holding_years=5,
                                sale_price=units.from_eok(8),
                                holding_cost_override=1_500_000, interest_rate=0.045,
-                               region="인천", lawd_cd=LAWD, **kw)
+                               region="인천", lawd_cd=LAWD, **kw, agent_vat_registered=True)
 
     def test_모든_충격이_기준보다_나쁘다(self, db):
         with get_conn(db) as conn:
@@ -513,7 +516,7 @@ def test_저장하고_다시_읽는다(db):
         got = scen_mod.band(conn, capital=cap, as_of=TODAY, holding_years=5,
                             base_sale_price=units.from_eok(8),
                             holding_cost_override=1_000_000, region="인천",
-                            lawd_cd=LAWD)
+                            lawd_cd=LAWD, agent_vat_registered=True)
         for key, tl in got.results.items():
             cf_repo.save(conn, complex_id=cid, area_band="84", as_of=TODAY,
                          scenario_key=key, timeline=tl)

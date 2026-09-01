@@ -1,0 +1,23 @@
+# ═══════════════════════════════════════════════════════════════════════
+# 수도권 외국인 대상 주택 토지거래허가구역
+# ═══════════════════════════════════════════════════════════════════════
+#
+# ⚠ 이 파일의 규칙은 **내국인 매수에 적용되지 않는다.**
+#   target_scope = FOREIGN_ONLY · nationality_scope = NON_KOREAN
+#
+#   내국인이 부평 아파트를 살 때 이 규칙으로 후보에서 빼면 심각한 오류다.
+#   적용대상: 대한민국 국적이 없는 개인 · 외국법인 · 외국정부
+#
+# 시행 2025-08-26 · 2026-08-20 국토교통부 발표로 1년 연장
+# 출처: 국토교통부 2026-08-20 발표 · 인천광역시 2025-08-22 지정 발표
+#
+# 주택유형: 단독 · 다가구 · 아파트 · 연립 · 다세대
+# 면적기준(㎡): 주거 6 · 상업공업 15 · 녹지 20
+rule_id,lawd_cd,zone_group,target_scope,buyer_scope,nationality_scope,property_scope,effective_from,effective_to,residence_duty_months,jeonse_succession_allowed,residential_threshold_sqm,commercial_threshold_sqm,green_threshold_sqm,status,source_name,source_url,last_verified,note
+LPZ_FOREIGN_ICN_JUNG,28110,CAPITAL_AREA_FOREIGN_HOUSING,외국인,FOREIGN_ONLY,NON_KOREAN,단독/다가구/아파트/연립/다세대,2026-08-26,2027-08-25,24,0,6,15,20,ENACTED,국토교통부,,2026-08-20,인천광역시 중구 · 외국인 전용 — 내국인 매수에는 적용되지 않음
+LPZ_FOREIGN_ICN_MICHUHOL,28177,CAPITAL_AREA_FOREIGN_HOUSING,외국인,FOREIGN_ONLY,NON_KOREAN,단독/다가구/아파트/연립/다세대,2026-08-26,2027-08-25,24,0,6,15,20,ENACTED,국토교통부,,2026-08-20,인천광역시 미추홀구 · 외국인 전용 — 내국인 매수에는 적용되지 않음
+LPZ_FOREIGN_ICN_YEONSU,28185,CAPITAL_AREA_FOREIGN_HOUSING,외국인,FOREIGN_ONLY,NON_KOREAN,단독/다가구/아파트/연립/다세대,2026-08-26,2027-08-25,24,0,6,15,20,ENACTED,국토교통부,,2026-08-20,인천광역시 연수구 · 외국인 전용 — 내국인 매수에는 적용되지 않음
+LPZ_FOREIGN_ICN_NAMDONG,28200,CAPITAL_AREA_FOREIGN_HOUSING,외국인,FOREIGN_ONLY,NON_KOREAN,단독/다가구/아파트/연립/다세대,2026-08-26,2027-08-25,24,0,6,15,20,ENACTED,국토교통부,,2026-08-20,인천광역시 남동구 · 외국인 전용 — 내국인 매수에는 적용되지 않음
+LPZ_FOREIGN_ICN_BUPYEONG,28237,CAPITAL_AREA_FOREIGN_HOUSING,외국인,FOREIGN_ONLY,NON_KOREAN,단독/다가구/아파트/연립/다세대,2026-08-26,2027-08-25,24,0,6,15,20,ENACTED,국토교통부,,2026-08-20,인천광역시 부평구 · 외국인 전용 — 내국인 매수에는 적용되지 않음
+LPZ_FOREIGN_ICN_GYEYANG,28245,CAPITAL_AREA_FOREIGN_HOUSING,외국인,FOREIGN_ONLY,NON_KOREAN,단독/다가구/아파트/연립/다세대,2026-08-26,2027-08-25,24,0,6,15,20,ENACTED,국토교통부,,2026-08-20,인천광역시 계양구 · 외국인 전용 — 내국인 매수에는 적용되지 않음
+LPZ_FOREIGN_ICN_SEO,28260,CAPITAL_AREA_FOREIGN_HOUSING,외국인,FOREIGN_ONLY,NON_KOREAN,단독/다가구/아파트/연립/다세대,2026-08-26,2027-08-25,24,0,6,15,20,ENACTED,국토교통부,,2026-08-20,인천광역시 서구 · 외국인 전용 — 내국인 매수에는 적용되지 않음

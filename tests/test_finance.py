@@ -413,10 +413,16 @@ class TestTransactionCosts:
         with get_conn(db) as conn:
             full_costs(conn)
             fee, vat, _ = cost_mod.brokerage(conn, price=units.from_eok(6),
-                                             as_of=TODAY, region="인천")
+                                             as_of=TODAY, region="인천",
+                                             agent_vat_registered=True)
+            # 과세유형을 안 넘기면 부가세를 자동으로 붙이지 않는다 (§5)
+            _, unknown_vat, _ = cost_mod.brokerage(
+                conn, price=units.from_eok(6), as_of=TODAY, region="인천")
         assert fee.amount == 2_400_000
         assert vat.amount == 240_000
         assert fee.name != vat.name
+        assert unknown_vat.amount is None, (
+            "중개업자 과세유형을 모르는데 부가세를 자동 합산했다")
 
     def test_기본은_법정_상한요율이다(self, db):
         with get_conn(db) as conn:
@@ -437,7 +443,8 @@ class TestTransactionCosts:
         with get_conn(db) as conn:
             full_costs(conn)
             fee, vat, _ = cost_mod.brokerage(conn, price=units.from_eok(6), as_of=TODAY,
-                                             region="인천", negotiated_rate=0.002)
+                                             region="인천", negotiated_rate=0.002,
+                                             agent_vat_registered=True)
         assert fee.amount == 1_200_000
         assert vat.amount == 120_000
 
@@ -479,7 +486,7 @@ class TestSelfCapital:
             full_costs(conn)
             cap = capital_mod.compute(conn, price=units.from_eok(6), as_of=TODAY,
                                       lawd_cd=LAWD, exclusive_area_m2=84,
-                                      use_mortgage=False)
+                                      use_mortgage=False, agent_vat_registered=True)
         assert cap.total_purchase_cost > cap.purchase_price
         assert cap.total_purchase_cost == sum(i.amount for i in cap.cost_items
                                               if i.known)
@@ -490,7 +497,7 @@ class TestSelfCapital:
             cap = capital_mod.compute(conn, price=units.from_eok(6), as_of=TODAY,
                                       lawd_cd=LAWD, exclusive_area_m2=84,
                                       use_mortgage=False,
-                                      jeonse_deposit=units.from_eok(3))
+                                      jeonse_deposit=units.from_eok(3), agent_vat_registered=True)
         assert cap.assumable_deposit == 0
         assert cap.required == cap.total_purchase_cost
 
@@ -506,7 +513,7 @@ class TestSelfCapital:
             cap = capital_mod.compute(conn, price=units.from_eok(6), as_of=TODAY,
                                       lawd_cd=LAWD, exclusive_area_m2=84,
                                       use_mortgage=False, assume_jeonse=True,
-                                      jeonse_deposit=units.from_eok(3))
+                                      jeonse_deposit=units.from_eok(3), agent_vat_registered=True)
         assert cap.assumable_deposit == units.from_eok(3)
         assert cap.required == cap.total_purchase_cost - units.from_eok(3)
 
@@ -514,7 +521,7 @@ class TestSelfCapital:
         with get_conn(db) as conn:
             full_costs(conn)            # 대출 규칙 없음
             cap = capital_mod.compute(conn, price=units.from_eok(6), as_of=TODAY,
-                                      lawd_cd=LAWD, exclusive_area_m2=84)
+                                      lawd_cd=LAWD, exclusive_area_m2=84, agent_vat_registered=True)
         assert cap.required is None
         assert "대출 가능액" in cap.unknown
         assert cap.affordable(units.from_eok(3)) is None    # '가능' 으로 넘기지 않는다
@@ -525,7 +532,7 @@ class TestSelfCapital:
             standard_tax(conn)          # 법무비·실비 규칙 없음
             cap = capital_mod.compute(conn, price=units.from_eok(6), as_of=TODAY,
                                       lawd_cd=LAWD, exclusive_area_m2=84,
-                                      use_mortgage=False)
+                                      use_mortgage=False, agent_vat_registered=True)
         assert not cap.confirmed
         assert cap.title == "예상 실투자금"
         assert cap.unknown
@@ -535,7 +542,7 @@ class TestSelfCapital:
             full_costs(conn)
             cap = capital_mod.compute(conn, price=units.from_eok(6), as_of=TODAY,
                                       lawd_cd=LAWD, exclusive_area_m2=84,
-                                      use_mortgage=False)
+                                      use_mortgage=False, agent_vat_registered=True)
         assert cap.confirmed
         assert cap.title == "실투자금 확정"
 
@@ -546,7 +553,7 @@ class TestSelfCapital:
                          "WHERE tax_kind='농어촌특별세'")
             cap = capital_mod.compute(conn, price=units.from_eok(6), as_of=TODAY,
                                       lawd_cd=LAWD, exclusive_area_m2=84,
-                                      use_mortgage=False)
+                                      use_mortgage=False, agent_vat_registered=True)
         assert not cap.confirmed
         assert cap.verification == rules.NEEDS_VERIFICATION
 
@@ -555,7 +562,7 @@ class TestSelfCapital:
             full_costs(conn)
             add_loan(conn, rule_type="LTV", value=0.5)
             cap = capital_mod.compute(conn, price=units.from_eok(6), as_of=TODAY,
-                                      lawd_cd=LAWD, exclusive_area_m2=84)
+                                      lawd_cd=LAWD, exclusive_area_m2=84, agent_vat_registered=True)
         assert cap.available_mortgage == units.from_eok(3)
         assert cap.required == cap.total_purchase_cost - units.from_eok(3)
         assert cap.required < cap.required_without_loan
@@ -569,7 +576,7 @@ class TestBudget:
             full_costs(conn)
             add_loan(conn, rule_type="LTV", value=0.6)
             cap = capital_mod.compute(conn, price=units.from_eok(6), as_of=TODAY,
-                                      lawd_cd=LAWD, exclusive_area_m2=84)
+                                      lawd_cd=LAWD, exclusive_area_m2=84, agent_vat_registered=True)
         cash = units.from_eok(3)
         # 매매가 6억 > 현금 3억 이지만 실투자금은 3억 미만이라 살 수 있다
         assert cap.purchase_price > cash
@@ -581,7 +588,7 @@ class TestBudget:
             full_costs(conn)
             add_loan(conn, rule_type="LTV", value=0.5)
             cap = capital_mod.compute(conn, price=units.from_eok(6), as_of=TODAY,
-                                      lawd_cd=LAWD, exclusive_area_m2=84)
+                                      lawd_cd=LAWD, exclusive_area_m2=84, agent_vat_registered=True)
         use = cap.cash_utilization(units.from_eok(4))
         assert use == pytest.approx(cap.required / units.from_eok(4))
 
@@ -627,7 +634,7 @@ class TestReturn:
         full_costs(conn)
         add_loan(conn, rule_type="LTV", value=0.5)
         return capital_mod.compute(conn, price=units.from_eok(6), as_of=TODAY,
-                                   lawd_cd=LAWD, exclusive_area_m2=84)
+                                   lawd_cd=LAWD, exclusive_area_m2=84, agent_vat_registered=True)
 
     def test_미래_매도가가_없으면_수익률을_만들지_않는다(self, db):
         with get_conn(db) as conn:
@@ -754,7 +761,7 @@ def test_가격x면적_조합에서_취득비용이_모순없이_나온다(db, e
         cap = capital_mod.compute(
             conn, price=units.from_eok(eok), as_of=TODAY, lawd_cd=LAWD,
             exclusive_area_m2=area, annual_income=units.from_eok(1),
-            interest_rate=0.045)
+            interest_rate=0.045, agent_vat_registered=True)
     assert cap.total_purchase_cost > cap.purchase_price
     assert cap.required is not None
     assert cap.required <= cap.required_without_loan
@@ -776,7 +783,7 @@ def test_주택수x규제지역_조합에서_규칙이_없으면_지어내지_�
                 (LAWD, "조정대상지역", "2020-01-01", "국토부 공고", TODAY))
         cap = capital_mod.compute(conn, price=units.from_eok(6), as_of=TODAY,
                                   lawd_cd=LAWD, current_home_count=homes,
-                                  exclusive_area_m2=84, use_mortgage=False)
+                                  exclusive_area_m2=84, use_mortgage=False, agent_vat_registered=True)
     tax_item = next(i for i in cap.cost_items if i.name == "취득세")
     if homes == 0:                       # 취득 후 1주택 → 규칙이 있다
         assert tax_item.amount == 6_000_000
@@ -1001,7 +1008,8 @@ class TestRealCosts:
     def test_중개보수와_법무보수의_부가세가_각각_계산된다(self, real_rules):
         with get_conn(real_rules) as conn:
             fee, vat, _ = cost_mod.brokerage(conn, price=units.from_eok(6),
-                                             as_of=REAL_AS_OF, region="인천")
+                                             as_of=REAL_AS_OF, region="인천",
+                                             agent_vat_registered=True)
             legal = cost_mod.calculate_legal_fee(conn, price=units.from_eok(6),
                                                  as_of=REAL_AS_OF, region="인천")
         assert vat.amount == fee.amount // 10
@@ -1046,14 +1054,20 @@ class TestRealLoan:
                 regulated_area=True, region="인천")
         assert got.amount == units.from_eok(4)
 
-    def test_비규제_LTV_는_아직_확인_불가다(self, real_rules):
-        """값을 받지 못했다. 70% 같은 숫자를 지어내지 않는다."""
+    def test_비규제_LTV_는_출처와_함께_들어왔다(self, real_rules):
+        """전에는 값을 못 받아 '확인 불가' 였다.
+
+        2026-09-01 작업지시서가 금융위원회 2026년 가계부채 관리방안을
+        출처로 비규제지역 70% 를 제공했다. 지어낸 값이 아니라 받은 값이라
+        이제 계산한다. **다만 이것은 LTV 상한일 뿐 최종 한도가 아니다** —
+        그건 아래 test_LTV_만으로_최종한도를_확정하지_않는다 가 지킨다.
+        """
         with get_conn(real_rules) as conn:
             got, _ = mortgage_mod.calculate_ltv_limit(
                 conn, price=units.from_eok(10), as_of=REAL_AS_OF, home_status="무주택",
                 regulated_area=False, region="인천")
-        assert got.amount is None
-        assert got.verification == rules.UNKNOWN
+        assert got.amount == units.from_eok(7)      # 10억 × 70%
+        assert got.verification == rules.VERIFIED   # 출처가 있는 값이다
 
     def test_처분조건_없는_1주택자는_추정하지_않는다(self, real_rules):
         with get_conn(real_rules) as conn:
@@ -1113,7 +1127,11 @@ def test_지정된_6개_CASE(real_rules, name, eok, area, homes, regulated, expe
             conn, price=units.from_eok(eok), as_of=REAL_AS_OF,
             lawd_cd=LAWD_REG if regulated else LAWD_FREE,
             current_home_count=homes - 1, exclusive_area_m2=area,
-            annual_income=units.from_eok(0.8), interest_rate=0.045, region="인천")
+            annual_income=units.from_eok(0.8), interest_rate=0.045, region="인천",
+            # 이 CASE 들은 "부가세가 얼마인가" 를 검증한다. 과세유형이 전제다.
+            # 안 넘기면 부가세가 '확인 불가' 로 나오는데, 그건 §5 가 요구한
+            # 정상 동작이지 이 테스트가 보려는 것이 아니다.
+            agent_vat_registered=True)
 
     by_name = {i.name: i for i in cap.cost_items}
     assert by_name["취득세"].amount == expected_tax
