@@ -389,3 +389,88 @@ def test_지역_이름에_직접_점수를_주는_곳이_없다():
                 p.read_text(encoding="utf-8")):
             hits.append(f"{p.name}: {m.group(0)}")
     assert not hits, f"지역 이름에 직접 점수를 주는 곳이 있다: {hits}"
+
+
+# ── §24·§27 주변 대표 신축은 새 API 없이 기존 데이터로 찾는다 ─────────
+
+def _mk(conn, name, *, year, lat, lon, band="84", price=None, n=10, ym="202512"):
+    conn.execute(
+        "INSERT INTO complex (kapt_code, name, name_norm, lawd_cd, emd_name,"
+        " lat, lon, approval_year, apt_households)"
+        " VALUES (?,?,?,'11110','청운동',?,?,?,500)",
+        (f"K{name}", name, name, lat, lon, year))
+    cid = conn.execute("SELECT id FROM complex WHERE name=?", (name,)).fetchone()[0]
+    if price is not None:
+        conn.execute(
+            "INSERT INTO price_snapshot (complex_id, area_band, as_of_ym,"
+            " window_months, representative_price, method, sample_n, excluded_n,"
+            " confidence, engine_version, data_grade, calc_trace)"
+            " VALUES (?,?,?,3,?,'median',?,0,'HIGH','x','CONFIRMED','{\"t\":1}')",
+            (cid, band, ym, price, n))
+    return cid
+
+
+@pytest.fixture
+def peers(db):
+    from apt_engine.repo import apt as repo
+    with get_conn(db) as conn:
+        repo.sync_regions(conn)
+        me = _mk(conn, "재건축단지", year=1985, lat=37.5850, lon=126.9700)
+        _mk(conn, "신축A", year=2023, lat=37.5855, lon=126.9705, price=1_500_000_000)
+        _mk(conn, "신축B", year=2022, lat=37.5860, lon=126.9710, price=1_200_000_000)
+        _mk(conn, "먼신축", year=2023, lat=37.7000, lon=127.1000, price=2_000_000_000)
+        _mk(conn, "표본부족", year=2024, lat=37.5852, lon=126.9702,
+            price=3_000_000_000, n=2)
+        conn.commit()
+    return db, me
+
+
+def test_주변_대표_신축을_기존_데이터로_찾는다(peers):
+    from apt_engine.redev import peer_new
+    db, me = peers
+    with get_conn(db) as conn:
+        p = peer_new.find(conn, complex_id=me, area_band="84", as_of_ym="202601")
+    assert p.known
+    assert p.name == "신축A", "가장 비싼 주변 신축이 대표여야 한다"
+    assert p.price == 1_500_000_000
+
+
+def test_멀리_있는_신축은_기준이_되지_않는다(peers):
+    """생활권이 갈리면 그 동네 기준이 아니다."""
+    from apt_engine.redev import peer_new
+    db, me = peers
+    with get_conn(db) as conn:
+        p = peer_new.find(conn, complex_id=me, area_band="84", as_of_ym="202601")
+    assert p.name != "먼신축"
+
+
+def test_표본이_적은_스냅샷은_대표로_쓰지_않는다(peers):
+    """가장 비싸지만 표본 2건인 단지를 대표로 쓰면 §49-4 위반이다."""
+    from apt_engine.redev import peer_new
+    db, me = peers
+    with get_conn(db) as conn:
+        p = peer_new.find(conn, complex_id=me, area_band="84", as_of_ym="202601")
+    assert p.name != "표본부족"
+
+
+def test_신축이_하나뿐이면_대표를_정하지_않는다(db):
+    from apt_engine.redev import peer_new
+    from apt_engine.repo import apt as repo
+    with get_conn(db) as conn:
+        repo.sync_regions(conn)
+        me = _mk(conn, "구축", year=1990, lat=37.585, lon=126.970)
+        _mk(conn, "유일신축", year=2023, lat=37.586, lon=126.971, price=1_000_000_000)
+        conn.commit()
+        p = peer_new.find(conn, complex_id=me, area_band="84", as_of_ym="202601")
+    assert not p.known and "1개뿐" in p.reason
+
+
+def test_상승률을_모르면_미래가격을_지어내지_않는다(peers):
+    from apt_engine.redev import peer_new
+    db, me = peers
+    with get_conn(db) as conn:
+        p = peer_new.find(conn, complex_id=me, area_band="84", as_of_ym="202601")
+    out = peer_new.future_price(p, annual_growth=None, years=5)
+    assert out["값"] is None and "가정" in out["사유"]
+    ok = peer_new.future_price(p, annual_growth=0.03, years=5)
+    assert ok["값"] > p.price and "가정" in ok
