@@ -124,12 +124,12 @@ confidence = HIGH   표본 ≥ 10
       <div class="cds--checkbox-wrapper">
         <input class="cds--checkbox" type="checkbox" id="jeonse" name="jeonse"
                {% if form.jeonse %}checked{% endif %}>
-        <label class="cds--checkbox-label" for="jeonse">전세 승계(갭투자)</label>
+        <label class="cds--checkbox-label" for="jeonse"><span class="cds--checkbox-label-text">전세 승계(갭투자)</span></label>
       </div>
       <div class="cds--checkbox-wrapper">
         <input class="cds--checkbox" type="checkbox" id="loan" name="loan"
                {% if form.loan %}checked{% endif %}>
-        <label class="cds--checkbox-label" for="loan">주담대 사용</label>
+        <label class="cds--checkbox-label" for="loan"><span class="cds--checkbox-label-text">주담대 사용</span></label>
       </div>
     </div>
     {% if mode == MODE_EXPERT %}<input type="hidden" name="mode" value="expert">{% endif %}

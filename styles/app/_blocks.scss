@@ -197,8 +197,30 @@
 }
 .table-scroll .cds--data-table { min-width: 100%; }
 
+// 모바일에서 열이 짜부라지면 글자가 한 자씩 끊겨 읽을 수 없고, 오른쪽 열은
+// 아예 잘려 나간다. 최소 폭을 줘서 **짜부라지는 대신 가로로 스크롤**하게 한다.
+// 넘치는 것은 이 상자 안이므로 페이지 본문은 밀리지 않는다.
+@include breakpoint-down(md) {
+  .table-scroll .cds--data-table { min-width: 620px; }
+}
+
 // Carbon data-table 이 기본으로 주는 것 위에 숫자 정렬만 얹는다
 .cds--data-table td.num, .cds--data-table th.num {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+
+// ── 체크박스 ─────────────────────────────────────────────────────────
+//
+// Carbon 1.x 의 checkbox SCSS 는 상자 그림을 웹컴포넌트 쪽에 두고 있어서
+// 순수 HTML 로는 네모가 안 그려진다. 네이티브 체크박스를 그대로 쓰고
+// 라벨 타이포만 Carbon 것을 얹는다 — 네이티브가 접근성·조작성이 더 낫다.
+.cds--checkbox-wrapper {
+  display: flex;
+  align-items: center;
+  gap: $spacing-03;
+  margin-bottom: $spacing-02;
+}
+.cds--checkbox { width: 16px; height: 16px; accent-color: brand.$brand-700; margin: 0; }
+.cds--checkbox-label { cursor: pointer; }
+.cds--checkbox-label-text { @include type-style('body-compact-01'); }

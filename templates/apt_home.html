@@ -174,7 +174,20 @@
     </ul>
     <table class="kv">
       <tr><th>스냅샷이 있는 달</th>
-          <td>{{ result.diagnosis.snapshot_months | join(", ") or "없음" }}</td></tr>
+          <td>
+            {% set ms = result.diagnosis.snapshot_months %}
+            {% if not ms %}없음
+            {% elif ms | length <= 6 %}{{ ms | join(", ") }}
+            {% else %}
+              {# 120개를 한 줄로 쏟으면 아무도 안 읽는다. 범위만 보이고
+                 전체는 펼쳐서 본다 — 빠진 달을 찾을 때는 목록이 필요하다. #}
+              <span class="num">{{ ms[0] }}</span> ~ <span class="num">{{ ms[-1] }}</span>
+              · <span class="num">{{ ms | length }}</span>개월
+              {% call ui.evidence('전체 목록 보기') %}
+                <p class="small" style="word-break:break-all">{{ ms | join(", ") }}</p>
+              {% endcall %}
+            {% endif %}
+          </td></tr>
       <tr><th>관측 가능 시점</th><td>{{ result.diagnosis.observable }}</td></tr>
       <tr><th>후보 모집단</th><td><span class="num">{{ result.diagnosis.universe }}</span>개</td></tr>
       {% if result.diagnosis.dropped %}

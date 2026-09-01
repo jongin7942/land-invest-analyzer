@@ -16,7 +16,7 @@
 // $theme 맵을 넘기면 Carbon 이 그 값으로 모든 컴포넌트를 칠한다.
 // 컴포넌트마다 색을 덮어쓰는 것이 아니라 **토큰 한 겹만 바꾸는** 방식이라,
 // Carbon 이 업데이트돼도 우리 색이 유지된다.
-@use '@carbon/styles/scss/theme' with (
+@use '@carbon/styles/scss/theme' as theme with (
   $theme: (
     background: brand.$gray-050,
     background-hover: brand.$gray-100,
@@ -80,12 +80,17 @@
 // 필요한 것만 가져온다. 전체 import 는 500KB 가 넘는데 우리는 그중
 // 일부만 쓴다 — 느린 회선에서 첫 화면이 늦어지는 값을 치를 이유가 없다.
 @use '@carbon/styles/scss/reset';
-@use '@carbon/styles/scss/theme' as *;
 @use '@carbon/styles/scss/spacing' as *;
 @use '@carbon/styles/scss/type' as *;
 @use '@carbon/styles/scss/breakpoint' as *;
 @use '@carbon/styles/scss/motion' as *;
 @use '@carbon/styles/scss/grid';
+
+// layout 은 :root 에 --cds-layout-size-height-* 를 발행한다. Carbon 의 버튼과
+// 입력은 높이·좌우 패딩을 전부 그 변수로 계산하기 때문에, 이걸 빼면
+// 버튼이 글자 크기 그대로 납작하게 나온다 (컴포넌트 CSS 는 멀쩡한데
+// 변수가 비어 있어서 padding 이 0 이 된다).
+@use '@carbon/styles/scss/layout';
 
 @use '@carbon/styles/scss/components/button';
 @use '@carbon/styles/scss/components/text-input';
@@ -107,3 +112,29 @@
 @use 'app/data';
 @use 'app/blocks';
 @use 'app/states';
+
+// ── 우리 색을 실제로 발행한다 ────────────────────────────────────────
+//
+// `@use ... with ($theme: ...)` 는 Sass 변수만 바꾼다. Carbon 컴포넌트 CSS 는
+// `var(--cds-button-primary, #0f62fe)` 처럼 **커스텀 프로퍼티 + IBM 색 폴백**
+// 으로 쓰기 때문에, 이 블록이 없으면 폴백이 이겨서 화면이 IBM 파랑으로 나온다.
+// :root 에 발행해야 위 $theme 맵이 실제로 적용된다.
+:root {
+  @include theme.theme();
+
+  // theme() 는 **기본 테마 → 컴포넌트 토큰** 순으로 발행한다. 버튼·알림처럼
+  // 컴포넌트 토큰 층에 있는 값은 위 $theme 맵에 적어도 뒤에서 IBM 기본색으로
+  // 다시 칠해진다. 그래서 이 10개만 마지막에 한 번 더 못박는다.
+  //
+  // 여기 없는 색을 여기에 추가하지 말 것 — 색은 _brand.scss 한 곳에서 정한다.
+  --cds-button-primary: #{brand.$brand-700};
+  --cds-button-primary-hover: #{brand.$brand-800};
+  --cds-button-primary-active: #{brand.$brand-900};
+  --cds-button-secondary: #{brand.$gray-700};
+  --cds-button-secondary-hover: #{brand.$gray-900};
+  --cds-button-tertiary: #{brand.$brand-700};
+  --cds-notification-background-error: #{brand.$danger-100};
+  --cds-notification-background-success: #{brand.$ok-100};
+  --cds-notification-background-warning: #{brand.$warn-100};
+  --cds-notification-background-info: #{brand.$brand-100};
+}

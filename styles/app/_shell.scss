@@ -91,8 +91,29 @@ $header-h: 48px;
   }
 }
 
-// 모바일에서는 서비스명을 줄이고 메뉴를 가로 스크롤로
+// 모바일: 메뉴를 아랫줄로 내린다
+//
+// 한 줄에 다 넣으면 서비스명과 보기모드에 밀려 메뉴가 40px 남짓만 남고,
+// 가로 스크롤이 걸려도 사용자는 거기 메뉴가 더 있는 줄 모른다.
+// 줄을 나눠 폭 전체를 메뉴에 준다.
 @include breakpoint-down(md) {
-  .app-header { gap: $spacing-04; padding: 0 $spacing-04; }
+  .app-header {
+    height: auto;
+    flex-wrap: wrap;
+    gap: $spacing-03;
+    padding: 0 $spacing-04;
+    align-items: center;
+  }
+  .app-header__name { padding: $spacing-03 0; }
+
+  .app-nav {
+    order: 3;
+    flex: 0 0 100%;
+    margin: 0 (-$spacing-04);
+    padding: 0 $spacing-04;
+    border-top: 1px solid rgba(255,255,255,.16);
+  }
+  .app-nav a { height: 40px; padding: 0 $spacing-03; }
+
   .mode-switch a { padding: $spacing-01 $spacing-02; }
 }

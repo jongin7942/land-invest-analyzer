@@ -401,11 +401,15 @@ def _why_empty(conn, as_of, result) -> dict:
     if not months:
         reasons.append("대표가격 스냅샷이 하나도 없습니다. `cli snapshot` 을 먼저 돌리세요.")
     elif not uni.rows:
+        # 달 목록을 그대로 붙이면 120개가 한 문단으로 쏟아져 아무도 안 읽는다.
+        # 범위와 개수만 문장에 넣고, 전체 목록은 화면이 접어서 보여준다.
+        span = (f"{months[0]}~{months[-1]} {len(months)}개월"
+                if len(months) > 1 else months[0])
         reasons.append(
-            f"스냅샷이 {', '.join(months)} 뿐인데, 랭킹은 신고 지연을 감안해 "
-            f"관측 가능 시점({as_of.observable.ym})의 **직전 달까지만** 봅니다. "
+            f"스냅샷이 {span} 뿐인데, 랭킹은 신고 지연을 감안해 "
+            f"관측 가능 시점({as_of.observable.ym})의 <b>직전 달까지만</b> 봅니다. "
             f"그래서 가장 최근 달 스냅샷은 후보에 들어가지 않습니다 — "
-            f"`cli snapshot --months 6` 처럼 과거 달도 만들어야 합니다.")
+            f"<code>cli snapshot --months 6</code> 처럼 과거 달도 만들어야 합니다.")
     if uni.excluded:
         reasons.append("표본 기준에서 빠진 단지: "
                        + " · ".join(f"{k} {v}개" for k, v in uni.excluded.items()))
