@@ -65,6 +65,21 @@ $DATA_START = & $python -c "import sqlite3,config; c=sqlite3.connect(f'file:{con
 $DATA_END   = & $python -c "import sqlite3,config; c=sqlite3.connect(f'file:{config.APT_DB_PATH}?mode=ro',uri=True); d=c.execute('SELECT MAX(as_of_ym) FROM price_snapshot').fetchone()[0]; print(f'{d[:4]}-{d[4:6]}-01')"
 Write-Log "데이터 구간 $DATA_START ~ $DATA_END"
 
+# ── 보유기간 1년 · 창 간격 6개월 · 스냅샷 240개월 ──────────────────
+# 첫 판에서 가중치가 0개 학습됐다. feature 마다 사유가 같았다 —
+#   TRAIN 창 14개 중 겹치지 않는 것 2개, VALIDATION 7개 중 1개 (최소 3개).
+# 겹친 창을 따로 세면 표본을 부풀리는 것이라 usefulness 가 거부한 것이고 옳다.
+#
+# 데이터가 모자란 게 아니라 우리가 쓴 구간이 짧았다. 매매 원본은 2006-09 부터
+# 있는데 스냅샷을 120개월만 만들었다. 20년이 있는데 10년만 쓰고 있었다.
+#
+# 보유기간 2년은 240개월로도 안 된다 - 창이 24개월씩 떨어져야 하는데 분할 하나가
+# 그만큼 길지 않다. 2년 가중치를 배우려면 30년어치가 필요하다. 1년으로 내리면
+# VALIDATION 이 약 60개월 -> 겹치지 않는 창 5개가 된다.
+#
+# 창 간격을 3->6개월로 늘렸다. 겹치지 않는 창 개수는 분할의 길이로 정해지지
+# 간격으로 정해지지 않는다. 간격을 좁혀봐야 계산량만 두 배가 된다.
+
 # ── 백테스트는 --no-loan 로 돌린다 ─────────────────────────────────
 # 기본(STRICT) 게이트는 실투자금(세금 + 부대비용 - 대출 - 승계전세)으로 거른다.
 # 과거 창에서 이게 성립하려면 규칙이 그 시점에 있어야 하는데, 하나씩 막혔다.
@@ -95,11 +110,11 @@ Write-Log "데이터 구간 $DATA_START ~ $DATA_END"
 $steps = @(
     @{ N = "init";             A = @("init");                                        Soft = $false }
     @{ N = "match";            A = @("match", "--rebuild");                           Soft = $false }
-    @{ N = "snapshot";         A = @("snapshot", "--months", "120", "--window", "6");   Soft = $false }
+    @{ N = "snapshot";         A = @("snapshot", "--months", "240", "--window", "6");   Soft = $false }
     @{ N = "validate";         A = @("validate");                                     Soft = $true  }
-    @{ N = "backtest-plan";    A = @("backtest", "plan", "--horizon", "2", "--step", "3",
+    @{ N = "backtest-plan";    A = @("backtest", "plan", "--horizon", "1", "--step", "6",
                                      "--start", $DATA_START, "--end", $DATA_END); Soft = $true }
-    @{ N = "backtest-run";     A = @("backtest", "run", "--horizon", "2", "--step", "3",
+    @{ N = "backtest-run";     A = @("backtest", "run", "--horizon", "1", "--step", "6",
                                      "--start", $DATA_START, "--end", $DATA_END,
                                      "--run-key", "wf1", "--cash", "10",
                                      "--no-loan", "--purge");                     Soft = $false }
