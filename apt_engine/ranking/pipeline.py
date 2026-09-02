@@ -128,8 +128,15 @@ def run(conn: sqlite3.Connection, *, as_of: cutoff_mod.AsOf, profile: Profile,
         lawd_cd: str | None = None, scan_limit: int = 2000,
         groups: list[str] | None = None,
         weights_source: str = weights_mod.HEURISTIC,
-        gate: str = GATE_STRICT) -> Result:
-    """전체 파이프라인 한 번."""
+        gate: str = GATE_STRICT,
+        cache: dict | None = None) -> Result:
+    """전체 파이프라인 한 번.
+
+    cache — 같은 as_of·같은 band 로 현금만 바꿔 여러 번 부를 때(백테스트의 자본
+    버킷) 창 단위로 넘긴다. universe·실투자금·feature 는 현금과 무관해서 단지별로
+    답이 같은데, 캐시가 없으면 버킷 수만큼 다시 계산한다. **as_of 나 band 가
+    달라지면 새 dict 를 줘야 한다** — 키가 complex_id 뿐이라 섞이면 틀린다.
+    """
     if not profile.available_cash:
         raise ValueError("가용 현금이 없으면 매수 가능 판정을 할 수 없습니다")
     if gate not in GATE_NOTE:
@@ -137,8 +144,17 @@ def run(conn: sqlite3.Connection, *, as_of: cutoff_mod.AsOf, profile: Profile,
 
     band = area_band or area_mod.DEFAULT_BAND
 
+    cap_cache = None if cache is None else cache.setdefault("capital", {})
+    feat_cache = None if cache is None else cache.setdefault("features", {})
+
     # ① Blind Universe — 이름 없이
-    universe = universe_mod.build(conn, as_of=as_of, area_band=band, lawd_cd=lawd_cd)
+    if cache is not None and "universe" in cache:
+        universe = cache["universe"]
+    else:
+        universe = universe_mod.build(conn, as_of=as_of, area_band=band,
+                                      lawd_cd=lawd_cd)
+        if cache is not None:
+            cache["universe"] = universe
     rows = universe.rows[:scan_limit]
     dropped: list[Dropped] = []
 
@@ -158,8 +174,13 @@ def run(conn: sqlite3.Connection, *, as_of: cutoff_mod.AsOf, profile: Profile,
             capitals[row.complex_id] = None
             feasible_rows.append(row)
             continue
-        capital = _capital_of(conn, row, profile=profile, as_of=as_of, band=band,
-                              use_mortgage=(gate != GATE_NO_LOAN))
+        if cap_cache is not None and row.complex_id in cap_cache:
+            capital = cap_cache[row.complex_id]
+        else:
+            capital = _capital_of(conn, row, profile=profile, as_of=as_of, band=band,
+                                  use_mortgage=(gate != GATE_NO_LOAN))
+            if cap_cache is not None:
+                cap_cache[row.complex_id] = capital
         if capital is None:
             dropped.append(Dropped(row.complex_id, "feasibility",
                                    "실투자금을 계산하지 못했습니다"))
@@ -181,9 +202,16 @@ def run(conn: sqlite3.Connection, *, as_of: cutoff_mod.AsOf, profile: Profile,
     # ③ Feature → Consensus
     feature_sets: dict[int, FeatureSet] = {}
     for row in feasible_rows:
-        feature_sets[row.complex_id] = features_mod.build(
-            conn, row.complex_id, band, as_of=as_of, lawd_cd=row.lawd_cd,
+        cid = row.complex_id
+        if feat_cache is not None and cid in feat_cache:
+            feature_sets[cid] = feat_cache[cid]
+            continue
+        built = features_mod.build(
+            conn, cid, band, as_of=as_of, lawd_cd=row.lawd_cd,
             horizon_years=horizon_years, groups=groups)
+        if feat_cache is not None:
+            feat_cache[cid] = built
+        feature_sets[cid] = built
 
     # Capital Efficiency 는 후보 집단이 있어야 계산된다(상대적 개념).
     for row in feasible_rows:

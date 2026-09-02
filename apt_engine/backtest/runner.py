@@ -248,13 +248,16 @@ def _run_window(conn, run_id: int, window: windows_mod.Window, *,
     picked_order: list[int] = []
     scores: dict[int, float] = {}
 
+    # 창 하나 = 캐시 하나. as_of 와 band 가 고정이라 버킷끼리 나눠 쓸 수 있다.
+    window_cache: dict = {}
+
     for bucket in buckets:
         bucket_profile = _with_cash(profile, bucket)
         try:
             ranked = pipeline_mod.run(
                 conn, as_of=as_of, profile=bucket_profile,
                 horizon_years=window.horizon_years, area_band=area_band,
-                weights_source=weights_source, gate=gate)
+                weights_source=weights_source, gate=gate, cache=window_cache)
         except Exception as exc:                       # noqa: BLE001
             _skip_window(conn, window_id,
                          f"랭킹이 실패했습니다: {type(exc).__name__}: {exc}")
