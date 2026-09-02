@@ -326,6 +326,10 @@ def run_matching(*, rebuild: bool = False, db_path: str | None = None,
 
 # ── 가격 스냅샷 (PHASE 2) ─────────────────────────────────────────────
 
+# 스냅샷을 몇 쌍마다 커밋할지. 쌍 하나가 모든 달을 함께 쓰므로 작게 잡는다.
+SNAPSHOT_CHUNK = 500
+
+
 def build_snapshots(*, as_of_ym: str | None = None, months: int = 1,
                     window_months: int = snap_mod.DEFAULT_WINDOW_MONTHS,
                     min_households: int | None = None, sido: str | None = None,
@@ -342,10 +346,16 @@ def build_snapshots(*, as_of_ym: str | None = None, months: int = 1,
 
     with get_conn(db_path) as conn:
         pairs = repo.matched_complex_bands(conn, min_households=min_households, sido=sido)
-        stats["pairs"] = len(pairs)
-        progress(f"대상 (단지×면적) {len(pairs)}쌍 × {len(targets_ym)}개월")
+    stats["pairs"] = len(pairs)
+    progress(f"대상 (단지×면적) {len(pairs)}쌍 × {len(targets_ym)}개월")
 
-        for i, pair in enumerate(pairs, 1):
+    # 쌍 단위로 끊어 커밋한다. 전체를 한 트랜잭션으로 묶으면 WAL 이 계속 자라고
+    # 진행률도 안 보인다 — 매칭에서 그렇게 몇 시간을 버렸다.
+    # 쌍 하나가 그 쌍의 모든 달을 함께 처리하므로 경계에서 끊어도 어중간하지 않다.
+    for chunk_start in range(0, len(pairs), SNAPSHOT_CHUNK):
+      with get_conn(db_path) as conn:
+        for i, pair in enumerate(pairs[chunk_start:chunk_start + SNAPSHOT_CHUNK],
+                                 chunk_start + 1):
             cid, band = pair["complex_id"], pair["area_band"]
             trades = repo.trades_for(conn, cid, band)
             jeonse = repo.jeonse_for(conn, cid, band)
@@ -370,7 +380,8 @@ def build_snapshots(*, as_of_ym: str | None = None, months: int = 1,
                     stats["ratio"] += 1
 
             if i % 200 == 0:
-                progress(f"  {i}/{len(pairs)}")
+                progress(f"  {i:,}/{len(pairs):,} "
+                         f"(매매 {stats['price']:,} · 전세 {stats['jeonse']:,})")
     return stats
 
 
@@ -598,7 +609,8 @@ def build_ratios(*, area_band: str, db_path: str | None = None,
                                    area_band=area_band, norm=norm)
                 stats["norms"] += 1
             if i % 200 == 0:
-                progress(f"  {i}/{len(pairs)}")
+                progress(f"  {i:,}/{len(pairs):,} "
+                         f"(매매 {stats['price']:,} · 전세 {stats['jeonse']:,})")
     return stats
 
 
