@@ -144,6 +144,19 @@ def compute(conn: sqlite3.Connection, *, price: int, as_of: str | date,
         items.append(Item(t.name, t.amount, t.verification, t.formula, t.note))
     evidence.extend(tax.calc.evidence)
 
+    # 규제지역을 확인하지 못했는데 그 답이 세금을 가르는 경우.
+    #
+    # regulated = bool(zone.types) 는 '확인 못 했다' 와 '확인했고 아니다' 를
+    # 같은 False 로 뭉갠다. 취득 후 1주택이면 조정 여부가 취득세를 바꾸지 않아
+    # 상관없지만, 2주택 이상이면 8%·12% 중과가 여기서 갈린다. 모르는데 비조정으로
+    # 두면 취득세를 수천만원 적게 잡는다 — 못 사는 집이 살 수 있는 집이 된다.
+    if not zone.checked and current_home_count + 1 >= 2:
+        items.append(Item(
+            "규제지역 판정", None, rules.UNKNOWN,
+            "regulation_coverage 에 이 시점·이 시도가 선언되어 있지 않습니다",
+            "취득 후 2주택 이상이라 조정대상지역 여부가 취득세 중과를 가릅니다. "
+            "비조정으로 단정하지 않았습니다"))
+
     # ── 중개보수 + 부가세 ──
     fee, vat, ev = cost_mod.brokerage(
         conn, price=price, as_of=day, region=region,

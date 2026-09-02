@@ -781,6 +781,11 @@ def test_주택수x규제지역_조합에서_규칙이_없으면_지어내지_�
                 "INSERT INTO regulation_zone (lawd_cd, zone_type, effective_from, "
                 " source_name, last_verified) VALUES (?,?,?,?,?)",
                 (LAWD, "조정대상지역", "2020-01-01", "국토부 공고", TODAY))
+            # 커버리지를 선언해야 zone_at 이 '확인했다' 로 본다(마이그레이션 022)
+            conn.execute(
+                "INSERT INTO regulation_coverage (sido_prefix, effective_from, "
+                " source_name, last_verified) VALUES (?,?,?,?)",
+                (LAWD[:2], "2020-01-01", "테스트용 전수 확인 선언", TODAY))
         cap = capital_mod.compute(conn, price=units.from_eok(6), as_of=TODAY,
                                   lawd_cd=LAWD, current_home_count=homes,
                                   exclusive_area_m2=84, use_mortgage=False, agent_vat_registered=True)
@@ -887,6 +892,10 @@ def real_rules(db):
             "INSERT INTO regulation_zone (lawd_cd, zone_type, effective_from, "
             " source_name, last_verified) VALUES (?,?,?,?,?)",
             (LAWD_REG, "조정대상지역", "2025-10-16", "테스트용 지정", REAL_AS_OF))
+        conn.execute(
+            "INSERT INTO regulation_coverage (sido_prefix, effective_from, "
+            " source_name, last_verified) VALUES (?,?,?,?)",
+            (LAWD_REG[:2], "2025-10-16", "테스트용 전수 확인 선언", REAL_AS_OF))
     return db
 
 

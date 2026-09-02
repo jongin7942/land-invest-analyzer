@@ -1,0 +1,2 @@
+cost_kind,rule_key,region,conditions_json,price_min,price_max,rate,max_amount,fixed_amount,vat_applicable,effective_from,effective_to,source_name,source_url,last_verified,status,verification,note
+증명서발급,cert/등기·대장 발급,,{},0,,,,10000,0,2013-08-28,,등기사항증명서 등 수수료규칙 · 공간정보관리법 시행규칙,https://www.law.go.kr/법령/등기사항증명서등수수료규칙,2026-09-03,ENACTED,ESTIMATED,"등기사항증명서(1,200원/통)·토지대장·건축물대장·주민등록 등 매수 한 건에 통상 1만원 남짓. 실투자금 비중이 0.01% 미만이다"

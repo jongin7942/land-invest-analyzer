@@ -77,6 +77,23 @@ from apt_engine.validation import rules as validation
 
 # ── 준비 ──────────────────────────────────────────────────────────────
 
+def _gate_of(args) -> str:
+    """명령줄 플래그에서 자본 게이트를 고른다.
+
+    STRICT      실투자금 (대출·전세 승계 반영). 기본값.
+    NO_LOAN     세금·부대비용은 다 세되 대출 0. loan_rule 이 과거 구간에 없을 때.
+    PRICE_ONLY  매매가만 본다. 가장 거친 대체 경로.
+
+    둘 다 주면 더 거친 쪽(PRICE_ONLY)이 이긴다 — 좁게 잡는 것이 안전한 방향이다.
+    """
+    from apt_engine.ranking import pipeline as pipeline_mod
+    if getattr(args, "price_only", False):
+        return pipeline_mod.GATE_PRICE_ONLY
+    if getattr(args, "no_loan", False):
+        return pipeline_mod.GATE_NO_LOAN
+    return pipeline_mod.GATE_STRICT
+
+
 def cmd_init(args):
     applied = mig.migrate(args.db)
     print(f"마이그레이션 적용: {', '.join(f'{v:03d}' for v in applied)}" if applied
@@ -1800,8 +1817,7 @@ def cmd_backtest(args):
             data_end=args.end, profile=profile, area_band=args.band or "84",
             horizons=horizons, step_months=args.step, cash_buckets=buckets,
             top_k=args.top, market_source=bt_runner.REAL,
-            gate=(pipeline_mod.GATE_PRICE_ONLY if args.price_only
-                  else pipeline_mod.GATE_STRICT),
+            gate=_gate_of(args),
             purge_embargo=args.purge, max_windows=args.max_windows,
             cash_hurdle_rate=args.cash_hurdle,
             train_fraction=args.train_frac,
@@ -1823,8 +1839,7 @@ def _backtest_sanity(args):
     from apt_engine.backtest import sanity
     from apt_engine.ranking import pipeline as pipeline_mod
 
-    gate = (pipeline_mod.GATE_PRICE_ONLY if args.price_only
-            else pipeline_mod.GATE_STRICT)
+    gate = _gate_of(args)
     with get_conn(args.db) as conn:
         report = sanity.run_all(
             conn, run_fn=sanity.buy_counter(gate=gate, limit=args.top),
@@ -1939,8 +1954,7 @@ def cmd_today(args):
                 conn, as_of=as_of, profile=profile,
                 horizon_years=args.horizon, area_band=args.band,
                 lawd_cd=args.lawd, scan_limit=args.scan,
-                gate=(pipeline_mod.GATE_PRICE_ONLY if args.price_only
-                      else pipeline_mod.GATE_STRICT),
+                gate=_gate_of(args),
                 weights=learned, weights_source=source, limit=args.limit)
         except ValueError as e:
             sys.exit(str(e))
@@ -1980,8 +1994,7 @@ def _print_frontier(conn, args, as_of, profile, source, learned):
     from apt_engine.ranking import frontier as frontier_mod
     from apt_engine.ranking import pipeline as pipeline_mod
 
-    gate = (pipeline_mod.GATE_PRICE_ONLY if args.price_only
-            else pipeline_mod.GATE_STRICT)
+    gate = _gate_of(args)
     buckets = frontier_mod.default_buckets(profile.available_cash)
     results = {}
     for cash in buckets:
@@ -2704,6 +2717,8 @@ def build_parser() -> argparse.ArgumentParser:
     bt.add_argument("--price-only", action="store_true",
                     help="대출 규칙이 없을 때 매매가 기준으로 거른다 "
                          "(전액 현금 가정 — 실제보다 후보가 좁다)")
+    bt.add_argument("--no-loan", action="store_true",
+                    help="대출 규칙이 없을 때 대출을 0 으로 보고 거른다 (취득세·중개보수·법무비는 그대로 센다 — 권장)")
     bt.add_argument("--purge", action="store_true",
                     help="정답 구간이 다음 분할을 침범하는 창을 뺀다 (embargo)")
     bt.add_argument("--max-windows", type=int, help="창 수 제한 (시험용)")
@@ -2734,6 +2749,8 @@ def build_parser() -> argparse.ArgumentParser:
     td.add_argument("--as-of", help="데이터 컷오프 YYYY-MM-DD")
     td.add_argument("--price-only", action="store_true",
                     help="대출 규칙이 없을 때 매매가 기준으로 거른다")
+    td.add_argument("--no-loan", action="store_true",
+                    help="대출 규칙이 없을 때 대출을 0 으로 보고 거른다 (취득세·중개보수·법무비는 그대로 센다 — 권장)")
     td.add_argument("--weights", default="heuristic",
                     choices=["heuristic", "backtested"])
     td.add_argument("--verbose", action="store_true", help="1위 상세")

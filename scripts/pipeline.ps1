@@ -65,16 +65,30 @@ $DATA_START = & $python -c "import sqlite3,config; c=sqlite3.connect(f'file:{con
 $DATA_END   = & $python -c "import sqlite3,config; c=sqlite3.connect(f'file:{config.APT_DB_PATH}?mode=ro',uri=True); d=c.execute('SELECT MAX(as_of_ym) FROM price_snapshot').fetchone()[0]; print(f'{d[:4]}-{d[4:6]}-01')"
 Write-Log "데이터 구간 $DATA_START ~ $DATA_END"
 
-# ── 백테스트는 --price-only 로 돌린다 ─────────────────────────────────
-# 기본(STRICT) 게이트는 실투자금(세금·대출)을 계산해 살 수 있는지 본다. 그런데
-# 세법 규칙의 effective_from 이 2026-01-01 이라 과거 창에서는 적용될 규칙이 없다.
-# 실측: 2018-01 창에서 universe 2,693행 중 **매수가능 0개**. 후보가 없으니 채점도
-# 0개였고, 그래서 가중치 학습이 두 번 실패했다.
+# ── 백테스트는 --no-loan 로 돌린다 ─────────────────────────────────
+# 기본(STRICT) 게이트는 실투자금(세금 + 부대비용 - 대출 - 승계전세)으로 거른다.
+# 과거 창에서 이게 성립하려면 규칙이 그 시점에 있어야 하는데, 하나씩 막혔다.
+# 실측으로 확인한 순서가 그대로 기록이다 (전부 '매수가능 0개'):
 #
-# 엔진이 옳게 동작한 것이다 - 2018년 세율을 모르는데 실투자금을 지어내면 안 된다.
-# 백테스트의 목적은 '어떤 feature 가 미래 수익을 예측하는가' 를 배우는 것이고,
-# 실투자금 게이트는 그와 무관하다. 그래서 '그때 그 가격에 살 수 있었나' 만 본다.
-# 현금 10억은 후보를 충분히 남기려는 값이다(전 기간 1,700~2,600개).
+#   실투자금 확인 불가: 취득세          → rules/tax_history.csv (2013-08-28~)
+#   실투자금 확인 불가: 중개보수         → rules/cost_history.csv (서울·경기·인천)
+#   실투자금 확인 불가: 중개보수 부가세   → Profile.agent_vat_registered
+#   실투자금 확인 불가: 인지세·국민주택채권 → rules/registration_costs.csv
+#   실투자금 확인 불가: 증명서발급        → rules/certificate_costs.csv
+#   실투자금 확인 불가: 대출 가능액       → 여기서 멈췄다
+#
+# loan_rule 은 2025-10-16 부터만 있다. LTV·DSR 연혁을 채우려면 규제지역 연혁이
+# 먼저 필요한데(LTV 가 조정 여부로 갈린다), 고시가 2016~2023 에 열 번 넘게
+# 바뀌어서 하루에 안전하게 끝낼 분량이 아니다.
+#
+# --price-only 로 내려가면 세금과 부대비용을 통째로 안 센다. 10억짜리에서
+# 취득세 3천만 + 중개보수 500만을 빼먹는 것이라 필요현금이 크게 어긋난다.
+# --no-loan 은 그 중간이다 - 세금·부대비용은 다 세고 대출만 0 으로 본다.
+# 필요현금을 크게 잡는 방향이라 못 사는 집이 올라오지 않는다.
+#
+# 가중치 학습에는 이걸로 충분하다. 자본 게이트는 후보 풀을 고르는 자리이고,
+# 학습은 그 풀 안에서 무엇이 올랐는지를 본다. 대출 규칙이 채워지면 STRICT 로
+# 다시 돌린다. 현금 10억은 후보를 충분히 남기려는 값이다.
 
 # validate 는 위반이 있으면 0 이 아닌 값을 낸다. 그건 실패가 아니라 결과다.
 # backtest plan 도 '표본 부족' 을 0 이 아닌 값으로 알릴 수 있다.
@@ -88,7 +102,7 @@ $steps = @(
     @{ N = "backtest-run";     A = @("backtest", "run", "--horizon", "2", "--step", "3",
                                      "--start", $DATA_START, "--end", $DATA_END,
                                      "--run-key", "wf1", "--cash", "10",
-                                     "--price-only", "--purge");                     Soft = $false }
+                                     "--no-loan", "--purge");                     Soft = $false }
     @{ N = "backtest-weights"; A = @("backtest", "weights", "--run-key", "wf1");       Soft = $false }
 )
 

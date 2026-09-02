@@ -45,12 +45,20 @@ CASH_THRESHOLD = 45.0
 #               쓰는 대체 경로다. **대출이 나온다고 가정하지 않는다** — 전액 현금
 #               매수만 가능하다고 보는 것이라 실제보다 후보가 좁게 잡힌다.
 #               이 모드로 돈 결과에는 그 사실이 항상 붙어 다닌다.
+#   NO_LOAN     세금과 부대비용은 다 세고 **대출만 0** 으로 본다. loan_rule 이
+#               2025-10-16 부터만 있어 과거 창에서 STRICT 가 성립하지 않을 때
+#               쓴다. PRICE_ONLY 와 달리 취득세·중개보수·법무비를 빠뜨리지 않고,
+#               STRICT 와 달리 레버리지를 기대하지 않는다. 필요현금을 크게 잡는
+#               방향이라 못 사는 집이 올라오지는 않는다.
 GATE_STRICT = "STRICT"
 GATE_PRICE_ONLY = "PRICE_ONLY"
+GATE_NO_LOAN = "NO_LOAN"
 GATE_NOTE = {
     GATE_STRICT: "실투자금 기준(§26)",
     GATE_PRICE_ONLY: ("매매가 기준 — 대출 규칙이 없어 전액 현금 매수만 가능하다고 "
                       "봤습니다. 실제보다 후보가 좁습니다"),
+    GATE_NO_LOAN: ("매수가 + 취득세 + 부대비용 기준 — 대출 규칙이 없어 대출을 0 으로 "
+                   "봤습니다. 필요현금을 실제보다 크게 잡습니다"),
 }
 
 
@@ -150,7 +158,8 @@ def run(conn: sqlite3.Connection, *, as_of: cutoff_mod.AsOf, profile: Profile,
             capitals[row.complex_id] = None
             feasible_rows.append(row)
             continue
-        capital = _capital_of(conn, row, profile=profile, as_of=as_of, band=band)
+        capital = _capital_of(conn, row, profile=profile, as_of=as_of, band=band,
+                              use_mortgage=(gate != GATE_NO_LOAN))
         if capital is None:
             dropped.append(Dropped(row.complex_id, "feasibility",
                                    "실투자금을 계산하지 못했습니다"))
@@ -234,7 +243,8 @@ def run(conn: sqlite3.Connection, *, as_of: cutoff_mod.AsOf, profile: Profile,
 
 
 def _capital_of(conn, row, *, profile: Profile, as_of: cutoff_mod.AsOf,
-                band: str) -> capital_mod.SelfCapital | None:
+                band: str,
+                use_mortgage: bool = True) -> capital_mod.SelfCapital | None:
     try:
         exclusive = float(band)
     except ValueError:
@@ -249,7 +259,9 @@ def _capital_of(conn, row, *, profile: Profile, as_of: cutoff_mod.AsOf,
             interest_rate=profile.interest_rate,
             mortgage_term_years=profile.mortgage_term_years,
             repayment_type=profile.repayment_type, lender_type=profile.lender_type,
-            region=profile.region, allow_unverified=True)
+            region=profile.region,
+            agent_vat_registered=profile.agent_vat_registered,
+            use_mortgage=use_mortgage, allow_unverified=True)
     except Exception:                      # noqa: BLE001 — 후보 하나 때문에 멈추지 않는다
         return None
 

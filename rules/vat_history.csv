@@ -1,0 +1,2 @@
+tax_kind,rule_key,conditions_json,bracket_min,bracket_max,rate,progressive_deduction,fixed_amount,rate_formula,rate_decimals,max_amount,base_kind,effective_from,effective_to,source_name,source_url,last_verified,status,verification,note
+부가가치세,vat/일반세율/과거,{},0,,0.1,0,,,,,공급가액,2013-07-01,2026-06-30,부가가치세법 제30조 (세율),https://www.law.go.kr/법령/부가가치세법/제30조,2026-09-03,ENACTED,VERIFIED,1977년 도입 이래 10% 로 바뀐 적이 없다

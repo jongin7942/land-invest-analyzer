@@ -111,6 +111,7 @@ TIMELESS_TABLES = frozenset({
     # 시장 관측이 아니라서 시점 컬럼이 없다. (규칙 자체인
     # land_permit_zone 은 effective_from/to 로 그 시점 유효분만 읽는다)
     "permit_coverage",
+    "regulation_coverage",
     # Phase 11 — 행정구역 개편 이력. 코드가 코드를 승계했다는 **구조적
     # 사실**이지 시장 관측이 아니다. 컷오프로 가릴 대상도 아니다 —
     # 가리면 옛 코드로 저장된 과거 거래를 어느 규칙으로 판정할지 알 수

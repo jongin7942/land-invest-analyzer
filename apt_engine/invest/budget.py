@@ -41,6 +41,18 @@ class Profile:
     cash_hurdle_rate: float | None = None
     # §2 RequiredCash 구성요소. 없으면 0 이 아니라 '확인 불가' 로 다룬다.
     initial_repair_cost: int | None = None
+    # 중개사무소가 일반과세자인가 — 중개보수 부가세 10% 가 붙는지를 가른다.
+    #
+    # costs.brokerage 의 기본값은 None(확인 불가)이다. 개별 거래에서는 그게 옳다.
+    # 하지만 순위·백테스트는 단지 수천 개를 한꺼번에 훑는 자리라, 중개사무소를
+    # 하나하나 확인할 방법이 없다. None 으로 두면 실투자금이 전부 '확인 불가' 가
+    # 되어 후보가 통째로 떨어진다 — 실측으로 2018·2021·2024 세 시점 모두
+    # 후보 2~3천 개 중 매수가능 0 개였다.
+    #
+    # 그래서 여기서만 True(일반과세)를 **가정**한다. 부가세를 붙이는 쪽이 비용을
+    # 크게 잡는 방향이라, 못 사는 집을 살 수 있다고 하는 오류는 생기지 않는다.
+    # 개별 단지 상세 화면은 이 가정을 쓰지 않고 실제 중개사무소로 확인한다.
+    agent_vat_registered: bool | None = True
 
     @classmethod
     def load(cls, conn: sqlite3.Connection, name: str) -> "Profile | None":
