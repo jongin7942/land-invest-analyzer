@@ -224,66 +224,98 @@ def collect_rents(months: int = 60, sido: str | None = None, *,
 
 # ── 매칭 ──────────────────────────────────────────────────────────────
 
-# 매칭 그룹 몇 개마다 커밋할지. 작을수록 안전하고 클수록 빠르다.
-# 2,000 이면 WAL 이 수백 MB 수준에서 유지된다.
-MATCH_CHUNK = 2_000
+# 판정표를 몇 개씩 끊어 넣을지. INSERT 는 가벼워서 크게 잡아도 된다.
+PLAN_CHUNK = 5_000
+
+# 판정 결과를 담는 임시표. 조인 대상이라 (시군구, 단지명) 인덱스가 필요하다.
+_PLAN_DDL = """
+CREATE TABLE IF NOT EXISTS match_plan (
+    tbl        TEXT NOT NULL,
+    lawd_cd    TEXT NOT NULL,
+    apt_name   TEXT NOT NULL,
+    emd_name   TEXT,
+    build_year INTEGER,
+    complex_id INTEGER,
+    confidence TEXT NOT NULL,
+    reason     TEXT
+)
+"""
 
 
 def run_matching(*, rebuild: bool = False, db_path: str | None = None,
                  progress=print) -> dict:
     """미매칭 거래를 단지에 붙인다.
 
-    같은 (시군구·단지명·법정동·건축년도) 조합은 한 번만 판정하고 결과를 일괄 적용한다 —
-    거래 수백만 건을 한 건씩 매칭하면 느리기도 하고, 같은 이름에 다른 판정이 나올
-    수도 있다.
+    같은 (시군구·단지명·법정동·건축년도) 조합은 한 번만 판정한다 — 거래 수백만 건을
+    한 건씩 매칭하면 느리기도 하고, 같은 이름에 다른 판정이 나올 수도 있다.
 
-    **배치로 커밋한다.** 전체를 한 트랜잭션으로 묶었더니 1,218만 건에서 WAL 이
-    9.5GB 까지 자랐고, 7시간 동안 진행률이 보이지 않았으며, 실패하면 전부 롤백됐다.
-    끊겨도 이어받는다 — 아직 안 붙은 그룹만 다시 돌기 때문이다.
+    **판정과 적용을 분리한다.** 예전에는 그룹마다 UPDATE 를 날렸는데, 1,218만 건에서
+    40,852번의 UPDATE 가 6시간 30분이 지나도 절반이었다. UPDATE 하나하나가 WAL 에
+    프레임을 쌓고 뒤따르는 조회가 그 WAL 을 훑느라 뒤로 갈수록 느려진다.
+
+    판정은 순수 계산이라 DB 가 필요 없다. 메모리에서 다 판정한 뒤 판정표를 만들고,
+    조인 한 번으로 적용한다 — 인덱스 탐색 4만 번이 테이블 한 번 통과로 바뀐다.
     """
     out = {}
     cache: dict[str, list] = {}
 
     for table, label in (("trade", "매매"), ("jeonse_contract", "전월세")):
-        if rebuild:
-            # 1,200만 행 UPDATE 한 번. 이것만으로도 트랜잭션이 크니 따로 끊는다.
-            with get_conn(db_path) as conn:
-                n = repo.clear_matches(conn, table)
-            progress(f"  {label}: 기존 매칭 {n:,}건 해제")
-
+        # rebuild 라도 기존 매칭을 NULL 로 지우지 않는다. 어차피 덮어쓸 것이라
+        # 1,218만 행을 두 번 쓰게 될 뿐이다(실측: 지우는 UPDATE 만 7분+).
+        # 대신 전부 다시 판정해서 덮는다.
+        # ── 1. 판정할 이름을 읽고 후보 단지를 시군구별로 준비 ──
         with get_conn(db_path) as conn:
-            groups = repo.distinct_unmatched_names(conn, table)
+            groups = (repo.distinct_names(conn, table) if rebuild
+                      else repo.distinct_unmatched_names(conn, table))
+            for lawd in {g["lawd_cd"] for g in groups}:
+                if lawd not in cache:
+                    cache[lawd] = repo.candidates_for(conn, lawd)
         total = len(groups)
         progress(f"  {label}: 판정할 이름 {total:,}개")
 
+        # ── 2. 메모리에서 전부 판정 (DB 쓰기 없음) ──
         applied = {"EXACT": 0, "STRONG": 0, "WEAK": 0, "NONE": 0}
-        for start in range(0, total, MATCH_CHUNK):
-            chunk = groups[start:start + MATCH_CHUNK]
-            with get_conn(db_path) as conn:
-                for lawd in {g["lawd_cd"] for g in chunk}:
-                    if lawd not in cache:
-                        cache[lawd] = repo.candidates_for(conn, lawd)
-                for g in chunk:
-                    lawd = g["lawd_cd"]
-                    result = matcher.match(
-                        g["apt_name"], cache[lawd],
-                        emd_name=g["emd_name"], build_year=g["build_year"],
-                        sgg_name=regions.name_of(lawd),
-                    )
-                    repo.apply_match(
-                        conn, table, lawd_cd=lawd, apt_name=g["apt_name"],
-                        emd_name=g["emd_name"], build_year=g["build_year"],
-                        complex_id=result.complex_id, confidence=result.confidence,
-                        reason=result.reason,
-                    )
-                    applied[result.confidence] += g["cnt"]
-            done = min(start + MATCH_CHUNK, total)
-            progress(f"    {label} {done:,}/{total:,} "
-                     f"({done / total * 100:.1f}%) · "
-                     + " · ".join(f"{k} {v:,}" for k, v in applied.items()))
+        rows = []
+        for i, g in enumerate(groups, 1):
+            lawd = g["lawd_cd"]
+            r = matcher.match(
+                g["apt_name"], cache[lawd],
+                emd_name=g["emd_name"], build_year=g["build_year"],
+                sgg_name=regions.name_of(lawd),
+            )
+            rows.append((table, lawd, g["apt_name"], g["emd_name"], g["build_year"],
+                         r.complex_id, r.confidence, r.reason))
+            applied[r.confidence] += g["cnt"]
+            if i % 10_000 == 0:
+                progress(f"    판정 {i:,}/{total:,}")
 
+        # ── 3. 판정표를 넣고 조인 한 번으로 적용 ──
+        with get_conn(db_path) as conn:
+            conn.execute(_PLAN_DDL)
+            conn.execute("DELETE FROM match_plan WHERE tbl = ?", (table,))
+            for i in range(0, len(rows), PLAN_CHUNK):
+                conn.executemany(
+                    "INSERT INTO match_plan (tbl, lawd_cd, apt_name, emd_name, "
+                    "build_year, complex_id, confidence, reason) "
+                    "VALUES (?,?,?,?,?,?,?,?)", rows[i:i + PLAN_CHUNK])
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_match_plan "
+                         "ON match_plan (tbl, lawd_cd, apt_name)")
+        progress(f"  {label}: 판정표 {len(rows):,}행 기록. 적용 중...")
+
+        # rebuild 면 기존 값을 덮어쓴다. 아니면 아직 안 붙은 것만 채운다.
+        only_new = "" if rebuild else " AND t.complex_id IS NULL"
+        with get_conn(db_path) as conn:
+            changed = conn.execute(
+                f"UPDATE {table} AS t SET complex_id = p.complex_id, "
+                f"       match_confidence = p.confidence, match_reason = p.reason "
+                f"  FROM match_plan AS p "
+                f" WHERE p.tbl = ?{only_new} "
+                f"   AND t.lawd_cd = p.lawd_cd AND t.apt_name = p.apt_name "
+                f"   AND t.emd_name IS p.emd_name AND t.build_year IS p.build_year",
+                (table,)).rowcount
+        progress(f"  {label}: {changed:,}건 적용 · "
+                 + " · ".join(f"{k} {v:,}" for k, v in applied.items()))
         out[label] = applied
-        progress(f"  {label}: " + " · ".join(f"{k} {v:,}" for k, v in applied.items()))
 
     with get_conn(db_path) as conn:
         created = repo.derive_unit_types_from_trades(conn)

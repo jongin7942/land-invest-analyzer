@@ -266,6 +266,21 @@ def distinct_unmatched_names(conn: sqlite3.Connection, table: str) -> list[sqlit
     """).fetchall()
 
 
+def distinct_names(conn: sqlite3.Connection, table: str) -> list[sqlite3.Row]:
+    """붙었든 안 붙었든 **모든** (시군구, 단지명, 법정동, 건축년도) 조합.
+
+    전체 재계산(rebuild)용. 기존 매칭을 NULL 로 지운 뒤 다시 붙이면 1,218만 행을
+    두 번 쓰게 된다 — 지우는 UPDATE 한 번, 붙이는 UPDATE 한 번. 어차피 덮어쓸 것이라
+    지우지 않고 전부 다시 판정해서 덮는다.
+    """
+    return conn.execute(f"""
+        SELECT lawd_cd, apt_name, emd_name, build_year, COUNT(*) AS cnt
+        FROM {table}
+        GROUP BY lawd_cd, apt_name, emd_name, build_year
+        ORDER BY cnt DESC
+    """).fetchall()
+
+
 def apply_match(conn: sqlite3.Connection, table: str, *, lawd_cd: str, apt_name: str,
                 emd_name: str | None, build_year: int | None,
                 complex_id: int | None, confidence: str, reason: str) -> int:
