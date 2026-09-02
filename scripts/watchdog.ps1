@@ -46,7 +46,10 @@ c = sqlite3.connect(f'file:{config.APT_DB_PATH}?mode=ro', uri=True)
 q = lambda s: c.execute(s).fetchone()[0]
 print(q('SELECT COUNT(*) FROM price_snapshot'),
       q('SELECT COUNT(complex_id) FROM trade'),
-      q('SELECT COUNT(complex_id) FROM jeonse_contract'))
+      q('SELECT COUNT(complex_id) FROM jeonse_contract'),
+      q('SELECT COUNT(*) FROM backtest_window WHERE status IS NOT NULL'),
+      q('SELECT COUNT(*) FROM backtest_pick'),
+      q('SELECT COUNT(*) FROM backtest_outcome'))
 "@ 2>$null
 $logLen = if (Test-Path "$logDir\pipeline.log") { (Get-Item "$logDir\pipeline.log").Length } else { 0 }
 $now = "$counts $logLen"
@@ -54,13 +57,31 @@ $now = "$counts $logLen"
 $procs = @(Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue |
     Where-Object { $_.CommandLine -like "*apt_engine.cli*" -and $_.CommandLine -notlike "*apt_app*" })
 
+# ── CPU 시간: '오래 걸리는 일' 과 '멈춘 일' 을 가른다 ──────────────────
+# 백테스트는 창마다 자본 버킷 9개 × 후보 전체를 채점하느라 수십 분씩 걸리는데,
+# 그동안 스냅샷도 매칭도 안 늘고 로그도 안 나온다. 결과물만 보면 멈춘 것과
+# 구별이 안 돼서, 실제로 40분씩 계산한 판을 두 번 죽였다(23:56, 01:41).
+# CPU 를 태우고 있으면 일하는 중이다. 죽이지 않는 것이 아니라, 인내심을
+# 30분에서 2시간으로 늘린다 — 인덱스를 못 써서 7시간 헛돌던 매칭 같은 경우도
+# 결국은 잡아야 하기 때문이다.
+$cpu = 0
+foreach ($pr in $procs) {
+    $o = Get-Process -Id $pr.ProcessId -ErrorAction SilentlyContinue
+    if ($o) { $cpu += [int]$o.CPU }
+}
+$prevCpu = if (Test-Path "$mark.cpu") { [int](Get-Content "$mark.cpu" -Raw) } else { 0 }
+$working = ($cpu - $prevCpu) -ge 30      # 15분 동안 CPU 30초 이상 = 일하는 중
+Set-Content -Path "$mark.cpu" -Value $cpu
+$PATIENCE = if ($working) { 8 } else { 2 }   # 8회 = 2시간 · 2회 = 30분
+
 # ── 사람이 읽는 상태 파일 ──
 $lines = @(
     "확인 시각 : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
     "끝난 단계 : $(if ($done) { $done -join ' -> ' } else { '없음' })",
     "남은 단계 : $(if ($left) { $left -join ', ' } else { '없음 (전부 완료)' })",
     "실행 중   : $(if ($procs) { ($procs | ForEach-Object { ($_.CommandLine -replace '.*cli ','').Trim() }) -join ', ' } else { '없음' })",
-    "진행 지표 : 스냅샷·매칭·로그 = $now"
+    "진행 지표 : 스냅샷·매칭·백테스트·로그 = $now",
+    "CPU       : 누적 $cpu 초 ($(if ($working) { '계산 중' } else { '놀고 있음' }))"
 )
 
 if ($left.Count -eq 0) {
@@ -83,17 +104,20 @@ if ($procs.Count -eq 0) {
 elseif ($now.Trim() -eq $prev.Trim()) {
     $stalledCount++
     Set-Content -Path "$mark.count" -Value $stalledCount
-    if ($stalledCount -ge 2) {
-        # 30분(15분 × 2) 동안 결과물이 하나도 안 늘었다. 살아 있어도 멈춘 것이다.
-        $lines += "상태      : 30분째 진전이 없어 중단하고 다시 시작했습니다."
-        Write-Log "30분째 진전 없음 (지표 $now). 프로세스 종료 후 재시작."
+    if ($stalledCount -ge $PATIENCE) {
+        # 결과물이 안 늘고, 참을 만큼 참았다. 살아 있어도 멈춘 것으로 본다.
+        $mins = $stalledCount * 15
+        $lines += "상태      : $mins 분째 진전이 없어 중단하고 다시 시작했습니다."
+        Write-Log "$mins 분째 진전 없음 (지표 $now · CPU $cpu). 프로세스 종료 후 재시작."
         $procs | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
         Start-Sleep -Seconds 10
         schtasks /run /tn apt-pipeline | Out-Null
         Set-Content -Path "$mark.count" -Value 0
     } else {
-        $lines += "상태      : 15분째 진전 없음. 한 번 더 보고 판단합니다."
-        Write-Log "진전 없음 1회 (지표 $now)"
+        $waited = $stalledCount * 15
+        $limit = $PATIENCE * 15
+        $lines += "상태      : $waited 분째 결과물이 안 늘었습니다 ($(if ($working) { 'CPU 를 쓰고 있어 계산 중으로 봅니다' } else { '놀고 있습니다' }) · $limit 분까지 기다립니다)"
+        Write-Log "진전 없음 $stalledCount 회 / $PATIENCE (지표 $now · CPU $cpu · working=$working)"
     }
 } else {
     Set-Content -Path "$mark.count" -Value 0
