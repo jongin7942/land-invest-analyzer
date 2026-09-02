@@ -53,6 +53,12 @@ if ($busy.Count -gt 0) {
     return
 }
 
+# 백테스트 구간은 **실제 데이터 범위**에서 뽑는다. 안 주면 run 이 None 을 받아
+# ValueError 로 죽는다(plan 은 넘어가서 더 헷갈린다).
+$DATA_START = & $python -c "import sqlite3,config; c=sqlite3.connect(f'file:{config.APT_DB_PATH}?mode=ro',uri=True); d=c.execute('SELECT MIN(deal_ymd) FROM trade').fetchone()[0]; print(f'{d[:4]}-{d[4:6]}-01')"
+$DATA_END   = & $python -c "import sqlite3,config; c=sqlite3.connect(f'file:{config.APT_DB_PATH}?mode=ro',uri=True); d=c.execute('SELECT MAX(deal_ymd) FROM trade').fetchone()[0]; print(f'{d[:4]}-{d[4:6]}-01')"
+Write-Log "데이터 구간 $DATA_START ~ $DATA_END"
+
 # validate 는 위반이 있으면 0 이 아닌 값을 낸다. 그건 실패가 아니라 결과다.
 # backtest plan 도 '표본 부족' 을 0 이 아닌 값으로 알릴 수 있다.
 $steps = @(
@@ -60,8 +66,10 @@ $steps = @(
     @{ N = "match";            A = @("match", "--rebuild");                           Soft = $false }
     @{ N = "snapshot";         A = @("snapshot", "--months", "12", "--window", "6");   Soft = $false }
     @{ N = "validate";         A = @("validate");                                     Soft = $true  }
-    @{ N = "backtest-plan";    A = @("backtest", "plan", "--horizon", "2", "--step", "3"); Soft = $true }
+    @{ N = "backtest-plan";    A = @("backtest", "plan", "--horizon", "2", "--step", "3",
+                                     "--start", $DATA_START, "--end", $DATA_END); Soft = $true }
     @{ N = "backtest-run";     A = @("backtest", "run", "--horizon", "2", "--step", "3",
+                                     "--start", $DATA_START, "--end", $DATA_END,
                                      "--run-key", "wf1", "--cash", "3", "--purge");    Soft = $false }
     @{ N = "backtest-weights"; A = @("backtest", "weights", "--run-key", "wf1");       Soft = $false }
 )
