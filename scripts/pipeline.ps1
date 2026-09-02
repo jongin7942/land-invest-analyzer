@@ -65,6 +65,17 @@ $DATA_START = & $python -c "import sqlite3,config; c=sqlite3.connect(f'file:{con
 $DATA_END   = & $python -c "import sqlite3,config; c=sqlite3.connect(f'file:{config.APT_DB_PATH}?mode=ro',uri=True); d=c.execute('SELECT MAX(as_of_ym) FROM price_snapshot').fetchone()[0]; print(f'{d[:4]}-{d[4:6]}-01')"
 Write-Log "데이터 구간 $DATA_START ~ $DATA_END"
 
+# ── 백테스트는 --price-only 로 돌린다 ─────────────────────────────────
+# 기본(STRICT) 게이트는 실투자금(세금·대출)을 계산해 살 수 있는지 본다. 그런데
+# 세법 규칙의 effective_from 이 2026-01-01 이라 과거 창에서는 적용될 규칙이 없다.
+# 실측: 2018-01 창에서 universe 2,693행 중 **매수가능 0개**. 후보가 없으니 채점도
+# 0개였고, 그래서 가중치 학습이 두 번 실패했다.
+#
+# 엔진이 옳게 동작한 것이다 - 2018년 세율을 모르는데 실투자금을 지어내면 안 된다.
+# 백테스트의 목적은 '어떤 feature 가 미래 수익을 예측하는가' 를 배우는 것이고,
+# 실투자금 게이트는 그와 무관하다. 그래서 '그때 그 가격에 살 수 있었나' 만 본다.
+# 현금 10억은 후보를 충분히 남기려는 값이다(전 기간 1,700~2,600개).
+
 # validate 는 위반이 있으면 0 이 아닌 값을 낸다. 그건 실패가 아니라 결과다.
 # backtest plan 도 '표본 부족' 을 0 이 아닌 값으로 알릴 수 있다.
 $steps = @(
@@ -76,7 +87,8 @@ $steps = @(
                                      "--start", $DATA_START, "--end", $DATA_END); Soft = $true }
     @{ N = "backtest-run";     A = @("backtest", "run", "--horizon", "2", "--step", "3",
                                      "--start", $DATA_START, "--end", $DATA_END,
-                                     "--run-key", "wf1", "--cash", "3", "--purge");    Soft = $false }
+                                     "--run-key", "wf1", "--cash", "10",
+                                     "--price-only", "--purge");                     Soft = $false }
     @{ N = "backtest-weights"; A = @("backtest", "weights", "--run-key", "wf1");       Soft = $false }
 )
 
