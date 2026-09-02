@@ -93,13 +93,30 @@ def zone_at(conn: sqlite3.Connection, lawd_cd: str, *, as_of: str | date,
             emd_name: str | None = None) -> ZoneStatus:
     """그 시점의 규제지역 지정 상태."""
     day = rules.as_ymd(as_of)
+
+    # 커버리지 밖이면 '확인 불가' 다.
+    #
+    # 예전에는 regulation_zone 이 전역으로 비었는지만 봤다. 그러면 한 행이라도
+    # 넣는 순간 안 넣은 시군구·기간이 전부 '확인했고 비조정' 으로 단정된다.
+    # 규제지역은 2016~2023 사이에 열 번 넘게 바뀌었고 고시마다 대상이 달라서,
+    # 일부만 넣는 것이 오히려 위험하다 — 취득세 중과가 빠지고 LTV 가 완화되어
+    # 실투자금이 실제보다 작게 나온다.
+    #
+    # 그래서 '이 시도의 이 기간은 고시를 전수 입력했다' 를 명시적으로 선언한
+    # regulation_coverage 안에서만 판정한다(마이그레이션 022).
+    covered = conn.execute(
+        "SELECT COUNT(*) FROM regulation_coverage "
+        " WHERE sido_prefix = ? "
+        "   AND effective_from <= ? "
+        "   AND (effective_to IS NULL OR effective_to = '' OR effective_to >= ?) "
+        "   AND last_verified IS NOT NULL AND trim(last_verified) != ''",
+        (lawd_cd[:2], day, day)).fetchone()[0]
+    if not covered:
+        return ZoneStatus(lawd_cd, day, checked=False)
+
     rows = conn.execute(
         f"SELECT * FROM regulation_zone WHERE lawd_cd = ? AND {rules.effective_clause()}",
         (lawd_cd, day, day)).fetchall()
-
-    total = conn.execute("SELECT COUNT(*) FROM regulation_zone").fetchone()[0]
-    if total == 0:
-        return ZoneStatus(lawd_cd, day, checked=False)
 
     hits = [r for r in rows if r["emd_name"] is None or r["emd_name"] == emd_name]
     types = sorted({r["zone_type"] for r in hits})

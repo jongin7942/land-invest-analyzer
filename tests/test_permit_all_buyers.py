@@ -25,14 +25,18 @@ def db(tmp_path_factory):
     from apt_engine.repo import apt as repo
     with get_conn(path) as conn:
         repo.sync_regions(conn)
-    env = {**os.environ, "APT_DB_PATH": path}
+    env = {**os.environ, "APT_DB_PATH": path,
+           # 자식이 UTF-8 로 쓰고 부모도 UTF-8 로 읽어야 한다. 윈도우 기본은
+           # cp949 라 안내문의 '—' 한 글자에 리더 스레드가 죽고 stdout 이 None 이 된다.
+           "PYTHONIOENCODING": "utf-8"}
     # permit.csv 도 넣는다 — 실제 운영 DB 에는 셋 다 들어간다. 두 개만
     # 넣고 테스트하면 파일끼리 같은 지정을 중복으로 적어도 안 잡힌다.
     for f in ("rules/permit_all_buyers.csv", "rules/permit_foreign.csv",
               "rules/permit.csv"):
         r = subprocess.run([sys.executable, "-m", "apt_engine.cli", "rule",
                             "import", "permit", f],
-                           capture_output=True, text=True, env=env)
+                           capture_output=True, text=True, env=env,
+                           encoding="utf-8", errors="replace")
         assert "입력" in r.stdout, f"{f} import 실패: {r.stdout}{r.stderr}"
     with get_conn(path) as conn:
         with open("rules/permit_coverage.csv", encoding="utf-8") as fh:

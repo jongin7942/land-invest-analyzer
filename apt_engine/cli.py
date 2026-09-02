@@ -2799,7 +2799,26 @@ HANDLERS = {
 }
 
 
+def _force_utf8_output() -> None:
+    """출력 인코딩을 UTF-8 로 못박는다.
+
+    윈도우 콘솔·작업 스케줄러·subprocess 파이프는 기본이 cp949 다. 안내문에 쓴
+    '—' 같은 글자 하나 때문에 다음이 실제로 터졌다:
+
+      * 일일 한도 소진을 곱게 처리하고도 UnicodeEncodeError 로 exit 1
+      * pytest 가 띄운 subprocess 의 stdout 리더 스레드가 죽어 r.stdout 이 None
+
+    호출부마다 PYTHONIOENCODING 을 챙기게 하면 언젠가 또 빠뜨린다. 진입점에서 한 번 막는다.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass          # 파이프가 아니거나 이미 UTF-8 이면 그대로 둔다
+
+
 def main(argv=None):
+    _force_utf8_output()
     p = build_parser()
     args = p.parse_args(argv)
     handler = HANDLERS.get(args.cmd)
