@@ -1,10 +1,13 @@
 """V-World 지오코딩 — 단지 주소를 좌표로.
 
 역세권 거리를 계산하려면 단지 좌표가 필요한데, K-apt 기본정보에는 좌표가 없다.
-토지 프로그램이 이미 V-World 를 쓰고 있어 `VWORLD_API_KEY` 는 설정돼 있다.
 
-(아파트 엔진은 토지 모듈을 import 하지 않는다는 원칙 때문에 같은 API 를 다시 부른다.
-호출 패턴은 토지 쪽 `collectors/land_characteristics.py` 에서 검증된 것을 따랐다.)
+`VWORLD_API_KEY` 는 이 저장소(land-invest-analyzer) 전용이다. 예전에는 같은
+저장소 안의 옛 토지투자 모듈(collectors/land_characteristics.py, main.py,
+pipeline.py …)과 나눠 쓰는 것처럼 적혀 있었는데, 그 모듈은 8월 중순 이후
+손대지 않은 죽은 코드다(2026-09-04 종인님 확인) - 실제로 경쟁하는 다른
+프로그램은 없다. 아파트 엔진은 그 모듈을 import 하지 않는다는 원칙이라 호출
+코드는 별도로 두되, 호출 패턴은 그 모듈에서 검증된 것을 따랐다.
 """
 from __future__ import annotations
 
@@ -25,8 +28,7 @@ class GeocodeError(RuntimeError):
 def _key() -> str:
     if not config.VWORLD_API_KEY:
         raise GeocodeError(
-            "VWORLD_API_KEY 가 비어 있습니다. .env 를 확인하세요 "
-            "(토지 프로그램과 같은 키를 씁니다).")
+            "VWORLD_API_KEY 가 비어 있습니다. .env 를 확인하세요.")
     return config.VWORLD_API_KEY
 
 
