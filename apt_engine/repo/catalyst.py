@@ -52,7 +52,8 @@ def import_transit(conn: sqlite3.Connection, path: str | Path) -> dict:
         if status == "개통" and not (r.get("opened_ym") or "").strip():
             raise CatalystImportError(
                 f"{i}행: status 가 '개통'이면 opened_ym 이 있어야 합니다. "
-                f"개통월을 모르면 아직 개통으로 적지 마세요")
+                f"개통월을 모르면 '운영중' 으로 적으세요 — 역세권 거리에는 쓰이고, "
+                f"개통 전후를 가르는 유사사례 측정에서만 빠집니다")
 
         if pname not in projects:
             conn.execute(
