@@ -61,9 +61,17 @@ if ($busy.Count -gt 0) {
 # 원자료가 있다고 평가할 수 있는 게 아니다 - 스냅샷이 있어야 한다.
 #
 # 안 주면 run 이 None 을 받아 ValueError 로 죽는다(plan 은 넘어가서 더 헷갈린다).
-$DATA_START = & $python -c "import sqlite3,config; c=sqlite3.connect(f'file:{config.APT_DB_PATH}?mode=ro',uri=True); d=c.execute('SELECT MIN(as_of_ym) FROM price_snapshot').fetchone()[0]; print(f'{d[:4]}-{d[4:6]}-01')"
-$DATA_END   = & $python -c "import sqlite3,config; c=sqlite3.connect(f'file:{config.APT_DB_PATH}?mode=ro',uri=True); d=c.execute('SELECT MAX(as_of_ym) FROM price_snapshot').fetchone()[0]; print(f'{d[:4]}-{d[4:6]}-01')"
-Write-Log "데이터 구간 $DATA_START ~ $DATA_END"
+#
+# **읽는 시점이 중요하다.** 예전에는 스크립트 맨 위에서 한 번만 읽었다. 그런데
+# 같은 실행 안에서 snapshot 단계가 범위를 바꾼다 - 120개월을 240개월로 늘렸더니
+# 스냅샷은 2006-10 부터 생겼는데 백테스트는 이미 읽어둔 2016-10 으로 돌았다.
+# 창이 17개밖에 안 나왔고 VALIDATION 표본이 모자라 가중치가 0개였다.
+# 그래서 자리표시자를 넣어두고 백테스트 단계 **직전에** 다시 읽는다.
+function Get-DataRange {
+    $a = & $python -c "import sqlite3,config; c=sqlite3.connect(f'file:{config.APT_DB_PATH}?mode=ro',uri=True); d=c.execute('SELECT MIN(as_of_ym) FROM price_snapshot').fetchone()[0]; print(f'{d[:4]}-{d[4:6]}-01')"
+    $b = & $python -c "import sqlite3,config; c=sqlite3.connect(f'file:{config.APT_DB_PATH}?mode=ro',uri=True); d=c.execute('SELECT MAX(as_of_ym) FROM price_snapshot').fetchone()[0]; print(f'{d[:4]}-{d[4:6]}-01')"
+    return @($a, $b)
+}
 
 # ── 보유기간 1년 · 창 간격 6개월 · 스냅샷 240개월 ──────────────────
 # 첫 판에서 가중치가 0개 학습됐다. feature 마다 사유가 같았다 —
@@ -113,9 +121,9 @@ $steps = @(
     @{ N = "snapshot";         A = @("snapshot", "--months", "240", "--window", "6");   Soft = $false }
     @{ N = "validate";         A = @("validate");                                     Soft = $true  }
     @{ N = "backtest-plan";    A = @("backtest", "plan", "--horizon", "1", "--step", "6",
-                                     "--start", $DATA_START, "--end", $DATA_END); Soft = $true }
+                                     "--start", "<DATA_START>", "--end", "<DATA_END>"); Soft = $true }
     @{ N = "backtest-run";     A = @("backtest", "run", "--horizon", "1", "--step", "6",
-                                     "--start", $DATA_START, "--end", $DATA_END,
+                                     "--start", "<DATA_START>", "--end", "<DATA_END>",
                                      "--run-key", "wf1", "--cash", "10",
                                      "--no-loan", "--purge");                     Soft = $false }
     @{ N = "backtest-weights"; A = @("backtest", "weights", "--run-key", "wf1");       Soft = $false }
@@ -131,11 +139,20 @@ Write-Log "=== 파이프라인 (PID $PID) · 끝난 단계: $($done -join ', ') 
 foreach ($s in $steps) {
     if ($done -contains $s.N) { continue }
 
+    # 자리표시자를 지금 채운다 — snapshot 단계가 범위를 바꿔놨을 수 있다.
+    $stepArgs = @($s.A)
+    if ($stepArgs -contains "<DATA_START>") {
+        $range = Get-DataRange
+        Write-Log "데이터 구간 $($range[0]) ~ $($range[1])"
+        $stepArgs = $stepArgs | ForEach-Object {
+            $_ -replace "<DATA_START>", $range[0] -replace "<DATA_END>", $range[1] }
+    }
+
     Write-Log "─── $($s.N) 시작 ───"
     $t0 = Get-Date
     # -u : 파이프에 물리면 파이썬이 stdout 을 버퍼링해서 진행률이 안 보인다.
     #      6시간 동안 로그가 한 줄도 안 나온 적이 있다.
-    & $python -u -m apt_engine.cli @($s.A) 2>&1 |
+    & $python -u -m apt_engine.cli @($stepArgs) 2>&1 |
         ForEach-Object { Add-Content -Path $log -Value $_ -Encoding UTF8 }
     $code = $LASTEXITCODE
     $mins = [int]((Get-Date) - $t0).TotalMinutes

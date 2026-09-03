@@ -72,7 +72,7 @@ foreach ($pr in $procs) {
 $prevCpu = if (Test-Path "$mark.cpu") { [int](Get-Content "$mark.cpu" -Raw) } else { 0 }
 $working = ($cpu - $prevCpu) -ge 30      # 15분 동안 CPU 30초 이상 = 일하는 중
 Set-Content -Path "$mark.cpu" -Value $cpu
-$PATIENCE = if ($working) { 8 } else { 2 }   # 8회 = 2시간 · 2회 = 30분
+$PATIENCE = if ($working) { 16 } else { 2 }  # 16회 = 4시간 · 2회 = 30분
 
 # ── 사람이 읽는 상태 파일 ──
 $lines = @(
