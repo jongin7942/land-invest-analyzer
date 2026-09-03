@@ -22,13 +22,17 @@ from apt_engine import geo, rules
 from apt_engine.trace import Calc, Evidence
 
 # 뒤로 갈수록 확실하다. '개통'만 사실이고 나머지는 예정이다.
-STAGES = ("계획", "예비타당성", "기본계획", "착공", "공사중", "개통예정", "개통")
+# '운영중' 을 '개통' 뒤에 둔다 — 개통이 확정이고 월만 모른다는 뜻이라,
+# stage_at_least("계획") 같은 문턱을 '개통' 과 동일하게 통과해야 한다.
+STAGES = ("계획", "예비타당성", "기본계획", "착공", "공사중", "개통예정", "개통", "운영중")
 STAGE_ORDER = {s: i for i, s in enumerate(STAGES)}
 
 # 단계별 실현 신뢰도. 착공 전은 밀리거나 무산되는 일이 흔하다.
+# '운영중' 은 개통월만 모를 뿐 개통 자체는 확정 사실이라 '개통' 과 같다.
 STAGE_CONFIDENCE = {
     "계획": "LOW", "예비타당성": "LOW", "기본계획": "MEDIUM",
     "착공": "HIGH", "공사중": "HIGH", "개통예정": "HIGH", "개통": "HIGH",
+    "운영중": "HIGH",
 }
 
 # 역세권으로 볼 직선거리. 직선이라 도보거리는 이보다 길다.
@@ -52,7 +56,13 @@ class NearbyStation:
 
     @property
     def opened(self) -> bool:
-        return self.status == "개통" and bool(self.opened_ym)
+        """이미 개통(운영)했는가 — 방향·등급 판정에 쓴다.
+
+        opened_ym 이 있어야만 맞는 계산(개통연도 표시, 개통 전후 유사사례)은
+        이 값을 쓰지 않고 opened_ym 을 직접 본다. 여기서는 '이미 반영된
+        사실인가' 만 답한다 — '운영중' 도 그 답은 True 다.
+        """
+        return self.status in ("개통", "운영중")
 
     @property
     def confidence(self) -> str:
@@ -64,8 +74,10 @@ class NearbyStation:
 
     def horizon_label(self, *, as_of: str, years: int) -> tuple[bool | None, str]:
         """투자기간 안에 개통이 들어오는가. (여부, 설명)."""
-        if self.opened:
+        if self.status == "개통" and self.opened_ym:
             return True, f"{self.opened_ym} 이미 개통 — 가격에 반영됐을 가능성이 높다"
+        if self.status == "운영중":
+            return True, "이미 운영 중 — 가격에 반영됐을 가능성이 높다 (개통월 미상)"
         if not self.expected_open_ym:
             return None, "개통 시점 미상 — 투자기간과 연결할 수 없다"
         end_year = int(as_of[:4]) + years
