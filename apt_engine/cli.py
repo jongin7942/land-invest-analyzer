@@ -1081,6 +1081,16 @@ def cmd_supply(args):
               + (f" · 미검증 {s['unverified']}건" if s["unverified"] else ""))
 
 
+def cmd_landarea(args):
+    """단지 대지면적·현재 용적률 (재건축 판정의 출발점)."""
+    s = ingest.collect_land_area(limit=args.limit, db_path=args.db)
+    print(f"\n대상 {s['targets']:,}개 · 채움 {s['filled']:,}개 · "
+          f"건너뜀 {s['skipped']:,}개 · 실패 {s['failed']:,}개")
+    if s["skipped"]:
+        print("  건너뛴 단지는 대지권이 여러 필지에 걸쳐 있어 대표 필지만 잡힌 것입니다.")
+        print("  틀린 대지면적을 넣지 않고 '확인 불가' 로 남겼습니다.")
+
+
 def cmd_geocode(args):
     print("단지 좌표 조회 (V-World)...")
     s = ingest.geocode_complexes(limit=args.limit, db_path=args.db)
@@ -2555,6 +2565,10 @@ def build_parser() -> argparse.ArgumentParser:
     gc = sub.add_parser("geocode", help="단지 좌표 채우기 (V-World)")
     gc.add_argument("--limit", type=int, help="한 번에 처리할 단지 수")
 
+    la = sub.add_parser("landarea",
+                        help="단지 대지면적·현재 용적률 (V-World 필지)")
+    la.add_argument("--limit", type=int, help="한 번에 처리할 단지 수")
+
     ct = sub.add_parser("catalyst", help="촉매 생성·조회")
     ct.add_argument("action", choices=["build", "show"])
     ct.add_argument("query", nargs="?", help="show: 단지명 일부")
@@ -2809,6 +2823,7 @@ HANDLERS = {
     "lessons": cmd_lessons, "resolve": cmd_resolve, "rank": cmd_rank,
     "ladder": cmd_ladder, "relative": cmd_relative,
     "transit": cmd_transit, "supply": cmd_supply, "geocode": cmd_geocode,
+    "landarea": cmd_landarea,
     "catalyst": cmd_catalyst, "redev": cmd_redev,
     "invite": cmd_invite, "landshare": cmd_landshare,
     "today": cmd_today, "leaders": cmd_leaders, "backtest": cmd_backtest, "validate": cmd_validate, "report": cmd_report,

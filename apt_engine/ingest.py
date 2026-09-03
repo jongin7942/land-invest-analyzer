@@ -658,30 +658,136 @@ def relative_view(*, complex_id: int, area_band: str,
 def geocode_complexes(*, limit: int | None = None, db_path: str | None = None,
                       progress=print) -> dict:
     """좌표가 없는 단지를 V-World 로 채운다. 실패는 남기고 추측하지 않는다."""
+    # 한 건마다 외부 API 를 부르는 작업이라 몇 시간이 걸린다. 그동안 DB 를
+    # 통째로 잡고 있으면 다른 작업이 하나도 못 돌고(실측: landarea 가
+    # 'database is locked' 로 죽었다), 중간에 끊기면 전부 날아간다.
+    CHUNK = 100
+
     stats = {"targets": 0, "filled": 0, "failed": 0}
     with get_conn(db_path) as conn:
         targets = cat_repo.complexes_missing_coords(conn, limit)
         stats["targets"] = len(targets)
-        src = repo.source_id(conn, geocode_mod.SOURCE_KEY)
+    progress(f"좌표 없는 단지 {len(targets)}개 조회 중...")
 
-        for i, row in enumerate(targets, 1):
-            try:
-                coords = geocode_mod.geocode_complex(row["road_addr"], row["jibun_addr"])
-            except geocode_mod.GeocodeError as e:
-                repo.log_collection(conn, geocode_mod.SOURCE_KEY, target=str(row["id"]),
-                                    period=None, status="FAILED", error=str(e)[:300])
+    buf: list[tuple] = []
+    logs: list[tuple] = []
+
+    def flush() -> None:
+        if not buf and not logs:
+            return
+        with get_conn(db_path) as conn:
+            for cid, lat, lon in buf:
+                cat_repo.set_coords(conn, cid, lat, lon)
+            for cid, status, err in logs:
+                repo.log_collection(conn, geocode_mod.SOURCE_KEY, target=str(cid),
+                                    period=None, status=status, error=err)
+        buf.clear()
+        logs.clear()
+
+    for i, row in enumerate(targets, 1):
+        try:
+            coords = geocode_mod.geocode_complex(row["road_addr"], row["jibun"])
+        except geocode_mod.GeocodeError as e:
+            logs.append((row["id"], "FAILED", str(e)[:300]))
+            stats["failed"] += 1
+            coords = None
+        else:
+            if coords:
+                buf.append((row["id"], coords[0], coords[1]))
+                stats["filled"] += 1
+            else:
+                logs.append((row["id"], "EMPTY", "주소로 좌표를 찾지 못함"))
                 stats["failed"] += 1
-                continue
-            if not coords:
-                repo.log_collection(conn, geocode_mod.SOURCE_KEY, target=str(row["id"]),
-                                    period=None, status="EMPTY",
-                                    error="주소로 좌표를 찾지 못함")
+
+        if i % CHUNK == 0 or i == len(targets):
+            flush()
+            progress(f"  {i}/{len(targets)} (채움 {stats['filled']} · "
+                     f"실패 {stats['failed']})")
+    flush()
+    return stats
+
+
+def collect_land_area(*, limit: int | None = None, db_path: str | None = None,
+                      progress=print) -> dict:
+    """단지 대지면적과 현재 용적률. 좌표가 있어야 한다.
+
+    재건축 판정의 출발점이 용적률인데, 건축물대장의 대지면적 칸이 비어 있어
+    토지 쪽(V-World LT_C_LANDINFOBASEMAP)에서 가져온다. 자세한 사정은
+    collectors/landinfo.py 의 머리말에 적었다.
+
+    **못 믿을 값은 넣지 않는다.** 여러 필지에 걸친 단지는 대표 필지 하나만
+    잡혀서 용적률이 36,000% 같은 값이 되는데, 그런 단지는 '확인 불가' 로 남긴다.
+    """
+    from apt_engine.collectors import landinfo
+
+    CHUNK = 100
+    stats = {"targets": 0, "filled": 0, "skipped": 0, "failed": 0}
+
+    with get_conn(db_path) as conn:
+        sql = ("SELECT id, name, lat, lon, gross_floor_area_m2, apt_households "
+               "  FROM complex "
+               " WHERE lat IS NOT NULL AND lon IS NOT NULL "
+               "   AND land_area_m2 IS NULL "
+               " ORDER BY id")
+        if limit:
+            sql += f" LIMIT {int(limit)}"
+        targets = conn.execute(sql).fetchall()
+    stats["targets"] = len(targets)
+    progress(f"대지면적 조회 대상 {len(targets)}개...")
+
+    updates: list[tuple] = []      # (id, pnu, area, far, source)  area 가 None 이면 PNU 만
+    logs: list[tuple] = []
+
+    def flush() -> None:
+        if not updates and not logs:
+            return
+        with get_conn(db_path) as conn:
+            for cid, pnu, area, far, source in updates:
+                # PNU 는 못 믿을 면적이어도 남긴다 — 나중에 필지를 합산할 때 열쇠다.
+                conn.execute("UPDATE complex SET pnu = ? WHERE id = ?", (pnu, cid))
+                if area is not None:
+                    conn.execute(
+                        "UPDATE complex SET land_area_m2 = ?, current_far = ?, "
+                        "  land_area_source = ?, land_area_verified = 0, "
+                        "  updated_at = datetime('now','localtime') WHERE id = ?",
+                        (area, far, source, cid))
+            for cid, status, err in logs:
+                repo.log_collection(conn, landinfo.SOURCE_KEY, target=str(cid),
+                                    period=None, status=status, error=err)
+        updates.clear()
+        logs.clear()
+
+    for i, row in enumerate(targets, 1):
+        try:
+            got = landinfo.land_of(
+                row["lat"], row["lon"],
+                gross_floor_area_m2=row["gross_floor_area_m2"],
+                households=row["apt_households"])
+        except landinfo.LandInfoError as e:
+            stats["failed"] += 1
+            logs.append((row["id"], "FAILED", str(e)[:300]))
+            got = None
+        else:
+            if not got:
                 stats["failed"] += 1
-                continue
-            cat_repo.set_coords(conn, row["id"], coords[0], coords[1])
-            stats["filled"] += 1
-            if i % 100 == 0:
-                progress(f"  {i}/{len(targets)}")
+                logs.append((row["id"], "EMPTY", "좌표로 필지를 찾지 못함"))
+            elif "skipped" in got:
+                stats["skipped"] += 1
+                updates.append((row["id"], got["pnu"], None, None, None))
+                logs.append((row["id"], "EMPTY", got["skipped"][:300]))
+            else:
+                area = got["area_m2"]
+                gross = row["gross_floor_area_m2"]
+                far = (gross / area) if (gross and area) else None
+                updates.append((row["id"], got["pnu"], area, far,
+                                f"V-World 필지 {got['pnu']} ({got['jibun']})"))
+                stats["filled"] += 1
+
+        if i % CHUNK == 0 or i == len(targets):
+            flush()
+            progress(f"  {i}/{len(targets)} (채움 {stats['filled']} · "
+                     f"건너뜀 {stats['skipped']} · 실패 {stats['failed']})")
+    flush()
     return stats
 
 

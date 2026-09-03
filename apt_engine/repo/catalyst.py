@@ -186,8 +186,13 @@ def catalysts_of(conn: sqlite3.Connection, complex_id: int) -> list[sqlite3.Row]
 
 def complexes_missing_coords(conn: sqlite3.Connection,
                              limit: int | None = None) -> list[sqlite3.Row]:
-    sql = ("SELECT id, name, road_addr, jibun_addr FROM complex "
-           "WHERE lat IS NULL OR lon IS NULL")
+    # 칸 이름은 jibun 이다(jibun_addr 아님). 그리고 주소가 하나도 없는 단지는
+    # 부르지 않는다 — 호출만 버리고 실패 로그만 쌓인다. 주소는 K-apt 기본정보와
+    # 함께 채워지므로 수집이 진행되면 대상도 같이 늘어난다.
+    sql = ("SELECT id, name, road_addr, jibun FROM complex "
+           " WHERE (lat IS NULL OR lon IS NULL) "
+           "   AND (COALESCE(road_addr, '') != '' OR COALESCE(jibun, '') != '') "
+           " ORDER BY id")
     if limit:
         sql += f" LIMIT {int(limit)}"
     return conn.execute(sql).fetchall()
