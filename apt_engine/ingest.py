@@ -778,7 +778,9 @@ def collect_land_area(*, limit: int | None = None, db_path: str | None = None,
             else:
                 area = got["area_m2"]
                 gross = row["gross_floor_area_m2"]
-                far = (gross / area) if (gross and area) else None
+                # current_far 는 퍼센트다(redev/screening.py MAX_CURRENT_FAR=200.0
+                # 등과 스케일을 맞춘다). 연면적/대지면적 은 소수 비율이라 x100 한다.
+                far = (gross / area * 100) if (gross and area) else None
                 updates.append((row["id"], got["pnu"], area, far,
                                 f"V-World 필지 {got['pnu']} ({got['jibun']})"))
                 stats["filled"] += 1
