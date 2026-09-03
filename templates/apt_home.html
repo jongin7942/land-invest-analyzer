@@ -245,11 +245,14 @@
 
     <div class="stat">
       <div class="stat__body">
-        <span class="stat__label">필요 현금 (1위)</span>
+        <span class="stat__label">실투자금 (1위)</span>
         <span class="stat__value">
-          {% if top and top.equity_no_loan is not none %}{{ top.equity_no_loan | eok }}
-          {% else %}{{ ui.value(none, reason='매수 부대비용 규칙이 부족합니다') }}{% endif %}
+          {% if top and top.equity is not none %}{{ top.equity | eok }}
+          {% else %}{{ ui.value(none, reason='매수 부대비용·대출 규칙이 부족합니다') }}{% endif %}
         </span>
+        {% if top and top.equity_no_loan is not none %}
+        <span class="stat__sub muted small">대출이 안 나오면 {{ top.equity_no_loan | eok }}</span>
+        {% endif %}
       </div>
       <span class="stat__icon">{{ ico.icon('wallet') }}</span>
     </div>
@@ -300,7 +303,7 @@
               <th class="num">순위</th>
               <th>단지</th>
               <th class="num">추천 매수가</th>
-              <th class="num">필요 현금</th>
+              <th class="num">실투자금</th>
               <th>저평가</th>
               <th>상승 여력</th>
               <th>하락 방어</th>
@@ -323,8 +326,13 @@
                 {% else %}{{ ui.value(none, reason='매수가 앵커가 부족합니다') }}{% endif %}
               </td>
               <td class="num">
-                {% if r.equity_no_loan is none %}{{ ui.value(none, reason='매수 부대비용 규칙이 부족합니다') }}
-                {% else %}{{ r.equity_no_loan | eok }}{% if r.capital_unknown %}<span class="stale"> 이상</span>{% endif %}{% endif %}
+                {# 후보를 거른 기준과 같은 숫자를 보여준다. 대출 없는 금액은 밑에 작게. #}
+                {% if r.equity is none %}{{ ui.value(none, reason='매수 부대비용·대출 규칙이 부족합니다') }}
+                {% else %}{{ r.equity | eok }}{% if r.capital_unknown %}<span class="stale"> 이상</span>{% endif %}
+                  {% if r.equity_no_loan is not none %}
+                  <span class="muted small nowrap">무대출 {{ r.equity_no_loan | eok }}</span>
+                  {% endif %}
+                {% endif %}
               </td>
               {% for rating in r.ratings %}
                 <td>{{ ui.rate(rating, pill=loop.first) }}</td>

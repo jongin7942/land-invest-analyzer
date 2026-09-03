@@ -1885,8 +1885,12 @@ class TestRegistryCoverage:
                           gate=bp.GATE_PRICE_ONLY, limit=3)
 
         produced = set(r.candidates[0].features.items)
-        needs_ladder = {"money_arrival_depth"}
-        never = set(reg.REGISTRY) - produced - needs_ladder
+        # 별도 빌드 단계를 거쳐야 재료가 생기는 Feature 들. 합성 DB 에는 그
+        # 재료가 없어서 안 나오는 것이지, 생산 경로가 없는 게 아니다.
+        #   money_arrival_depth — 가격사다리(수기 도메인 지식)
+        #   relative_gap        — `cli relative build` 가 만드는 비교단지·가격비율
+        needs_build = {"money_arrival_depth", "relative_gap"}
+        never = set(reg.REGISTRY) - produced - needs_build
         assert never == set(), (
             f"등록만 되고 생산되지 않는 Feature: {sorted(never)}. "
             f"등록부에서 빼거나 생산 경로를 만드세요")

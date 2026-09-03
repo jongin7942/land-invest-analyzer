@@ -95,6 +95,9 @@ REGISTRY: dict[str, Entry] = {e.feature_key: e for e in (
     # ── CHEAPNESS (§4-A) ────────────────────────────────────────────
     _e("entry_position", CHEAPNESS, ROLE_ALPHA, False,
        "매수가 구간 안에서의 위치. 낮을수록 싸다", "entry"),
+    _e("relative_gap", CHEAPNESS, ROLE_ALPHA, True,
+       "비교단지와의 가격비율이 과거 정상에서 벌어진 정도(§10). "
+       "양수면 예전보다 싸진 것이라 높을수록 좋다"),
     _e("price_stretch", CHEAPNESS, ROLE_ALPHA, False,
        "장기 정상가 대비 현재가 이탈률(§5). 전고점 대비가 아니다"),
     _e("recoverable_discount_ratio", CHEAPNESS, ROLE_ALPHA, True,

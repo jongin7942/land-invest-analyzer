@@ -25,11 +25,12 @@ from apt_engine.relative import ladder
 from apt_engine.trace import Calc, Evidence
 
 DEFAULT_WEIGHTS: dict[str, float] = {
-    "사다리인접": 0.40,
+    "사다리인접": 0.32,
+    "같은시군구": 0.18,
     "가격대": 0.20,
-    "단지규모": 0.15,
-    "연식": 0.15,
-    "같은시도": 0.10,
+    "단지규모": 0.13,
+    "연식": 0.12,
+    "같은시도": 0.05,
 }
 
 # 이 점수 아래는 비교대상으로 삼지 않는다.
@@ -109,6 +110,10 @@ def score(target: Candidate, other: Candidate, *,
     reasons["단지규모"] = _closeness(target.apt_households, other.apt_households,
                                     tolerance=1.20)
     reasons["연식"] = _year_closeness(target.approval_year, other.approval_year)
+    # 같은 구 안의 비슷한 단지는 실재하는 비교대상이다. 사다리 축이 없을 때
+    # 문턱을 넘게 해주는 것이 이 항목이고, 시군구가 다르면 0 이라 아무 단지나
+    # 묶이지 않는다.
+    reasons["같은시군구"] = 1.0 if target.lawd_cd == other.lawd_cd else 0.0
     reasons["같은시도"] = 1.0 if (target.sido and target.sido == other.sido) else 0.0
 
     similarity = sum(reasons[k] * w[k] for k in w)

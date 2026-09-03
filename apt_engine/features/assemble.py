@@ -17,6 +17,7 @@ from apt_engine.features import cycle
 from apt_engine.features import stretch as stretch_mod
 from apt_engine.features import (catalyst, entry, flow, jeonse, momentum,
                                  regime, supply)
+from apt_engine.features import relative as relative_mod
 from apt_engine.features.base import Feature, FeatureSet
 
 # 그룹 이름 → 그 그룹의 feature 를 만드는 함수.
@@ -33,6 +34,7 @@ GROUPS: dict[str, str] = {
     "bands": "가격대 이동 P25/중앙값/P75 · Latent/Visible · 기울기 지속 (§7·§8·§9)",
     "stretch": "장기 정상가 대비 이탈 · 상승폭 · 가속 구간 (§4-D·§5·§6)",
     "cycle": "과열→회복 사이클 단계 · 가격 도달 경로 (§18·§19)",
+    "relative": "비교단지 대비 가격비율이 정상에서 벌어진 정도 (§10)",
 }
 
 
@@ -138,6 +140,10 @@ def build(conn: sqlite3.Connection, complex_id: int, area_band: str, *,
             cycle.excess_reset(series, jeonse_held=held)))
         out = out.add(cycle.path_feature(cycle.price_path(series)))
 
+    if "relative" in wanted:
+        out = out.add(relative_mod.relative_gap(
+            conn, complex_id, area_band, as_of=as_of))
+
     if "catalyst" in wanted:
         price = None
         row = conn.execute(
@@ -172,6 +178,7 @@ def group_of(feature_key: str) -> str | None:
                     "price_percentile", "persistent_cheapness",
                     "price_to_jeonse_stretch"),
         "cycle": ("reset_completion", "path_quality"),
+        "relative": ("relative_gap",),
     }
     for group, keys in prefixes.items():
         if any(feature_key.startswith(k) for k in keys):

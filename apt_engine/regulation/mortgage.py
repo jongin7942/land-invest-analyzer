@@ -383,12 +383,23 @@ def calculate_final_mortgage_limit(
         limits.append(collateral)
         usable[collateral.name] = price
 
-    policy_max = min(usable.values()) if usable else None
-    binding = min(usable, key=usable.get) if usable else None
-    if binding == collateral.name and not any(
-            l.name == "LTV 한도" and l.known for l in limits):
-        unknown.append("LTV 한도가 없어 담보가액이 한도가 됐습니다 — "
-                       "실제 대출은 이보다 훨씬 작습니다")
+    # LTV 를 못 구했으면 대출 가능액 자체가 '확인 불가' 다.
+    #
+    # 총액 상한(6억)은 '이보다 많이는 못 빌린다' 일 뿐, '집값만큼 빌릴 수 있다'
+    # 를 뜻하지 않는다. 그런데 상한만 있어도 usable 이 비지 않아서 담보가액이
+    # 후보에 들어가고 min(상한, 집값) = 집값이 됐다. 실측으로 평택 4.32억
+    # 아파트의 실투자금이 800만원(98% 차입)으로 나왔다.
+    #
+    # LTV 는 담보대출의 근본 제약이라 이것만은 대체할 수 없다. 모르면 모른다.
+    ltv_known = any(l.name == "LTV 한도" and l.known for l in limits)
+    if not ltv_known:
+        unknown.append("LTV 한도가 없어 대출 가능액을 계산하지 못했습니다 — "
+                       "0원으로도, 집값만큼으로도 세지 않았습니다")
+        policy_max = None
+        binding = None
+    else:
+        policy_max = min(usable.values()) if usable else None
+        binding = min(usable, key=usable.get) if usable else None
 
     verification = rules.weakest_verification(
         *([l.verification for l in limits if l.known] or [rules.UNKNOWN]))

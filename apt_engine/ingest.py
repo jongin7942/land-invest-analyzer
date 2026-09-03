@@ -107,6 +107,20 @@ def collect_complexes(sido: str | None = None, *, with_basis: bool = True,
                 repo.log_collection(conn, kapt.SOURCE_KEY, target=code, period=None,
                                     status="EMPTY")
             continue
+        # 응답이 단지코드를 안 돌려주는 단지가 있다. 우리는 그 코드로 조회했으니
+        # 어느 단지인지 알고 있다 — 요청한 코드를 채운다. 이게 없으면
+        # upsert_complexes 가 묶음 전체를 거부해서 수집이 통째로 죽는다.
+        basis.setdefault("kapt_code", code)
+        if not basis.get("kapt_code"):
+            basis["kapt_code"] = code
+        if not basis.get("name"):
+            # 이름조차 없으면 저장할 것이 없다. 세대수만 있는 응답은 아래에서
+            # upsert 가 NULL 을 덮지 않으므로 그대로 두면 된다.
+            with get_conn(db_path) as conn:
+                repo.log_collection(conn, kapt.SOURCE_KEY, target=code, period=None,
+                                    status="EMPTY", error="이름 없는 응답")
+            continue
+
         # lawd_cd 등 목록 단계에서 채운 값은 upsert 가 유지한다(NULL 은 덮지 않음).
         basis["name_norm"] = matcher.normalize(basis.get("name"))
         buf.append(basis)
@@ -381,7 +395,8 @@ def build_snapshots(*, as_of_ym: str | None = None, months: int = 1,
 
             if i % 200 == 0:
                 progress(f"  {i:,}/{len(pairs):,} "
-                         f"(매매 {stats['price']:,} · 전세 {stats['jeonse']:,})")
+                         f"(비율 {stats['ratios']:,} · 정상비율 {stats['norms']:,} "
+                         f"· 겹치는 달 없음 {stats['skipped']:,})")
     return stats
 
 
@@ -610,7 +625,8 @@ def build_ratios(*, area_band: str, db_path: str | None = None,
                 stats["norms"] += 1
             if i % 200 == 0:
                 progress(f"  {i:,}/{len(pairs):,} "
-                         f"(매매 {stats['price']:,} · 전세 {stats['jeonse']:,})")
+                         f"(비율 {stats['ratios']:,} · 정상비율 {stats['norms']:,} "
+                         f"· 겹치는 달 없음 {stats['skipped']:,})")
     return stats
 
 

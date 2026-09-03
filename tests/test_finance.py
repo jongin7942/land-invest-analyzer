@@ -1153,16 +1153,32 @@ def test_지정된_6개_CASE(real_rules, name, eok, area, homes, regulated, expe
     assert by_name["중개보수 부가세"].amount == by_name["중개보수"].amount // 10
     assert by_name["법무보수 부가세"].amount == by_name["법무사 기본보수"].amount // 10
 
-    # 대출 세 한도가 모두 계산 시도되고, 최종값은 그중 최솟값이다
+    # 대출 세 한도가 모두 계산 시도된다.
     limits = {l.name: l for l in cap.mortgage.limits}
     assert set(limits) >= {"LTV 한도", "DSR 한도", "절대 상한"}
-    known = {k: v.amount for k, v in limits.items() if v.known}
-    assert cap.mortgage.policy_max == min(known.values())
 
-    # 총취득비용과 실투자금이 앞뒤가 맞는다
+    # 최종값은 **LTV 를 구했을 때만** 나오고, 그때는 알려진 한도 중 최솟값이다.
+    #
+    # LTV 는 담보대출의 근본 제약이라 DSR 이나 총액 상한으로 대체할 수 없다.
+    # 예전에는 LTV 가 '확인 불가' 여도 DSR 한도를 최종값으로 썼는데, 그러면
+    # 규제지역 다주택자처럼 실제로는 대출이 안 나오는 사람에게 3.8억을 빌릴 수
+    # 있다고 말하게 된다. 지금은 LTV 가 없으면 대출 가능액도 없다.
+    known = {k: v.amount for k, v in limits.items() if v.known}
+    if limits["LTV 한도"].known:
+        assert cap.mortgage.policy_max == min(known.values())
+    else:
+        assert cap.mortgage.policy_max is None
+        assert cap.mortgage.expected is None
+
+    # 총취득비용과 실투자금이 앞뒤가 맞는다.
+    # 대출을 못 구했으면 실투자금도 없다 — 그때는 뺄 값이 없어서 항등식이
+    # 성립하지 않는 게 아니라, 답 자체가 '확인 불가' 인 것이다.
     assert cap.total_purchase_cost > cap.purchase_price
-    assert cap.required == (cap.total_purchase_cost - cap.available_mortgage
-                            - cap.assumable_deposit)
+    if cap.available_mortgage is None:
+        assert cap.required is None
+    else:
+        assert cap.required == (cap.total_purchase_cost - cap.available_mortgage
+                                - cap.assumable_deposit)
     # 실비를 못 구했으므로 '확정' 이 아니라 '예상' 이어야 한다
     assert cap.title == "예상 실투자금"
 
