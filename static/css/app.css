@@ -14922,3 +14922,49 @@ a {
     justify-content: center;
   }
 }
+
+/* ── 엔진 성적표 ────────────────────────────────────────────────────
+   순위 위에 붙박이로 뜬다. 학습 가중치가 없을 때 무엇이 비어 있는지
+   숨기지 않으려는 자리라, 접히지도 않고 눈에 띄어야 한다. */
+.engine-status__table {
+  margin: 0.75rem 0 0.5rem;
+  background: transparent;
+}
+.engine-status__table th,
+.engine-status__table td {
+  vertical-align: top;
+  padding-top: 0.35rem;
+  padding-bottom: 0.35rem;
+}
+.engine-status .table-wrap {
+  overflow-x: auto;
+}
+.tag {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 0 0.5rem;
+  font-size: 0.75rem;
+  line-height: 1.5rem;
+  font-weight: 600;
+  white-space: nowrap;
+  margin-right: 0.35rem;
+}
+/* 확인됨만 초록이다. 나머지는 '믿지 말라' 는 뜻이라 색을 아끼지 않는다. */
+.tag--확인됨 { background: #e7f4ee; color: #0e4b30; }
+.tag--잡음   { background: #fdf3e2; color: #6b4600; }
+.tag--반대   { background: #fbeaea; color: #7d1818; }
+.tag--빈칸   { background: #eceff3; color: #4a5462; }
+.engine-status__row--빈칸 td { opacity: 0.72; }
+
+@media (max-width: 671px) {
+  .engine-status__table.stacked td { padding-left: 0; }
+}
+
+.engine-status__details > summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 0.35rem 0;
+}
+.engine-status__details[open] > summary {
+  margin-bottom: 0.25rem;
+}

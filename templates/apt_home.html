@@ -139,6 +139,59 @@
 </div>
 {% endif %}
 
+{% if engine %}
+<div class="notice notice--warn engine-status">
+  <span class="notice__title">
+    이 순위는 아직 <b>학습되지 않은 가중치</b>로 만든 것입니다
+  </span>
+  <p>
+    과거 {{ engine.scored }}개 시점으로 백테스트를 돌렸습니다. 그 결과
+    모델 9개 중 <b>{{ engine.blind | join("·") }}</b>
+    {{ engine.blind | length }}개는 <b>쓸 데이터가 한 행도 없고</b>
+    (원래 비중 {{ "%.0f"|format(engine.blind_weight * 100) }}%),
+    나머지도 예측력이 잡음과 구분되지 않았습니다.
+    지금 순위는 <b>남은 모델로 후보를 좁힌 결과</b>이지 검증된 추천이 아닙니다.
+  </p>
+  <details class="engine-status__details">
+  <summary>모델 9개 성적표 — 무엇을 보고 매긴 순위인가</summary>
+  <div class="table-wrap">
+  <table class="cds--data-table cds--data-table--sm stacked engine-status__table">
+    <thead>
+      <tr><th>모델</th><th>무엇을 보는가</th><th>원래 비중</th>
+          <th>과거 성적</th><th>판정</th></tr>
+    </thead>
+    <tbody>
+      {% for m in engine.models %}
+      <tr class="engine-status__row--{{ m.state }}">
+        <td data-label="모델"><b>{{ m.label }}</b></td>
+        <td data-label="무엇을 보는가" class="muted small">{{ m.what }}</td>
+        <td data-label="원래 비중" class="num">{{ "%.0f"|format(m.base * 100) }}%</td>
+        <td data-label="과거 성적" class="num">
+          {% if m.train_ic is not none %}{{ "%+.3f"|format(m.train_ic) }}{% else %}—{% endif %}
+        </td>
+        <td data-label="판정">
+          <span class="tag tag--{{ m.state }}">{{ m.state }}</span>
+          <span class="muted small">{{ m.why }}</span>
+          {% if m.missing %}
+          <span class="muted small">— 비어 있는 표: {{ m.missing | join(", ") }}</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  </details>
+  <p class="muted small">
+    <b>확인됨</b> 은 TRAIN 과 VALIDATION 양쪽에서 예측력이 확인된 모델입니다.
+    <b>잡음</b> 은 방향은 맞아 보여도 표본 대비 흔들림이 커서 우연과 구분되지
+    않는다는 뜻이고, <b>반대</b> 는 과거에 오히려 거꾸로 움직였다는 뜻입니다.
+    <b>빈칸</b> 은 그 모델이 쓸 데이터를 아직 모으지 않았다는 뜻입니다 —
+    틀린 게 아니라 <b>모르는</b> 것입니다.
+  </p>
+</div>
+{% endif %}
+
 {% if not result %}
   {{ ui.empty_state(
        '＄', '투자금을 넣어 주세요',
@@ -153,7 +206,10 @@
 
 {% else %}
 
-  {% if result.heuristic %}
+  {# 성적표(engine)가 떠 있으면 이미 같은 이야기를 더 자세히 하고 있다.
+     여기서 또 말하면서 '백테스트를 돌려라' 라고 하면, 이미 돌린 사용자가
+     시키는 대로 해도 아무 일이 안 일어난다. #}
+  {% if result.heuristic and not engine %}
   <div class="notice notice--warn">
     <span class="notice__title">지금 순위는 투자 판단 근거가 아닙니다.</span>
     가중치가 <span class="chip chip--warn">{{ result.weights_label }}</span> 상태입니다 —

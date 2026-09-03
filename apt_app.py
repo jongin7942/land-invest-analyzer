@@ -423,8 +423,10 @@ def home():
             if cash_in else None
         rail = (_rail(conn, view["rows"][0])
                 if view and view.get("rows") else None)
+        engine = _engine_status(conn)
     return render_template("apt_home.html", form=form, result=view, rail=rail,
-                           lock=None, unlocked=lock if override else None)
+                           lock=None, unlocked=lock if override else None,
+                           engine=engine)
 
 
 def _lock_state(conn) -> dict | None:
@@ -443,6 +445,26 @@ def _lock_state(conn) -> dict | None:
     if learned is not None:
         return None
 
+    # 백테스트를 이미 돌렸다면 잠그지 않는다.
+    #
+    # 잠금의 취지는 '학습 안 된 순위를 근거처럼 읽지 않게' 였다. 그런데 백테스트를
+    # 끝까지 돌리고 나서 가중치가 왜 안 나오는지가 밝혀졌다 — 9개 모델 중 4개의
+    # 입력 데이터가 한 행도 없다(supply_plan·catalyst·transit_project·
+    # redevelopment_project·benchmark_relation 이 전부 0행). 임계값 문제가 아니라
+    # 데이터 문제라, 그 데이터를 모으기 전에는 가중치가 생길 수 없다.
+    #
+    # 몇 주를 잠가두면 도구를 아예 못 쓴다. 그래서 열되, 무엇이 비어 있는지를
+    # 순위 **위에** 붙박이로 띄운다(_engine_status). 숨기지 않는 것이 핵심이었지
+    # 못 보게 하는 것이 핵심이 아니었다.
+    try:
+        scored = conn.execute(
+            "SELECT COUNT(*) FROM backtest_window WHERE status = 'SCORED'"
+        ).fetchone()[0]
+    except Exception:
+        scored = 0
+    if scored:
+        return None
+
     q = lambda s: conn.execute(s).fetchone()
     span = q("SELECT MIN(deal_ymd), MAX(deal_ymd) FROM trade") or (None, None)
     months = _month_span(span[0], span[1])
@@ -458,6 +480,99 @@ def _lock_state(conn) -> dict | None:
                          if k not in sido],
     }
 
+
+# 순위를 만드는 9개 모델. 이름만으로는 뭘 보는지 모르니 한 줄씩 붙인다.
+MODEL_LABEL = {
+    "value": ("싸게 사는가", "지금 가격이 그 단지의 과거 위치에서 어디쯤인가"),
+    "momentum": ("최근 흐름", "최근 6개월 상승과 가속도"),
+    "supply": ("공급", "앞으로 몇 년 안에 들어올 입주물량"),
+    "catalyst": ("호재", "아직 가격에 반영되지 않은 교통·개발 계획"),
+    "redevelopment": ("재건축", "사업 단계 대비 가격이 덜 붙었는가"),
+    "relative": ("비교단지", "옆 단지와 벌어진 격차"),
+    "jeonse": ("전세 하방", "전세가 받쳐주는 정도"),
+    "risk": ("위험", "거래가 얇거나 공급이 임박했는가"),
+    "capital_efficiency": ("자본 효율", "같은 돈으로 더 큰 자산을 잡는가"),
+}
+
+# 이 표들이 비면 해당 모델은 계산 자체가 안 된다.
+MODEL_SOURCE = {
+    "supply": ("supply_plan",),
+    "catalyst": ("catalyst", "catalyst_exposure", "transit_project"),
+    "redevelopment": ("redevelopment_project", "redev_candidate"),
+    "relative": ("benchmark_relation", "complex_group"),
+}
+
+
+def _engine_status(conn) -> dict | None:
+    """엔진이 무엇을 알고 무엇을 모르는지. 순위 위에 붙박이로 띄운다.
+
+    백테스트를 돌렸는데도 가중치가 학습되지 않았을 때 그 이유를 모델별로 보여준다.
+    '가중치가 없습니다' 한 줄로는 사람이 무엇을 믿어야 할지 알 수 없다.
+    """
+    from apt_engine.backtest import usefulness as useful_mod
+    from apt_engine.scoring import weights as weights_mod
+
+    try:
+        if useful_mod.load_weights(conn, market_source="REAL") is not None:
+            return None                        # 학습됐다 — 띄울 것이 없다
+        scored = conn.execute(
+            "SELECT COUNT(*) FROM backtest_window WHERE status = 'SCORED'"
+        ).fetchone()[0]
+    except Exception:
+        return None
+    if not scored:
+        return None
+
+    rows = conn.execute(
+        "SELECT feature_key, split, rank_ic, verdict, note FROM feature_usefulness "
+        " WHERE run_id = (SELECT MAX(run_id) FROM feature_usefulness)").fetchall()
+    best: dict[tuple, dict] = {}
+    for r in rows:
+        key = (r["feature_key"], r["split"])
+        # 같은 칸이 여러 번 적힐 수 있다(지표가 여럿). USEFUL 쪽을 남긴다.
+        cur = best.get(key)
+        if cur is None or (r["verdict"] == "USEFUL" and cur["verdict"] != "USEFUL"):
+            best[key] = dict(r)
+
+    def _empty(tables) -> list[str]:
+        out = []
+        for t in tables:
+            try:
+                if conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] == 0:
+                    out.append(t)
+            except Exception:
+                out.append(t)
+        return out
+
+    models, blind, noisy = [], [], []
+    for key in weights_mod.MODELS:
+        label, what = MODEL_LABEL.get(key, (key, ""))
+        tr = best.get((key, "TRAIN"))
+        va = best.get((key, "VALIDATION"))
+        missing = _empty(MODEL_SOURCE.get(key, ()))
+        if missing or tr is None or tr["verdict"] == "INSUFFICIENT":
+            state, why = "빈칸", "이 모델이 쓰는 데이터가 아직 없습니다"
+            blind.append(label)
+        elif tr["verdict"] == "USEFUL" and va and va["verdict"] == "USEFUL":
+            state, why = "확인됨", "TRAIN·VALIDATION 양쪽에서 예측력이 확인됐습니다"
+        elif tr["verdict"] == "HARMFUL":
+            state, why = "반대", "과거에는 오히려 반대로 움직였습니다"
+            noisy.append(label)
+        else:
+            state = "잡음"
+            why = (tr["note"] or "잡음과 구분되지 않습니다") if tr else ""
+            noisy.append(label)
+        models.append({
+            "key": key, "label": label, "what": what, "state": state, "why": why,
+            "base": weights_mod.BASE.get(key, 0.0),
+            "train_ic": tr["rank_ic"] if tr else None,
+            "valid_ic": va["rank_ic"] if va else None,
+            "missing": missing,
+        })
+
+    blind_weight = sum(m["base"] for m in models if m["state"] == "빈칸")
+    return {"models": models, "blind": blind, "noisy": noisy,
+            "blind_weight": blind_weight, "scored": scored}
 
 def _rank_view(conn, cash_in, house_count, horizon, limit):
     """랭킹 한 번. 후보가 0 이면 '왜 0 인지'까지 담아 돌려준다.

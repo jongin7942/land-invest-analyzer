@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "apt-ui",
+      "runtimeExecutable": ".venv/Scripts/python.exe",
+      "runtimeArgs": ["apt_app.py"],
+      "port": 5001
+    }
+  ]
+}
