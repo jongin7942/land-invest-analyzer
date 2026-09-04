@@ -93,6 +93,7 @@ class Alternative:
     deposit: int = 0                         # 전세 승계 보증금
     occupancy: str = "임대"
     settlement_status: str = "SETTLEMENT_VERIFY_REQUIRED"
+    official_price: int | None = None        # 공시가격 — 보유세용. 없으면 보유세를 모른다고 둔다
 
 
 @dataclass(frozen=True)
@@ -147,6 +148,7 @@ def hold_case(conn: sqlite3.Connection, held: HeldAsset, *, as_of: str | date,
         temporary_two_home=held.temporary_two_home,
         interest_rate=held.interest_rate, repayment_type=held.repayment_type,
         requested_mortgage=held.mortgage_amount,
+        agent_vat_registered=held.agent_vat_registered if isinstance(held.agent_vat_registered, bool) else None,
         allow_unverified=allow_unverified)
     tl = timeline_mod.build(
         conn, capital=cap, as_of=as_of, holding_years=holding_years,
@@ -198,7 +200,9 @@ def switch_case(conn: sqlite3.Connection, held: HeldAsset, alt: Alternative, *,
         current_home_count=held.house_count_at_purchase - 1,
         exclusive_area_m2=held.exclusive_area_m2, temporary_two_home=held.temporary_two_home,
         interest_rate=held.interest_rate, repayment_type=held.repayment_type,
-        requested_mortgage=held.mortgage_amount, allow_unverified=allow_unverified)
+        requested_mortgage=held.mortgage_amount,
+        agent_vat_registered=held.agent_vat_registered if isinstance(held.agent_vat_registered, bool) else None,
+        allow_unverified=allow_unverified)
     # 중개보수 조례는 시도별이다. lawd_cd 앞 두 자리로 시도를 고른다(전국 규칙은 없다).
     region = {"11": "서울", "28": "인천", "41": "경기"}.get(held.lawd_cd[:2])
     fee, vat, _ = cost_mod.brokerage(conn, price=sale_now, as_of=as_of, region=region,
@@ -233,6 +237,7 @@ def switch_case(conn: sqlite3.Connection, held: HeldAsset, alt: Alternative, *,
         current_home_count=held.house_count_at_purchase - 1,
         exclusive_area_m2=alt.exclusive_area_m2, temporary_two_home=held.temporary_two_home,
         interest_rate=held.interest_rate, repayment_type=held.repayment_type,
+        agent_vat_registered=held.agent_vat_registered if isinstance(held.agent_vat_registered, bool) else None,
         allow_unverified=allow_unverified)
     by_name = {i.name: i.amount for i in cap_alt.cost_items}
     items["새 아파트 취득세"] = next((v for k, v in by_name.items() if "취득세" in k), None)
@@ -242,9 +247,12 @@ def switch_case(conn: sqlite3.Connection, held: HeldAsset, alt: Alternative, *,
     tl_alt = timeline_mod.build(
         conn, capital=cap_alt, as_of=as_of, holding_years=holding_years,
         sale_price=alt.expected_sale_price, occupancy=alt.occupancy,
+        official_price=alt.official_price,
         interest_rate=held.interest_rate, repayment_type=held.repayment_type,
-        house_count=held.house_count_at_purchase, lawd_cd=alt.lawd_cd,
-        allow_unverified=allow_unverified)
+        house_count=held.house_count_at_purchase,
+        agent_vat_registered=held.agent_vat_registered if isinstance(held.agent_vat_registered, bool) else None,
+        region={"11": "서울", "28": "인천", "41": "경기"}.get(alt.lawd_cd[:2]),
+        lawd_cd=alt.lawd_cd, allow_unverified=allow_unverified)
     items["신규 대출이자"] = sum(y.loan_interest for y in tl_alt.years) if tl_alt.years else None
     tw_alt = _terminal_wealth(tl_alt)
     # ③ 남는 현금(매도 현금 − 대안 실투자금 − 이사비)은 놀지 않는다 — 5년 복리.
