@@ -30,6 +30,10 @@ def pct(v, digits=1):
     return "—" if v is None else f"{v*100:+.{digits}f}%"
 
 
+def rate(v):
+    return "—" if v is None else f"{v*100:.0f}%"
+
+
 def esc(s):
     return html.escape(str(s))
 
@@ -58,7 +62,7 @@ def main() -> int:
     for name in ("A_market", "B_+own", "C_+theory", "D_+jobs"):
         if name in sets:
             lam, v = sets[name]
-            rows_bt += f"<tr><td>{esc(label.get(name, name))}</td><td>{v.get('ic_mean')}</td><td>{pct(v.get('recall_mean'),0) if v.get('recall_mean') is not None else '—'}</td><td>{v.get('mae_mean')}</td><td>{v.get('mae_market_only_mean')}</td></tr>"
+            rows_bt += f"<tr><td>{esc(label.get(name, name))}</td><td>{v.get('ic_mean')}</td><td>{rate(v.get('recall_mean'))}</td><td>{v.get('mae_mean')}</td><td>{v.get('mae_market_only_mean')}</td></tr>"
     sel = bt.get("selected") or {}
     coef = bt.get("final_coef") or {}
     top_coef = sorted(coef.items(), key=lambda kv: -abs(kv[1]))[:8]
@@ -75,13 +79,12 @@ def main() -> int:
         tier_rows += f"<tr><td>{tr}급</td><td>{int(levels[tr])/1e4:,.0f}만원/㎡</td><td>{counts.get(tr, counts.get(str(tr), '—'))}</td><td>{('+%.1f%%' % gap) if gap is not None else '—'}</td></tr>"
     conds = hier.get("conditions") or {}
     cond_rows = "".join(
-        f"<tr><td>{esc(c)}</td><td>{v['n']}</td><td>{pct(v['up_rate'],0) if v['up_rate'] is not None else '—'}</td><td>{('%.2f배' % v['lift']) if v.get('lift') else '—'}</td></tr>"
+        f"<tr><td>{esc(c)}</td><td>{v['n']}</td><td>{rate(v['up_rate'])}</td><td>{('%.2f배' % v['lift']) if v.get('lift') else '—'}</td></tr>"
         for c, v in sorted(conds.items(), key=lambda kv: -(kv[1].get("lift") or 0)))
     base_rate = hier.get("promotion_base_rate")
 
     # ── 3. 동아 ──
-    d = (bt.get("donga_482") or [{}])
-    d74 = next((x for x in d if x.get("band") == "74"), d[0] if d else {})
+    d74 = preds.get((482, "74")) or next((x for x in (bt.get("donga_482") or []) if x.get("band") == "74"), {})
     probe = tw.get("probe") or {}
 
     # ── 4. TW 상위 ──
@@ -124,8 +127,8 @@ ul{{padding-left:18px;margin:6px 0;}} li{{margin:3px 0;}}
 
 <div class="card"><h2>한 줄 결론</h2><div class="big">
 ① 5년 뒤 가격을 맞히는 힘은 <b>{esc(label.get(sel.get('set',''), sel.get('set','')))}</b>이 가장 컸습니다(순위 정확도 IC {sel.get('ic')}). 시장 흐름만 보는 것보다 이론 변수를 넣었을 때 더 잘 맞는지는 아래 표에서 바로 비교됩니다.<br>
-② 급지 사이 가격 차이는 데이터가 정했고, 5년 안에 급지가 한 단계 오르는 확률은 {pct(base_rate,0) if base_rate is not None else '—'}입니다. 그 확률을 실제로 올리는 조건만 '호재'로 인정합니다.<br>
-③ 부평 동아1단지 74㎡: 같은 시기 수도권 평균보다 <b>{pct(float(d74.get('pred_log5y')) if d74.get('pred_log5y') is not None else None)}</b> 더 오를 것으로 예측(시장 평균과 거의 같음). 시장 전체가 과거처럼 움직이면 5년 뒤 Bear {d74.get('bear_factor')}배 · Base {d74.get('base_factor')}배 · Bull {d74.get('bull_factor')}배 — 시장 수준은 예측이 아니라 과거 분포(최저·중앙·상위 20%)입니다.
+② 급지 사이 가격 차이는 데이터가 정했고, 5년 안에 급지가 한 단계 오르는 확률은 {rate(base_rate)}입니다. 그 확률을 실제로 올리는 조건만 '호재'로 인정합니다.<br>
+③ 부평 동아1단지 74㎡: 같은 시기 수도권 평균보다 <b>{pct(float(d74.get('pred_log5y')) if d74.get('pred_log5y') is not None else None)}</b> 더 오를 것으로 예측(시장 평균과 거의 같음). 시장 전체가 과거처럼 움직이면 5년 뒤 Bear {float(d74.get('bear_factor')):.2f}배 · Base {float(d74.get('base_factor')):.2f}배 · Bull {float(d74.get('bull_factor')):.2f}배 — 시장 수준은 예측이 아니라 과거 분포(최저·중앙·상위 20%)입니다.
 </div></div>
 
 <div class="card"><h2>종인님이 하실 일</h2><div class="todo"><b>지금은 없습니다.</b> 보유 vs 갈아타기의 최종 답은 여전히 계약일·대출·전세·거주형태·처분시점·중개사 과세유형·공시가격이 오면 냅니다.</div></div>
@@ -143,13 +146,13 @@ ul{{padding-left:18px;margin:6px 0;}} li{{margin:3px 0;}}
 <p class="muted">급지 = 최근 24개월 ㎡단가로 데이터가 나눈 8단계(1급이 최고). '차이'는 바로 위 급지 중앙값이 얼마나 더 비싼가.</p>
 <h2 style="margin-top:12px">급지가 올라간 조건 = 호재의 정의</h2>
 <div class="tbl"><table><tr><th>조건(진입 시점)</th><th>표본</th><th>5년 내 승급률</th><th>기본 대비</th></tr>{cond_rows}</table></div>
-<p class="muted">기본 승급률 {pct(base_rate,0) if base_rate is not None else '—'}. '기본 대비'가 1배를 뚜렷이 넘는 조건만 호재로 인정하고, 그 확률·폭으로만 가격에 넣습니다.</p>
+<p class="muted">기본 승급률 {rate(base_rate)}. '기본 대비'가 1배를 뚜렷이 넘는 조건만 호재로 인정하고, 그 확률·폭으로만 가격에 넣습니다.</p>
 </div>
 
 <div class="card"><h2>부평 동아1단지 74㎡ (4.6억 저층)</h2>
 <div class="kv">
 <div><b>시장 대비 5년 예측</b><span>{pct(float(d74.get('pred_log5y')) if d74.get('pred_log5y') is not None else None)}</span></div>
-<div><b>급지 / 상위급지 중심까지</b><span>{d74.get('tier')}급 / {d74.get('dist_center_km')}km</span></div>
+<div><b>급지 / 상위급지 중심까지</b><span>{int(float(d74.get('tier')))}급 / {d74.get('dist_center_km')}km</span></div>
 <div><b>EXPECTED_TW(표준 프로필)</b><span class="{'good' if (probe.get('expected_tw') or 0)>0 else 'bad'}">{eok(probe.get('expected_tw'))}</span></div>
 <div><b>Wealth Floor(Bear)</b><span class="bad">{eok(probe.get('wealth_floor'))}</span></div>
 </div>
