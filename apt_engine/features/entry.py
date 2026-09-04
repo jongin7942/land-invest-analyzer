@@ -247,7 +247,10 @@ def feature(entry: EntryPrice) -> Feature:
 
     lo, hi = entry.strong_buy, entry.wait
     span = max(hi - lo, 1)
-    value = max(0.0, min(1.5, (entry.current - lo) / span))
+    # 아래쪽을 0 에서 자르지 않는다. 인천 74㎡ 204개를 채점했더니 Strong Buy 아래
+    # 단지가 전부 0.0 에 묶여 같은 백분위(83)를 받았다 — "얼마나 더 싼가" 가 지워졌다.
+    # 구간 한 폭(-1.0)까지는 그대로 두고, 그 아래는 데이터 오류일 가능성이 커 자른다.
+    value = max(-1.0, min(1.5, (entry.current - lo) / span))
     conf = combine(*[a.confidence for a in entry.anchors])
 
     calc = Calc(
