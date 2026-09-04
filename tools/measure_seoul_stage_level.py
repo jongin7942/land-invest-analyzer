@@ -132,6 +132,11 @@ def main() -> int:
             continue
         want = tokens(r.get("사업장명", ""))
         hits = [x for x in near if want & tokens(x[1])]
+        if not hits and "재건축" in r.get("사업구분", ""):
+            # 재건축은 대상이 아파트 단지 자체다. 사업장명이 '○○구역' 처럼 행정 이름이라
+            # 글자가 안 겹쳐도, 대표지번에서 150m 안의 아파트는 거의 확실히 그 단지다.
+            # (재개발은 빌라촌이라 이 규칙을 쓰면 엉뚱한 아파트를 붙이므로 안 쓴다.)
+            hits = [x for x in near if x[2] <= 150]
         if not hits:
             stats["이름불일치"] += 1
             continue

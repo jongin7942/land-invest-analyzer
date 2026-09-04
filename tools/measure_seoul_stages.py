@@ -68,11 +68,13 @@ def main() -> int:
                     continue
                 results[stage].append((b - a, m["complex_name"], day, approx))
 
-    print("═" * 76)
+    # 정보몽땅은 최초 인가도 '(변경)인가' 로 표시하므로 _approx 와 일반을 구분하지
+    # 않는다 — 가장 이른 인가일이 곧 그 단계의 날이다.
+    print("═" * 70)
     print(f"서울 · 단계 인가 전후 {WINDOW_MONTHS}개월 · 자치구 대비 상대가격 변화")
-    print("═" * 76)
-    print(f"  {'단계':12s} {'전체':>4s} {'중앙값':>8s} {'상승':>5s}   {'최초인가만':>6s} {'중앙값':>8s}   {'변경인가만':>6s} {'중앙값':>8s}")
-    print("  " + "─" * 72)
+    print("═" * 70)
+    print(f"  {'단계':12s} {'사례':>4s} {'중앙값':>8s} {'상승비율':>7s} {'하위25%':>8s} {'상위25%':>8s}")
+    print("  " + "─" * 60)
     table = []
     for stage in ORDER:
         v = results[stage]
@@ -80,18 +82,12 @@ def main() -> int:
             print(f"  {stage:12s} {len(v):4d}  표본 5건 미만")
             continue
         allv = sorted(x[0] for x in v)
-        strict = sorted(x[0] for x in v if not x[3])
-        loose = sorted(x[0] for x in v if x[3])
         med = statistics.median(allv)
         pos = sum(1 for x in allv if x > 0) / len(allv)
-        ms = f"{statistics.median(strict):+8.2%}" if len(strict) >= 3 else "       —"
-        ml = f"{statistics.median(loose):+8.2%}" if len(loose) >= 3 else "       —"
-        print(f"  {stage:12s} {len(allv):4d} {med:+8.2%} {pos:5.0%}   {len(strict):6d} {ms}   {len(loose):6d} {ml}")
+        q1, q3 = allv[len(allv) // 4], allv[(len(allv) * 3) // 4]
+        print(f"  {stage:12s} {len(allv):4d} {med:+8.2%} {pos:7.0%} {q1:+8.2%} {q3:+8.2%}")
         table.append({"stage": stage, "samples": len(allv), "median_delta": round(med, 6),
-                      "positive_ratio": round(pos, 4), "strict_n": len(strict),
-                      "strict_median": round(statistics.median(strict), 6) if strict else "",
-                      "approx_n": len(loose),
-                      "approx_median": round(statistics.median(loose), 6) if loose else "",
+                      "positive_ratio": round(pos, 4), "q1": round(q1, 6), "q3": round(q3, 6),
                       "window_months": WINDOW_MONTHS})
     if table:
         with OUT.open("w", encoding="utf-8", newline="") as f:

@@ -108,7 +108,7 @@ def strip(html: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html)).strip()
 
 
-PAGE_SIZE = 100
+PAGE_SIZE = 10
 
 
 def list_rows(op) -> list[dict]:
@@ -123,9 +123,9 @@ def list_rows(op) -> list[dict]:
             break
         rows.extend(got)
         seen.update(r["no"] for r in got)
-        # 서버는 pageSize 와 무관하게 시작 위치를 (cpage-1)*10 으로 잡는다.
-        # 100행씩 받으려면 cpage 를 10씩 건너뛰어야 한다(실측: cpage=2 가 11번째 행부터).
-        page += PAGE_SIZE // 10
+        # 서버는 시작 위치를 (cpage-1)*10 으로 잡으면서도 cpage 상한은 pageSize 기준으로
+        # 검사한다(pageSize=100 이면 cpage 21 부터 빈 응답). 10행씩 끝까지 넘기는 게 안전하다.
+        page += 1
         time.sleep(0.2)
     if not rows:
         raise SystemExit("목록을 못 읽었습니다 — 폼 값이 바뀐 것 같습니다.")
@@ -190,18 +190,18 @@ def stage_dates(html_or_plain: str) -> dict[str, str]:
             continue
         end = marks[idx + 1][0] if idx + 1 < len(marks) else len(plain)
         chunk = plain[pos:end]
-        strict, loose = [], []
+        # 정보몽땅은 최초 인가도 '(변경)인가' 로 표시한다(200개 카페의 조합설립인가
+        # 구간에서 '(변경)인가' 1,248건, 그냥 '인가' 0건). 그래서 '변경' 을 가르지
+        # 않고, 신청·고시를 뺀 확정 줄 중 가장 이른 날을 그 단계의 날로 본다.
+        dates = []
         for y, mo, d, tag in DATE_RE.findall(chunk):
             tag_ = tag.replace(" ", "")
             if "신청" in tag_ or "고시" in tag_:
                 continue
-            if not any(x in tag_ for x in CONFIRM[stage]):
-                continue
-            (loose if "변경" in tag_ else strict).append(f"{y}{mo}{d}")
-        if strict:
-            out[stage] = min(strict)
-        elif loose:
-            out[stage + "_approx"] = min(loose)
+            if any(x in tag_ for x in CONFIRM[stage]):
+                dates.append(f"{y}{mo}{d}")
+        if dates:
+            out[stage] = min(dates)
     return out
 
 
