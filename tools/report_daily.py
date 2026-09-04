@@ -138,7 +138,7 @@ ul{{padding-left:18px;margin:6px 0;}} li{{margin:3px 0;}}
 </style>
 <div class="wrap">
 <h1>아파트 엔진 오늘의 보고</h1>
-<div class="date">2026-09-05 · 5년 뒤 가격 엔진(§12) 2차(시장 수준 분리) · 계급도 · Terminal Wealth 재계산</div>
+<div class="date">2026-09-05 · 1,000세대 이상 단지만 집계·추천 · 5년 뒤 가격 엔진 v0.3(하락기 포함) · 투자 시점 · 확산 계급 · Terminal Wealth</div>
 
 <div class="card"><h2>한 줄 결론</h2><div class="big">
 ① 5년 뒤 가격을 맞히는 힘은 <b>{esc(label.get(sel.get('set',''), sel.get('set','')))}</b>이 가장 컸습니다(순위 정확도 IC {sel.get('ic')}). 시장 흐름만 보는 것보다 이론 변수를 넣었을 때 더 잘 맞는지는 아래 표에서 바로 비교됩니다.<br>
@@ -179,7 +179,7 @@ ul{{padding-left:18px;margin:6px 0;}} li{{margin:3px 0;}}
 <p class="muted">표준 프로필(3억·비거주·5년·금리 4%·공시가 = 매매가×0.65)은 후보 비교용이지 종인님 실제 조건이 아닙니다. 매도가 Bear/Base/Bull {eok(probe.get('exit_bear'))} / {eok(probe.get('exit_base'))} / {eok(probe.get('exit_bull'))}.</p>
 </div>
 
-<div class="card"><h2>5년 뒤 순자산이 가장 큰 후보 10 (3억 프로필, 기존 TOP100 안에서)</h2>
+<div class="card"><h2>5년 뒤 순자산이 가장 큰 후보 10 (3억 프로필 · 1,000세대 이상 · 점수 TOP100 풀)</h2>
 <div class="tbl"><table><tr><th>TW순위</th><th>단지</th><th>가격</th><th>5년 뒤 Base</th><th>기대 순이익</th><th>최악(Bear)</th><th>점수순위</th></tr>{tw_rows}</table></div>
 <p class="muted">100개 중 가격 엔진 예측이 붙은 후보 {model_priced}개, 기대 순이익 양수 {pos}개. 세금·이자·복비를 다 뺀 5년 뒤 순이익(3억 프로필, 금리 4%)입니다. 예측이 없는 후보는 무성장으로 계산돼 뒤로 밀립니다. 아직 '연구 후보'이며 실제 매물·전세 확인 전입니다.</p>
 </div>
@@ -189,6 +189,8 @@ ul{{padding-left:18px;margin:6px 0;}} li{{margin:3px 0;}}
 <li>직장 변수는 국민연금 가입 사업장(수도권 570만→707만 명, 2016~2026)으로 만들었습니다.</li>
 <li>급지 계급도와 '급지 상승 조건'을 데이터로 정했습니다.</li>
 <li>Terminal Wealth 가 무성장 가정을 벗어나 예측 가격으로 계산됩니다.</li>
+<li><b>1,000세대 미만 단지는 집계·추천에서 제외</b>했습니다(종인님 규칙). 대상 단지 10,123 → 1,478.</li>
+<li>확산 계급 검증: 선행지·빠른추종지는 다음 해에도 61~62% 같은 계급(정해져 있음). 후행지는 5년 뒤에도 시장 대비 −7%(상승국면 −14.5%) — '나중에 오른다'가 아니라 '덜 오른다'. 상승국면 승자는 빠른 추종(+3.3%).</li>
 </ul>
 <p class="muted">상세(스펙 전문·연구로그·체크리스트)는 별도 페이지: <a href="https://claude.ai/code/artifact/1acc5db5-80be-41bc-b95e-d6d81392908d">MASTER SPEC 병합 보고</a></p>
 </div>
