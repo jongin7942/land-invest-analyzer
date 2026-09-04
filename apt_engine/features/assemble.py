@@ -16,7 +16,7 @@ from apt_engine.features import bands
 from apt_engine.features import cycle
 from apt_engine.features import stretch as stretch_mod
 from apt_engine.features import (access, catalyst, entry, flow, jeonse,
-                                 momentum, regime, supply)
+                                 momentum, regime, resilience, supply)
 from apt_engine.features import relative as relative_mod
 from apt_engine.features.base import Feature, FeatureSet
 
@@ -31,6 +31,7 @@ GROUPS: dict[str, str] = {
     "entry": "매수가 구간 대비 현재 위치 (§7)",
     "catalyst": "남은 호재 알파 (§17·§18)",
     "access": "역세권 격차가 벌어지는 속도. 수준이 아니라 추세다",
+    "resilience": "하락기(2022→2023) 실측 방어력. 방어 전용",
     # DELTA UPGRADE — 4 State 의 CORE 후보. 기존 7그룹을 대체하지 않고 위에 얹는다.
     "bands": "가격대 이동 P25/중앙값/P75 · Latent/Visible · 기울기 지속 (§7·§8·§9)",
     "stretch": "장기 정상가 대비 이탈 · 상승폭 · 가속 구간 (§4-D·§5·§6)",
@@ -165,6 +166,13 @@ def build(conn: sqlite3.Connection, complex_id: int, area_band: str, *,
                                      horizon_years=horizon_years):
             out = out.add(f)
 
+    if "resilience" in wanted:
+        # 2022 고점→2023 저점은 이미 지난 사실이라 컷오프를 따로 보지 않는다.
+        # 다만 컷오프가 2023-12 이전이면 그 하락기는 아직 끝나지 않았으므로 세지 않는다.
+        if as_of.observable.ym >= resilience.TROUGH_TO:
+            for f in resilience.all_features(conn, complex_id, area_band):
+                out = out.add(f)
+
     return out
 
 
@@ -179,6 +187,7 @@ def group_of(feature_key: str) -> str | None:
         "entry": ("entry_",),
         "catalyst": ("catalyst_",),
         "access": ("station_access_",),
+        "resilience": ("crash_resilience",),
         "bands": ("p25_migration", "median_migration", "p75_migration",
                   "band_shift_strength", "latent_movement", "visible_movement",
                   "slope_persistence", "transaction_recovery",

@@ -44,8 +44,17 @@ def _downside(c: Candidate) -> float:
     데이터가 없어 확인 못 한 위험은 **0 이 아니라 중립(0.5)** 으로 둔다 —
     모른다는 걸 안전하다고 읽으면 정확히 반대의 실수를 한다.
     """
-    defense = c.features["downside_defense"]
-    unknown_penalty = 0.5 if not defense.usable else (1.0 - defense.value)
+    # 하방 방어는 실측(crash_resilience)이 있으면 그것을 먼저 본다 — 2022→2023 에
+    # 같은 시군구보다 실제로 얼마나 덜 빠졌나. 없으면 전세가율 이론값(downside_defense).
+    # 종인님 지적(2026-09-04): "전부 떨어질 때 얼마나 비교적 더 방어됐냐로 봐야 한다".
+    # 실측값은 상승 점수에는 절대 쓰지 않는다 — 덜 빠진 단지가 이후엔 덜 오른다.
+    resilience = c.features["crash_resilience"] if "crash_resilience" in c.features else None
+    if resilience is not None and resilience.usable:
+        # -10%p(동네보다 훨씬 더 빠짐) → 위험 1.0, +10%p(훨씬 덜 빠짐) → 0.0
+        unknown_penalty = max(0.0, min(1.0, 0.5 - resilience.value / 0.20))
+    else:
+        defense = c.features["downside_defense"]
+        unknown_penalty = 0.5 if not defense.usable else (1.0 - defense.value)
     return min(1.0, 0.5 * c.kill.value + 0.5 * unknown_penalty)
 
 

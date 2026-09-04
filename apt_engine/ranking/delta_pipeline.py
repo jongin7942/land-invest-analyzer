@@ -39,7 +39,7 @@ from apt_engine.scoring import weights as weights_mod
 
 # 4 State 를 계산하려면 이 그룹들이 필요하다.
 DELTA_GROUPS = ("momentum", "regime", "flow", "supply", "jeonse", "entry",
-                "catalyst", "access", "bands", "stretch", "cycle")
+                "catalyst", "access", "resilience", "bands", "stretch", "cycle")
 
 
 @dataclass(frozen=True)

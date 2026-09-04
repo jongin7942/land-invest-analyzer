@@ -150,6 +150,11 @@ REGISTRY: dict[str, Entry] = {e.feature_key: e for e in (
     # 알파가 아니고, 그 격차가 계속 벌어진다는 사실만 알파다(features/access.py).
     _e("station_access_drift", SUSTAINABILITY, ROLE_ALPHA, True,
        "역까지 거리 밴드의 연 추세 × 투자기간. 2008~2025년 자체 측정", "access"),
+    # 실측 방어력. 2022 고점→2023 저점에서 같은 시군구보다 덜 빠진 정도.
+    # 덜 빠진 단지가 이후엔 덜 오르는 것으로 측정돼(순위상관 -0.30) RISK 에만 쓴다 —
+    # 상승 점수에 더하면 저점 매수자에게 반대 신호를 준다(features/resilience.py).
+    _e("crash_resilience", SUSTAINABILITY, ROLE_RISK, True,
+       "하락기(2022→2023) 시군구 대비 상대 낙폭. 방어 전용, 상승에 쓰지 않음", "resilience"),
     _e("next_node_score", MOVEMENT, ROLE_ALPHA, True,
        "이미 오른 칸 바로 아래이면서 아직 초기인가(§16)"),
     _e("effective_supply_risk", SUSTAINABILITY, ROLE_RISK, False,
