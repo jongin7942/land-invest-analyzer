@@ -35,7 +35,7 @@ def esc(s):
 
 
 def main() -> int:
-    bt = load("exit_price_backtest.json", {})
+    bt = load("exit_price_backtest_relative.json") or load("exit_price_backtest.json", {})
     hier = load("hierarchy_2026.json", {})
     tw = load("tw_combined_2026-09-04.json", {})
     rel = load("relative_gap_report.json", {})
@@ -119,12 +119,12 @@ ul{{padding-left:18px;margin:6px 0;}} li{{margin:3px 0;}}
 </style>
 <div class="wrap">
 <h1>아파트 엔진 오늘의 보고</h1>
-<div class="date">2026-09-05 · 5년 뒤 가격 엔진(§12) 첫 실행 · 계급도 · Terminal Wealth 재계산</div>
+<div class="date">2026-09-05 · 5년 뒤 가격 엔진(§12) 2차(시장 수준 분리) · 계급도 · Terminal Wealth 재계산</div>
 
 <div class="card"><h2>한 줄 결론</h2><div class="big">
 ① 5년 뒤 가격을 맞히는 힘은 <b>{esc(label.get(sel.get('set',''), sel.get('set','')))}</b>이 가장 컸습니다(순위 정확도 IC {sel.get('ic')}). 시장 흐름만 보는 것보다 이론 변수를 넣었을 때 더 잘 맞는지는 아래 표에서 바로 비교됩니다.<br>
 ② 급지 사이 가격 차이는 데이터가 정했고, 5년 안에 급지가 한 단계 오르는 확률은 {pct(base_rate,0) if base_rate is not None else '—'}입니다. 그 확률을 실제로 올리는 조건만 '호재'로 인정합니다.<br>
-③ 부평 동아1단지 74㎡의 5년 뒤 예측: 지금 대비 <b>{pct(float(d74.get('pred_log5y')) if d74.get('pred_log5y') is not None else None)}</b> (Bear {d74.get('bear_factor')}배 · Base {d74.get('base_factor')}배 · Bull {d74.get('bull_factor')}배).
+③ 부평 동아1단지 74㎡: 같은 시기 수도권 평균보다 <b>{pct(float(d74.get('pred_log5y')) if d74.get('pred_log5y') is not None else None)}</b> 더 오를 것으로 예측(시장 평균과 거의 같음). 시장 전체가 과거처럼 움직이면 5년 뒤 Bear {d74.get('bear_factor')}배 · Base {d74.get('base_factor')}배 · Bull {d74.get('bull_factor')}배 — 시장 수준은 예측이 아니라 과거 분포(최저·중앙·상위 20%)입니다.
 </div></div>
 
 <div class="card"><h2>종인님이 하실 일</h2><div class="todo"><b>지금은 없습니다.</b> 보유 vs 갈아타기의 최종 답은 여전히 계약일·대출·전세·거주형태·처분시점·중개사 과세유형·공시가격이 오면 냅니다.</div></div>
@@ -134,7 +134,7 @@ ul{{padding-left:18px;margin:6px 0;}} li{{margin:3px 0;}}
 <p class="muted">IC = 예측 순위와 실제 순위의 상관(0이면 무작위). 승자 포착률 = 실제 상위 10%를 예측 상위 20%가 잡은 비율. MAE = 5년 log 수익률 오차(0.10 ≈ 10%p).</p>
 <details><summary>어떤 변수가 가장 크게 작용했나</summary><div class="tbl"><table><tr><th>변수</th><th>표준화 계수</th></tr>{coef_rows}</table></div>
 <p class="muted">양수 = 그 변수가 클수록 5년 뒤 더 오름. 학습 표본 {bt.get('final_n')}건.</p></details>
-<p class="muted">현재(2026-06 진입) 전 단지 예측 분포: P10 {pct(dist.get('0.1'))} · 중앙 {pct(dist.get('0.5'))} · P90 {pct(dist.get('0.9'))}</p>
+<p class="muted">현재(2026-06 진입) 전 단지의 "시장 대비" 예측 분포: P10 {pct(dist.get('0.1'))} · 중앙 {pct(dist.get('0.5'))} · P90 {pct(dist.get('0.9'))}. 시장 전체 수준(5년)은 과거 10개 진입연도의 최저 {pct((bt.get("market_scenario_log") or {}).get("bear_used"))} · 중앙 {pct((bt.get("market_scenario_log") or {}).get("0.5"))} · 상위 20% {pct((bt.get("market_scenario_log") or {}).get("0.8"))}를 Bear/Base/Bull 로 씁니다 — 이건 예측이 아니라 가정입니다.</p>
 </div>
 
 <div class="card"><h2>아파트 계급도 (법정동 급지 8단계)</h2>
@@ -147,7 +147,7 @@ ul{{padding-left:18px;margin:6px 0;}} li{{margin:3px 0;}}
 
 <div class="card"><h2>부평 동아1단지 74㎡ (4.6억 저층)</h2>
 <div class="kv">
-<div><b>5년 뒤 예측(중앙)</b><span>{pct(float(d74.get('pred_log5y')) if d74.get('pred_log5y') is not None else None)}</span></div>
+<div><b>시장 대비 5년 예측</b><span>{pct(float(d74.get('pred_log5y')) if d74.get('pred_log5y') is not None else None)}</span></div>
 <div><b>급지 / 상위급지 중심까지</b><span>{d74.get('tier')}급 / {d74.get('dist_center_km')}km</span></div>
 <div><b>EXPECTED_TW(표준 프로필)</b><span class="{'good' if (probe.get('expected_tw') or 0)>0 else 'bad'}">{eok(probe.get('expected_tw'))}</span></div>
 <div><b>Wealth Floor(Bear)</b><span class="bad">{eok(probe.get('wealth_floor'))}</span></div>
