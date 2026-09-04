@@ -28,15 +28,9 @@ OUT = Path(__file__).resolve().parents[1] / "reports" / "top100_latest.json"
 
 
 def region_name(conn, lawd_cd: str) -> str:
-    row = conn.execute("SELECT * FROM region WHERE lawd_cd = ?", (lawd_cd,)).fetchone()
-    if not row:
-        return lawd_cd
-    texts = [str(row[k]) for k in row.keys()
-             if isinstance(row[k], str) and row[k] and row[k] != lawd_cd]
-    # '경기도 용인시 기흥구' 처럼 가장 긴 이름을 고른 뒤 시도는 뗀다.
-    best = max(texts, key=len) if texts else lawd_cd
-    parts = best.split()
-    return " ".join(parts[1:]) if len(parts) > 1 else best
+    """region.name 은 '용인시 기흥구' 꼴이다. 시도는 붙이지 않는다."""
+    row = conn.execute("SELECT name FROM region WHERE lawd_cd = ?", (lawd_cd,)).fetchone()
+    return row["name"] if row and row["name"] else lawd_cd
 
 
 def kill_value(kill) -> float:
@@ -66,7 +60,10 @@ def main() -> int:
                               horizon_years=args.horizon, scan_limit=args.scan,
                               weights_source=weights_mod.HEURISTIC)
         top = result.top100
-        all_lists = lists_mod.all_lists(top, limit=len(top))
+        # ★ 는 cli rank 와 같은 기준으로 센다 — TOP10 안에서 세 리스트를 만들고,
+        # 그 셋 모두 5위 안(lists.CONVICTION_RANK)이어야 한다. 100개로 리스트를
+        # 만들면 위험조정·비대칭 순서가 크게 달라져 아무도 못 든다.
+        all_lists = lists_mod.all_lists(result.top10, limit=len(result.top10))
         stars = set(lists_mod.highest_conviction(all_lists))
 
         rows = []
