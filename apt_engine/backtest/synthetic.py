@@ -142,7 +142,7 @@ def build(conn: sqlite3.Connection, *, n_complexes: int = 40,
             " emd_name, apt_households, approval_year, confidence) "
             "VALUES (?,?,?,?,?,?,?,?)",
             (f"SYN{seed}{k:04d}", f"합성{k:03d}", f"합성{k:03d}", lawd,
-             "합성동", 300 + rng.randrange(0, 900),
+             "합성동", 1000 + rng.randrange(0, 900),   # 1,000세대 Gate(§24) 통과용
              1990 + rng.randrange(0, 30), "HIGH"))
         cid = int(cur.lastrowid)
         ids.append(cid)
