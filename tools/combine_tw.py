@@ -33,13 +33,13 @@ OFFICIAL_RATIO = 0.65
 PROBE = {"complex_id": 482, "band": "74", "price": 460_000_000, "label": "회귀 예시 · 부평 동아1단지 74㎡ 저층 4.6억"}
 
 
-def one(conn, cid: int, band: str, *, profile: Profile, rel, opt, price_override=None):
+def one(conn, cid: int, band: str, *, profile: Profile, rel, opt, pred, price_override=None):
     cand = budget_mod.evaluate(conn, cid, profile=profile, as_of=AS_OF, area_band=band,
                                price_override=price_override, allow_unverified=True)
     if cand is None:
         return None
     price = cand.capital.purchase_price
-    es = exit_price.build(price, relative=rel.get((cid, band)), option=opt.get(cid))
+    es = exit_price.build(price, relative=rel.get((cid, band)), option=opt.get(cid), prediction=pred.get((cid, band)))
     region = profile.region or regions.sido_of(cand.lawd_cd)
     band_res = scenario_mod.band(
         conn, capital=cand.capital, as_of=AS_OF, holding_years=5, base_sale_price=price,
@@ -57,6 +57,7 @@ def one(conn, cid: int, band: str, *, profile: Profile, rel, opt, price_override
         "lawd_cd": cand.lawd_cd, "price": price, "self_capital": cand.capital.required,
         "exit_bear": es.prices["Bear"], "exit_base": es.prices["Base"], "exit_bull": es.prices["Bull"],
         "relative_uplift": round(es.relative_uplift, 4), "relative_status": es.relative_status,
+        "exit_model": pred[(cid, band)].model if (cid, band) in pred else "NONE(무성장)",
         "relative_label": r.label if r else "N/A", "consensus": r.consensus if r else "N/A",
         "option_stage": o.option_stage if o else None, "option_applied": es.option_applied,
         "np_bear": nps.get("Bear"), "np_base": nps.get("Base"), "np_bull": nps.get("Bull"),
@@ -77,15 +78,16 @@ def main() -> int:
     profile = replace(Profile(name="balanced"), available_cash=int(float(args.cash) * 1e8),
                       interest_rate=args.rate)
     pool = json.loads(Path(args.pool).read_text(encoding="utf-8"))["rows"]
-    rel, opt = exit_price.load_relative(), exit_price.load_options()
+    rel, opt, pred = exit_price.load_relative(), exit_price.load_options(), exit_price.load_predictions()
+    print(f"Exit Price 예측 {len(pred)}건 적재")
     rows = []
     with get_conn() as conn:
         for it in pool:
-            got = one(conn, int(it["complex_id"]), str(it["area_band"]), profile=profile, rel=rel, opt=opt)
+            got = one(conn, int(it["complex_id"]), str(it["area_band"]), profile=profile, rel=rel, opt=opt, pred=pred)
             if got:
                 got["name"] = it["name"]; got["score_rank"] = it["rank"]; got["score"] = it["score"]
                 rows.append(got)
-        probe = one(conn, PROBE["complex_id"], PROBE["band"], profile=profile, rel=rel, opt=opt,
+        probe = one(conn, PROBE["complex_id"], PROBE["band"], profile=profile, rel=rel, opt=opt, pred=pred,
                     price_override=PROBE["price"])
         if probe:
             probe["name"] = PROBE["label"]; probe["score_rank"] = None; probe["score"] = None

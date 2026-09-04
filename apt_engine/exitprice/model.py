@@ -49,31 +49,58 @@ def _solve(a: list[list[float]], b: list[float]) -> list[float]:
     return [m[i][n] / (m[i][i] or 1e-12) for i in range(n)]
 
 
-def fit(rows: list[Row], features: list[str], lam: float = 1.0) -> Fit | None:
+@dataclass
+class Design:
+    """표준화된 설계행렬의 XᵀX·Xᵀy — λ 가 달라도 다시 만들지 않는다."""
+    features: list
+    mean: dict
+    std: dict
+    xtx: list
+    xty: list
+    data: list          # [(x, y)]
+
+
+def design(rows: list[Row], features: list[str]) -> Design | None:
     data = [(r.x, r.target) for r in rows if r.target is not None and all(r.x.get(f) is not None for f in features)]
     if len(data) < 50:
         return None
-    mean = {f: sum(x[f] for x, _ in data) / len(data) for f in features}
-    std = {f: math.sqrt(sum((x[f] - mean[f]) ** 2 for x, _ in data) / len(data)) for f in features}
+    n = len(data)
+    mean = {f: sum(x[f] for x, _ in data) / n for f in features}
+    std = {f: math.sqrt(sum((x[f] - mean[f]) ** 2 for x, _ in data) / n) for f in features}
     k = len(features)
-    X = [[1.0] + [((x[f] - mean[f]) / std[f] if std[f] > 0 else 0.0) for f in features] for x, _ in data]
-    y = [t for _, t in data]
     xtx = [[0.0] * (k + 1) for _ in range(k + 1)]
     xty = [0.0] * (k + 1)
-    for xi, yi in zip(X, y):
+    for x, yi in data:
+        xi = [1.0] + [((x[f] - mean[f]) / std[f] if std[f] > 0 else 0.0) for f in features]
         for i in range(k + 1):
-            xty[i] += xi[i] * yi
             xi_i = xi[i]
+            if xi_i == 0.0:
+                continue
+            xty[i] += xi_i * yi
             row = xtx[i]
-            for j in range(k + 1):
+            for j in range(i, k + 1):
                 row[j] += xi_i * xi[j]
+    for i in range(k + 1):
+        for j in range(i + 1, k + 1):
+            xtx[j][i] = xtx[i][j]
+    return Design(features, mean, std, xtx, xty, data)
+
+
+def fit_design(d: Design, lam: float) -> Fit:
+    k = len(d.features)
+    a = [row[:] for row in d.xtx]
     for i in range(1, k + 1):
-        xtx[i][i] += lam
-    beta = _solve(xtx, xty)
-    f = Fit(features, mean, std, beta, lam, len(data))
-    resid = [yi - f.predict(x) for (x, _), yi in zip(data, y)]
+        a[i][i] += lam
+    beta = _solve(a, d.xty)
+    f = Fit(d.features, d.mean, d.std, beta, lam, len(d.data))
+    resid = [yi - f.predict(x) for x, yi in d.data]
     f.resid_q = {q: percentile(resid, q) for q in (0.1, 0.2, 0.5, 0.8, 0.9)}
     return f
+
+
+def fit(rows: list[Row], features: list[str], lam: float = 1.0) -> Fit | None:
+    d = design(rows, features)
+    return fit_design(d, lam) if d else None
 
 
 # ── 평가 ──
@@ -116,21 +143,24 @@ def evaluate(f: Fit, rows: list[Row]) -> dict:
             "winner_recall": round(recall, 3), "top_decile_lift": round(lift, 4)}
 
 
-def walk_forward(rows: list[Row], features: list[str], test_years: list[int], lam: float = 1.0) -> dict:
-    """test year T: 학습 = 진입연도 ≤ T−5 (결과가 T 이전에 확정된 창만)."""
-    out = {}
+def walk_forward(rows: list[Row], features: list[str], test_years: list[int],
+                 lams: list[float] = (1.0,)) -> dict[float, dict]:
+    """test year T: 학습 = 진입연도 ≤ T−5 (결과가 T 이전에 확정된 창만). λ 별 결과를 한 번의 설계행렬로."""
+    out: dict[float, dict] = {lam: {} for lam in lams}
     by_year: dict[int, list[Row]] = {}
     for r in rows:
         by_year.setdefault(int(r.entry_ym[:4]), []).append(r)
     for T in test_years:
         train = [r for y, rs in by_year.items() if y <= T - 5 for r in rs]
         test = by_year.get(T, [])
-        f = fit(train, features, lam)
-        if f is None or not test:
-            out[T] = {"n_train": len(train), "note": "학습 표본 부족"}
-            continue
-        ev = evaluate(f, test)
-        ev["n_train"] = f.n
-        ev["coef"] = {fe: round(b, 4) for fe, b in zip(features, f.beta[1:])}
-        out[T] = ev
+        d = design(train, features)
+        for lam in lams:
+            if d is None or not test:
+                out[lam][T] = {"n_train": len(train), "note": "학습 표본 부족"}
+                continue
+            f = fit_design(d, lam)
+            ev = evaluate(f, test)
+            ev["n_train"] = f.n
+            ev["coef"] = {fe: round(b, 4) for fe, b in zip(features, f.beta[1:])}
+            out[lam][T] = ev
     return out

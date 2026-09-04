@@ -35,10 +35,13 @@ FEATURES = [
     # 공급
     "supply_recent", "supply_planned",
 ]
+JOB_FEATURES = ["jobs_emd", "jobs_3km"]            # 국민연금 사업장(2016~) — 그 전 진입은 PROXY 스냅샷
+JOB_GROWTH = ["jobs_growth5"]                       # 5년 전 스냅샷이 있는 진입연도(2021~)만
 FEATURE_SETS = {
     "A_market": ["metro_mom5", "gu_mom5", "gu_mom1", "regime"],
     "B_+own": ["metro_mom5", "gu_mom5", "gu_mom1", "regime", "mom1", "mom3", "own_pct", "rel_gu", "log_vol", "jeonse_ratio", "jeonse_mom1"],
     "C_+theory": FEATURES,
+    "D_+jobs": FEATURES + JOB_FEATURES,
 }
 
 
@@ -63,9 +66,11 @@ class Row:
 
 class PanelBuilder:
     def __init__(self, complexes: dict[int, Complex], prices: dict[tuple[int, str], Series],
-                 jeonse: dict[tuple[int, str], list], stations: list[tuple[float, float, str, str | None]]):
-        """stations: (lat, lon, opened_ym or None, status_date 'YYYY-MM-DD' or None)"""
+                 jeonse: dict[tuple[int, str], list], stations: list[tuple[float, float, str, str | None]],
+                 jobs=None):
+        """stations: (lat, lon, opened_ym or None, status_date 'YYYY-MM-DD' or None); jobs: exitprice.jobs.Jobs"""
         self.cx, self.prices, self.jeonse, self.stations = complexes, prices, jeonse, stations
+        self.jobs = jobs
         self.by_gu: dict[str, list[tuple[int, str]]] = {}
         for (cid, band) in prices:
             self.by_gu.setdefault(complexes[cid].lawd_cd, []).append((cid, band))
@@ -222,6 +227,9 @@ class PanelBuilder:
             "supply_recent": self.supply_near(c, year - 3, year),
             "supply_planned": self.supply_near(c, year, year + 2),     # leakage 위험(입주예정 대리)
         }
+        if self.jobs is not None:
+            jf = self.jobs.features(c, entry_ym)
+            x.update({k: jf.get(k) for k in ("jobs_emd", "jobs_3km", "jobs_growth5")})
         t1 = t + HORIZON
         p1 = smooth_price(s, t1) if t1 < N_MONTHS else None
         target = math.log(p1 / p0) if p1 else None

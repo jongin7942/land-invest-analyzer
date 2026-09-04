@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from apt_engine.db.connection import get_conn  # noqa: E402
-from apt_engine.exitprice import model as model_mod, panel as panel_mod  # noqa: E402
+from apt_engine.exitprice import jobs as jobs_mod, model as model_mod, panel as panel_mod  # noqa: E402
 from apt_engine.relative import store  # noqa: E402
 from apt_engine.relative.store import median, percentile  # noqa: E402
 
@@ -46,10 +46,12 @@ def main() -> int:
         store.attach_academies(cx)
         jeonse = store.load_jeonse(conn, set(prices))
         stations = panel_mod.load_stations(conn)
-    pb = panel_mod.PanelBuilder(cx, prices, jeonse, stations)
+        jobs = jobs_mod.Jobs(cx, conn)
+    print(f"[일자리] 스냅샷 {jobs.yms} · 법정동 코드 매핑 {len(jobs.code_of)}")
+    pb = panel_mod.PanelBuilder(cx, prices, jeonse, stations, jobs=jobs if jobs.available else None)
     rows = pb.build(ENTRY_YEARS)
     with_t = [r for r in rows if r.target is not None]
-    print(f"[패널] 행 {len(rows)} · 목표 있음 {len(with_t)} · 진입연도 {ENTRY_YEARS[0]}~{ENTRY_YEARS[-1]} ({time.time()-t0:.0f}s)")
+    print(f"[패널] 행 {len(rows)} · 목표 있음 {len(with_t)} · 진입연도 {ENTRY_YEARS[0]}~{ENTRY_YEARS[-1]} ({time.time()-t0:.0f}s)", flush=True)
     miss = Counter(f for r in rows for f in panel_mod.FEATURES if r.x.get(f) is None)
     print("  결측 상위:", miss.most_common(6))
 
@@ -57,8 +59,8 @@ def main() -> int:
     bt = {}
     best = (None, None, -9)
     for name, feats in panel_mod.FEATURE_SETS.items():
-        for lam in lams:
-            res = model_mod.walk_forward(rows, feats, TEST_YEARS, lam)
+        res_by_lam = model_mod.walk_forward(rows, feats, TEST_YEARS, lams)
+        for lam, res in res_by_lam.items():
             ics = [v["ic"] for v in res.values() if v.get("ic") is not None]
             recs = [v["winner_recall"] for v in res.values() if v.get("winner_recall") is not None]
             maes = [v["mae"] for v in res.values() if v.get("mae") is not None]
@@ -72,7 +74,7 @@ def main() -> int:
             score = (summ["ic_mean"] or -9)
             if score > best[2]:
                 best = (name, lam, score)
-            print(f"  {name:10s} λ={lam:<4} IC {summ['ic_mean']} · Recall {summ['recall_mean']} · MAE {summ['mae_mean']} (시장중앙값 {summ['mae_market_only_mean']})")
+            print(f"  {name:10s} λ={lam:<4} IC {summ['ic_mean']} · Recall {summ['recall_mean']} · MAE {summ['mae_mean']} (시장중앙값 {summ['mae_market_only_mean']})", flush=True)
     print(f"[선택] {best[0]} λ={best[1]} (IC {best[2]})  ({time.time()-t0:.0f}s)")
 
     # ── 최종 적합(전 창) → 현재 예측 ──

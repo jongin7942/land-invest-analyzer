@@ -29,7 +29,7 @@ PK = "15083277"
 DETAIL_PK = "uddi:b5ac0771-a9e3-4ce0-9505-ad0439d97b79"
 PAGE = f"{BASE}/data/{PK}/fileData.do"
 DIR = ROOT / "logs" / "nps"
-OUT = ROOT / "rules" / "nps_jobs_by_emd.csv"
+OUT = ROOT / "rules" / "nps_jobs_by_emd.csv"  # 실행마다 전체 재작성(캐시된 파일은 재집계)
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36")
 CAPITAL_SIDO = {"11", "28", "41"}
 
@@ -152,7 +152,13 @@ def main() -> int:
     picked = []
     for w in want:
         # 파일명 뒤 8자리 날짜 → 그 달 파일. 없으면 가장 가까운 달
-        cands = [(abs(int(n[-8:-2]) - int(w)), n, pk) for n, pk in hist if re.search(r"_\d{8}$", n)]
+        cands = []
+        for n, pk in hist:
+            m = re.search(r"_(\d{6})\d{2}$", n) or re.search(r"(\d{4})년\s*(\d{1,2})월", n)
+            if not m:
+                continue
+            ym = m.group(1) if len(m.groups()) == 1 else f"{m.group(1)}{int(m.group(2)):02d}"
+            cands.append((abs(int(ym) - int(w)), n, pk))
         if cands:
             d, n, pk = min(cands)
             if d <= 2:
@@ -169,7 +175,7 @@ def main() -> int:
         agg = aggregate(p)
         for (code, ym), (wp, ins, amt) in agg.items():
             rows_out.append({"emd_cd10": code, "sido_cd": code[:2], "sgg_cd": code[:5], "ym": ym,
-                             "workplaces": wp, "insured": ins, "notice_amount": amt, "file": n[-8:]})
+                             "workplaces": wp, "insured": ins, "notice_amount": amt, "file": n[-12:]})
         print(f"  집계 {n[-8:]}: 법정동 {len({c for (c, _) in agg})} · 가입자 {sum(v[1] for v in agg.values()):,}")
     if rows_out:
         with OUT.open("w", encoding="utf-8", newline="") as f:

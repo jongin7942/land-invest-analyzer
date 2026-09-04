@@ -89,10 +89,36 @@ def load_options() -> dict[int, OptionInput]:
     return out
 
 
+@dataclass
+class Prediction:
+    bear: float
+    base: float
+    bull: float
+    model: str
+    status: str
+
+
+def load_predictions() -> dict[tuple[int, str], Prediction]:
+    """Exit Price Engine(§12, tools/run_exit_price.py) 의 5년 배율. 없으면 빈 dict → 무성장 Base."""
+    out: dict[tuple[int, str], Prediction] = {}
+    p = RULES / "exit_price_2026.csv"
+    if not p.exists():
+        return out
+    with p.open(encoding="utf-8", newline="") as f:
+        for r in csv.DictReader(f):
+            out[(int(r["complex_id"]), r["band"])] = Prediction(
+                float(r["bear_factor"]), float(r["base_factor"]), float(r["bull_factor"]), r["model"], r["status"])
+    return out
+
+
 def build(base_price: int, *, relative: RelativeInput | None, option: OptionInput | None,
-          adjust: dict[str, float] | None = None) -> ExitSet:
-    factors = adjust or PRICE_ADJUST
-    notes: list[str] = ["Base = 현재 대표가격(명목 무성장). Fundamental Exit Price 미구현 — 성장률을 지어내지 않음"]
+          adjust: dict[str, float] | None = None, prediction: Prediction | None = None) -> ExitSet:
+    if prediction is not None:
+        factors = {"Bear": prediction.bear, "Base": prediction.base, "Bull": prediction.bull}
+        notes: list[str] = [f"Base/Bear/Bull = Exit Price Engine 예측(잔차 P50/P20/P80) · {prediction.model} · {prediction.status}"]
+    else:
+        factors = adjust or PRICE_ADJUST
+        notes = ["Base = 현재 대표가격(명목 무성장). Exit Price Engine 예측 없음 — 성장률을 지어내지 않음"]
     uplift, rstatus = 0.0, "N/A"
     if relative is not None and relative.mispricing is not None:
         conf = CONFIDENCE_FACTOR.get(relative.status.split("(")[0], 0.0)
