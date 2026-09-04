@@ -104,7 +104,9 @@ def main() -> int:
     summary = {
         "pool": len(pool), "computed": len(ranked), "not_computed": len(rows) - len(ranked),
         "prob_note": exit_price.PROB_NOTE,
-        "top20_by_tw": [{k: r[k] for k in ("tw_rank", "score_rank", "name", "band", "price", "self_capital", "relative_uplift", "relative_status", "relative_label", "option_stage", "expected_tw", "wealth_floor")} for r in ranked[:20]],
+        "top20_by_tw": [{k: r[k] for k in ("tw_rank", "score_rank", "name", "band", "price", "self_capital", "relative_uplift", "relative_status", "relative_label", "option_stage", "expected_tw", "wealth_floor", "exit_model", "exit_base")} for r in ranked[:20]],
+        "model_priced": sum(1 for r in ranked if not r["exit_model"].startswith("NONE")),
+        "positive_tw": sum(1 for r in ranked if (r["expected_tw"] or 0) > 0),
         "biggest_movers": sorted([{"name": r["name"], "band": r["band"], "score_rank": r["score_rank"], "tw_rank": r["tw_rank"], "move": r["score_rank"] - r["tw_rank"], "relative_uplift": r["relative_uplift"]} for r in ranked], key=lambda x: -abs(x["move"]))[:15],
         "uplift_applied": sum(1 for r in ranked if r["relative_uplift"] > 0),
         "option_applied": sum(1 for r in ranked if r["option_applied"]),

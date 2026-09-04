@@ -48,6 +48,7 @@ EXAM_KEYWORDS = ("입시", "보습", "교과", "논술", "종합")
 SOURCES = [
     (ROOT / "rules" / "gg_academies.csv", ("WGS84위도", "WGS84경도", "교습과정명", "소재지지번주소")),
     (ROOT / "rules" / "academies_all.csv", ("위도", "경도", "교습과정명", "소재지지번주소")),
+    (ROOT / "rules" / "academies_neis.csv", ("lat", "lon", "course", "addr")),   # NEIS 서울·인천 입시계열 19,023
 ]
 
 

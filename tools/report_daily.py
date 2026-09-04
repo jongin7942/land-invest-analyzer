@@ -86,9 +86,10 @@ def main() -> int:
 
     # ── 4. TW 상위 ──
     tw_rows = "".join(
-        f"<tr><td>{r['tw_rank']}</td><td>{esc(r['name'])} {r['band']}</td><td>{r['price']/1e8:.2f}억</td><td>{eok(r['expected_tw'])}</td><td>{eok(r['wealth_floor'])}</td><td>{r.get('score_rank') or '—'}</td></tr>"
+        f"<tr><td>{r['tw_rank']}</td><td>{esc(r['name'])} {r['band']}</td><td>{r['price']/1e8:.2f}억</td><td>{(r.get('exit_base') or 0)/max(r['price'],1):.2f}배</td><td>{eok(r['expected_tw'])}</td><td>{eok(r['wealth_floor'])}</td><td>{r.get('score_rank') or '—'}</td></tr>"
         for r in (tw.get("top20_by_tw") or [])[:10])
-    pos = sum(1 for r in (tw.get("top20_by_tw") or []) if (r.get("expected_tw") or 0) > 0)
+    pos = tw.get("positive_tw", sum(1 for r in (tw.get("top20_by_tw") or []) if (r.get("expected_tw") or 0) > 0))
+    model_priced = tw.get("model_priced")
 
     page = f"""<title>아파트 엔진 오늘의 보고</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&family=Noto+Serif+KR:wght@700&display=swap">
@@ -156,8 +157,8 @@ ul{{padding-left:18px;margin:6px 0;}} li{{margin:3px 0;}}
 </div>
 
 <div class="card"><h2>5년 뒤 순자산이 가장 큰 후보 10 (3억 프로필, 기존 TOP100 안에서)</h2>
-<div class="tbl"><table><tr><th>TW순위</th><th>단지</th><th>가격</th><th>기대 순이익</th><th>최악(Bear)</th><th>점수순위</th></tr>{tw_rows}</table></div>
-<p class="muted">기대 순이익이 양수인 후보 {pos}개(상위 20 중). 세금·이자·복비를 다 뺀 5년 뒤 순이익입니다. 아직 '연구 후보'이며 실제 매물·전세 확인 전입니다.</p>
+<div class="tbl"><table><tr><th>TW순위</th><th>단지</th><th>가격</th><th>5년 뒤 Base</th><th>기대 순이익</th><th>최악(Bear)</th><th>점수순위</th></tr>{tw_rows}</table></div>
+<p class="muted">100개 중 가격 엔진 예측이 붙은 후보 {model_priced}개, 기대 순이익 양수 {pos}개. 세금·이자·복비를 다 뺀 5년 뒤 순이익(3억 프로필, 금리 4%)입니다. 예측이 없는 후보는 무성장으로 계산돼 뒤로 밀립니다. 아직 '연구 후보'이며 실제 매물·전세 확인 전입니다.</p>
 </div>
 
 <div class="card"><h2>이번에 바뀐 것</h2><ul>
