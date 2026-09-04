@@ -1,6 +1,8 @@
 # 수도권 아파트 투자 추천 엔진 — MASTER SPEC
 
-업데이트 기준일: 2026-09-03
+업데이트 기준일: 2026-09-04 (v2026-09-04a — 정비사업 Option Value Engine DELTA v0.1 병합, 섹션 번호 재정렬)
+
+> 이 문서가 단일 기준문서(Single Source of Truth)다. 병합 전 원본은 git `b22a2e0`(`spec/MASTER_SPEC.md`, 2026-09-03판)이고, 병합 diff·회귀결과는 `RESEARCH_LOG_REDEVELOPMENT_OPTION_v0.1.md`에 있다. 변경 이력은 §35.
 
 ## 1. 최종 목표
 
@@ -12,6 +14,8 @@
 
 단지 자체의 우수성보다 **현재 가격에서의 투자상품성**을 평가한다. 동일 단지도 진입가격이 다르면 다른 투자상품이다.
 
+재건축·재개발·리모델링 등 정비사업의 가치는 이 목적함수의 **하위 요소**다(§14). 독립적인 정성 가점으로 작동하지 않으며, 검증된 확률 × 순증 Terminal Wealth로만 들어온다.
+
 ---
 
 ## 2. 실행 순서
@@ -22,10 +26,25 @@
 4. 실제 매물/정상체결가격 Asset Availability Gate
 5. CORE 투자지표 계산
 6. 5년 Future Choice Set / Buyer Depth / Price Runway 계산
-7. Liquid Exit Price 및 Terminal Wealth 추정
-8. 동일 자기자본 대안 비교
-9. CASH 포함 순위 산출
-10. TOP10/TOP20 및 Good Buy 가격 제시
+7. 정비사업 Option Value Engine — Stage·확률·사업성·분담금·기간 → 시나리오별 ΔTW (§14)
+8. Liquid Exit Price 및 Terminal Wealth 추정 (시나리오 트리 확률가중)
+9. 동일 자기자본 대안 비교
+10. CASH 포함 순위 산출
+11. TOP10/TOP20 및 Good Buy 가격 제시
+
+레이어 관계:
+
+```text
+CORE 6
+    ↓
+Base Asset Value (정비사업 미반영 기준가치)
+    ↓
+Redevelopment / Reconstruction Option Engine (§14)
+    ↓
+Scenario-specific Liquid Exit Price (§12)
+    ↓
+Terminal Wealth (§13)
+```
 
 ### Investable Universe 식별·재사용 규칙
 
@@ -41,12 +60,14 @@
 - 사용자가 많이 언급한 지역/아파트에 Alpha 가점을 주지 않는다.
 - `UserMentionCount`, `ResearchFrequency`, `WatchlistStatus`, `ManualInterest`는 FORBIDDEN FEATURES.
 - 호재 이름 자체에 점수를 주지 않는다. 실제 가격·수요·소득·거래·전세·구매력 변화로 반영될 때만 인정한다.
+- 정비사업 관련 문구 자체에도 점수를 주지 않는다. 다음 표현만으로는 어떤 점수도 올리지 않는다: `재건축 기대`, `재개발 기대`, `역세권 재건축`, `안전진단 추진`, `주민들이 추진 중`, `GTX 수혜 + 재건축`, `종상향 가능`, `용적률 완화 가능`, `정비사업 후보`, `노후계획도시 수혜`. 공식적·정량적 증거가 없으면 `OPTION_STATUS = UNVERIFIED`, `OPTION_VALUE = NOT_CALCULATED`로 둔다(§14.1).
 - 토허·실거주 제한은 점수 감점이 아니라 실행 Gate다.
 - 현재 호가와 실거래를 혼합하지 않는다.
 - 평형·타입을 섞은 연평균 가격을 사용하지 않는다.
 - 단일 고가/저가 거래를 정상가격으로 사용하지 않는다.
 - 과거 백테스트에서 미래 정보를 사용하지 않는다.
 - 서울/경기/인천·신축/재건축 같은 라벨 자체에 보너스를 주지 않는다.
+- `UNKNOWN`을 0이나 중간값으로 임의 치환하지 않는다(§32). 0으로 확정하는 것도 임의 치환이다.
 
 ---
 
@@ -72,6 +93,20 @@
 
 나머지 변수는 이 6개를 계산하는 하위 변수로 둔다.
 
+### 4.7 실측으로 유지 중인 하위 변수 (2026-09-04 로컬 엔진 기준)
+아래 변수는 이름에 가점을 주는 것이 아니라 **실측된 효과**만큼만 CORE의 하위 변수로 들어간다. 이 DELTA 병합으로 바뀌지 않는다.
+
+| 하위 변수 | 소속 CORE | 실측 근거 | 상태 |
+|---|---|---|---|
+| 역 접근 드리프트(`station_access_drift`) | Buyer Depth / Exit Liquidity | 거리 밴드별 시군구 대비 연간 드리프트(~500m +0.13%p/년 … 2km 밖 −0.15%p/년), 개통 자체 효과 ≈ 0(117건) | VERIFIED(표본 얇은 밴드 confidence 하향) |
+| 학원가 밀도(`academy_density`) | Buyer Depth(학군 수요) | 경기 상위 5% +0.32%p/년(17년 +87% vs 하위 50% +48%); 서울·인천 좌표 결합 진행 중 | PROXY(경기만 VERIFIED) |
+| 학업성취도·진학실적 | Buyer Depth(학군 수요) | 초품아(거리)보다 성취도·진학실적 우선 원칙. 데이터 원천 미확보 | UNKNOWN(원천 필요) |
+| 하락기 상대 방어력(`crash_resilience`) | Downside Floor | 2021~22 고점 → 2023 저점 낙폭의 시군구 대비 실측. 상승 신호로 쓰지 않음 | VERIFIED |
+| 병원·공원·초등학교 거리 | — | 실측 효과 없음 또는 역세권과 중복 → 점수 미반영 | 측정 완료, 미채택 |
+| 산업단지 지정 | — | 측정 가능 표본 4건 | UNKNOWN |
+
+정비사업 Option Value는 **7번째 CORE가 아니다.** CORE 6은 정비사업이 없다고 가정한 Base Asset Value를 만들고, Option Value는 그 위의 별도 레이어(§14)에서 시나리오별 Terminal Wealth로만 들어온다. 정비사업 기대가 검증되지 않은 후보의 CORE 점수를 올리지 않는다.
+
 ---
 
 ## 5. Price Runway 엔진
@@ -88,6 +123,9 @@
 
 ### Buyer-Supported Upside
 `min(회복가능 상대가격, 구매력 천장가격, 미래 경쟁대체재 허용가격) - 현재 정상가격`
+
+### Price Runway와 Option Value의 분리
+Price Runway는 **현재 자산 구조**(구축 그대로)에서 남은 가격여력이다. Option Value는 정비사업 사건이 일어났을 때 추가되는 비대칭 수익이다. 두 값을 합치지 않고, 정비사업 기대를 Runway에 넣지 않는다. 정비사업 기대가 이미 최근 거래가격에 들어 있으면 그것은 `Already Priced In`이며 §14.9의 `option_already_priced_ratio`로 관리한다.
 
 ---
 
@@ -117,7 +155,7 @@
 
 ## 7. 구매자 예산 전이
 
-가격전파를 ‘대장 상승’ 자체가 아니라 **구매자 예산군 이동**으로 모델링한다.
+가격전파를 '대장 상승' 자체가 아니라 **구매자 예산군 이동**으로 모델링한다.
 
 - 지역 내 첫 매수
 - 지역 내 갈아타기
@@ -177,6 +215,9 @@ Same-Budget Size Choice와 Future Choice Set에 반영한다.
 - Buyer Pool, 공급위험, Exit Liquidity, Price Stretch 등 CORE 입력값을 FCP에서 그대로 다시 사용해 이중 가중하지 않는다.
 - Confidence는 자산가치 보너스가 아니라 측정오차 확대, 보수적 할인, 결과 신뢰구간에 사용한다.
 
+### 정비사업 완료 후 대체재 집합
+정비사업 완료 후 가격(§14.6 `POST_REDEV_LIQUID_EXIT_PRICE`)의 비교집합은 이 Future Choice Set 논리를 그대로 쓴다: ① 동일 생활권 신축 ② 인접 상위 생활권 준신축 ③ 동일 역세권 신축 ④ 미래 입주시점 경쟁 신축 ⑤ 동일 평형·동일 총액 구매자 선택집합. 주변 최고가를 단순 복사하지 않는다. 같은 대체재 집합을 FCP와 Option Engine에서 각각 다른 목적(현 자산의 경쟁위치 vs 신축 전환 후 가격)으로 쓰되, 신축 전환 가치를 FCP 점수에 다시 넣지 않는다.
+
 ---
 
 ## 11. Settlement Strength
@@ -205,6 +246,9 @@ Same-Budget Size Choice와 Future Choice Set에 반영한다.
 - 돌파↓ 유지↑ : Quiet Compounder
 - 돌파↓ 유지↓ : Value Trap
 
+### 정비사업 뉴스와 Settlement
+정비사업 기대감으로 가격이 한 번 급등했다고 Settlement가 된 것이 아니다. Settlement 판정 기준은 그대로다: 반복 정상거래, 가격 하단 이동, Median 이동, 충분한 거래량, 취소/직거래 이상치 제거. 옵션 뉴스 뒤의 단일 고가 거래는 `SETTLEMENT = UNKNOWN` 또는 `EVENT_SPIKE_ONLY`로 분류하고 정착 증거로 쓰지 않는다.
+
 ---
 
 ## 12. Exit Price Engine
@@ -229,6 +273,17 @@ Same-Budget Size Choice와 Future Choice Set에 반영한다.
 
 투자수익 계산 기본값은 Liquid Exit Price를 사용한다.
 
+### 5년 시점 잔여 옵션가치
+정비사업 후보의 5년 후 매도가격은 신축가가 아니라 **그 시점 매수자가 당시 Stage를 얼마로 평가하는가**다.
+
+```text
+EXIT_VALUE_AT_YEAR_5 =
+    Base_Asset_Value_Year5
+  + Market_Value_of_Remaining_Option_At_Year5
+```
+
+5년 안에 준공되지 않는다고 Option Value를 0으로 만들지 않고, "15년 뒤 신축가" 전체를 5년 투자자에게 귀속시키지도 않는다. `Market_Value_of_Remaining_Option_At_Year5`는 §14.7의 Stage Premium 실측(지역·가격대·사업유형별)으로 추정하며, 실측이 없으면 `PROXY` 또는 `N/A`다.
+
 ---
 
 ## 13. Terminal Wealth
@@ -238,6 +293,19 @@ Same-Budget Size Choice와 Future Choice Set에 반영한다.
 `Terminal Wealth = 현실적 매도가 - 남은대출 - 양도세 - 매도중개비 - 보유기간 이자 - 취득비용 - 보유비용 - 수리/정비비 + 보유기간 현금흐름 + 미사용 현금 미래가치`
 
 CASH도 하나의 실제 후보로 포함한다.
+
+### 시나리오 확률가중
+정비사업 후보는 시나리오별 TW를 따로 계산하고 확률가중한다.
+
+```text
+TW_BASE      정비사업 진전 없음(구축 그대로 5년 보유)
+TW_PROJECT   사업 진전(§14.6 시나리오 트리의 해당 말단)
+TW_UPSIDE    강한 정책/종상향 확정
+
+EXPECTED_TW = Σ(P_scenario × TW_scenario)
+```
+
+정비사업이 없는 경쟁단지도 **같은 TW 구조**로 비교한다. 정비사업 후보에만 다른 계산식을 쓰지 않는다.
 
 ### Wealth Floor
 불리한 시나리오에서 예상되는 5년 후 순자산 하한.
@@ -255,7 +323,28 @@ CASH도 하나의 실제 후보로 포함한다.
 - 공격형: Expected Terminal Wealth와 Price Runway, Settlement Strength를 더 중시하고 하방·환금성 비중을 낮춤
 - 고공격형: Price Runway와 상승 정착을 가장 강하게 반영하는 후보 발굴용 프로필. 실제 레버리지·세후 Terminal Wealth 검증 전에는 최종 매수순위로 사용하지 않음
 
-정비사업·교통호재 등 정성 `Optionality`는 직접 가점으로 사용하지 않는다. 검증된 사업확률·기간·분담금·순증가치를 시나리오별 Terminal Wealth에 반영할 때만 인정한다.
+정비사업·교통호재 등 정성 `Optionality`는 직접 가점으로 사용하지 않는다. 정비사업은 §14의 `OPTION_VALUE`(검증된 사업확률·기간·분담금·순증가치의 시나리오별 TW 반영)로만 인정한다. (기존 `Optionality` 변수명은 `OPTION_VALUE`로 통일한다.)
+
+### Opportunity Cost — 기다리는 비용
+정비사업 후보는 기다리는 동안 자본이 묶인다. 반드시 다음을 비교한다.
+
+```text
+TW_RECONSTRUCTION_CANDIDATE  vs  TW_BEST_NON_RECONSTRUCTION_ALTERNATIVE
+```
+
+사업이 성공해도 기다리는 동안 다른 아파트가 더 많이 오르면 좋은 투자가 아니다. 핵심 질문은 §1과 같다: 같은 자기자본으로 더 좋은 선택이 있었는가?
+
+### Hold vs Switch — 이미 보유한 자산
+이미 보유한 자산(정비사업 후보 포함)은 매수순위와 별도로 계산한다.
+
+```text
+SWITCH_ALPHA = TW_ALTERNATIVE_AFTER_SWITCH_COSTS − TW_HOLD
+```
+
+- `TW_HOLD`에는 현재 보유 자산의 `OPTION_VALUE`(§14)를 포함한다. 계산되지 않았으면 `N/A`로 두고 결론을 내지 않는다.
+- `TW_ALTERNATIVE_AFTER_SWITCH_COSTS`에는 양도비용·세금·중개보수·기존대출 상환·신규 취득세·신규 중개비·법무비·신규 금융비·수리/이사비·남는 현금 미래가치를 전부 포함한다.
+- 다른 후보의 Expected Return이 높다는 이유만으로 갈아타기를 권하지 않는다. 대안은 Settlement Evidence를 통과해야 하고, SWITCH_ALPHA가 거래비용·세금을 다 이긴 뒤 의미 있게 양(+)일 때만 갈아타기 후보다.
+- 보유 자산은 스크리닝 대표가가 아니라 **실제 매수가**로, 대안은 **지금 실제로 살 수 있는 가격**으로 넣는다.
 
 ### 순위 안정성 출력
 
@@ -270,7 +359,325 @@ CASH도 하나의 실제 후보로 포함한다.
 
 ---
 
-## 14. Good Buy 가격
+## 14. 정비사업 Option Value Engine (재건축·재개발·리모델링) — v0.1
+
+### 14.0 목적과 위치
+정비사업 가능성을 무시하지도, 이름만 보고 점수를 주지도 않는다. 정비사업은 CORE 점수가 아니라 **확률가중 Option Value**로 평가한다.
+
+- "재건축 가능"이라는 문구 자체에는 점수를 주지 않는다.
+- 사업단계가 올라갈수록 사업확률이 바뀐다.
+- 용적률·대지지분·일반분양·분담금·사업기간을 계산한다.
+- 실제 가치 증가는 Terminal Wealth 시나리오에만 반영한다.
+- 같은 정비사업 기대를 Price Runway, Settlement, Optionality 등 여러 항목에서 중복 계산하지 않는다.
+
+정식 원칙:
+
+```text
+OPTION_VALUE = PROBABILITY × INCREMENTAL_TERMINAL_WEALTH
+             − DELAY / CONTRIBUTION / FINANCING / EXECUTION RISK
+```
+
+정확한 질문은 "되면 대박인가"가 아니라 **"현재 가격에 비해, 사업이 진전될 확률 × 진전됐을 때의 순증가치가 얼마인가"**다.
+
+### 14.1 검증되지 않은 옵션
+공식적·정량적 증거가 없으면:
+
+```text
+OPTION_STATUS = UNVERIFIED
+OPTION_VALUE  = NOT_CALCULATED
+```
+
+0점으로 확정하지 않는다. `UNKNOWN`을 0이나 중간값으로 치환하지 않는다(§3, §32).
+
+### 14.2 Option Stage Ladder
+모든 재건축·재개발·리모델링 후보는 같은 사다리를 쓴다. 코드의 한글 단계(`redev.stage.STAGES`)는 아래 `option_stage`로 매핑해 저장한다.
+
+| option_stage | option_stage_label | 진입 기준(예) | 코드 한글 단계 매핑 |
+|---:|---|---|---|
+| 0 | PRE_PROJECT | 공식 절차 없음. 노후·주민 관심·역세권·용적률 완화 가능성·정비구역 미지정 | 미지정 |
+| 1 | POLICY_ELIGIBLE | 공식 역세권 정비대상 범위 포함, 도시기본계획·정비기본계획 반영, 노후계획도시 대상, 공식 용도지역 상향 검토, 지자체가 정비 가능 대상으로 명시, 정비예정구역 | (신설) 정비예정구역 |
+| 2 | EARLY_PROJECT | 주민설명회, 추진 준비위, 동의서 모집, 안전진단 신청, 정비계획 입안 제안, 신탁방식 사업제안 | 예비안전진단·정밀안전진단(신청/진행) |
+| 3 | FORMAL_ENTRY | 정비계획 입안, 안전진단 통과, 정비구역 지정, 추진위원회 승인 | 정비구역지정·추진위원회 |
+| 4 | OPERATOR_FORMED | 조합설립인가, 사업시행자 지정, 신탁 사업시행자 지정 | 조합설립 |
+| 5 | PROJECT_APPROVED | 사업시행인가, 건축계획 확정, 세대수·평형·분담금 추정 가능 | 사업시행인가 |
+| 6 | DISPOSITION_APPROVED | 관리처분인가, 분양신청 완료 | 관리처분인가 |
+| 7 | CONSTRUCTION | 이주·철거·착공 | 이주철거·착공 |
+| 8 | NEAR_COMPLETE | 준공·입주 임박 또는 완료. Option Value가 아니라 신축 자산가치로 전환 | 준공 |
+
+- Stage 1은 단순 언론기사보다 공식 고시·계획·조례를 우선한다.
+- Stage 2는 주민 카페·중개업소 말만으로 승격하지 않는다.
+- Stage 0에서는 사업성 계산을 할 수 있어도 사업확률을 높게 두지 않는다.
+- 각 Stage에는 `stage_verification = VERIFIED | PROXY | HEURISTIC | UNKNOWN`과 출처·일자를 붙인다. 공식 등록부(서울 정보몽땅, 경기데이터드림 추진현황, 인천 renewal)에서 확인되면 VERIFIED, 단지-사업 매칭이 불확실하면 PROXY_MATCH.
+
+### 14.3 Option Probability
+Stage 숫자를 그대로 확률로 쓰지 않는다.
+
+```text
+PROJECT_PROBABILITY = f(
+    stage,
+    regulatory_feasibility,        # 규제·용도지역·조례
+    physical_feasibility,          # 대지·용적률·구조
+    economic_feasibility,          # 일반분양·분담금·비례율
+    resident_alignment,            # 동의율·갈등
+    financing_feasibility,         # 시공사·신탁·금융
+    historical_stage_conversion_rate   # 과거 단계별 전환율(학습)
+)
+```
+
+가능하면 실제 과거 정비사업의 **단계별 전환율**을 학습한다. 데이터가 없으면 정밀한 확률을 지어내지 않고 `probability_status = VERIFIED | PROXY | HEURISTIC | UNKNOWN`을 값과 함께 저장한다. 현재(2026-09-04) 전환율 데이터는 없으므로 모든 후보의 `probability_status = UNKNOWN`이다.
+
+### 14.4 사업성 계산
+정비사업의 핵심은 "오래됐다"가 아니라 **실제 신축 가능한 면적과 일반분양 여력**이다.
+
+최소 입력 (기존 코드 변수와의 대응은 §14.10):
+
+```text
+site_area                 대지면적
+existing_households       기존 세대수
+existing_floor_area       기존 연면적
+existing_far              현재 용적률
+land_share_per_unit       세대당 대지지분
+allowed_far_base          현행 허용 용적률
+allowed_far_policy        정책·조례상 완화 용적률
+expected_new_gfa          신축 연면적
+expected_new_households   신축 세대수
+expected_member_units     조합원 분양
+expected_general_sale_units   일반분양
+```
+
+#### 용적률 시나리오 (단일값 금지)
+```text
+FAR_BASE    현행 도시계획·현행 허용 용적률 (코드 far.KINDS: 조례 / 법정상한)
+FAR_POLICY  공식 정책·조례상 적용 가능한 완화 (역세권특례 등, STATION_POLICY=VERIFIED_APPLICABLE일 때)
+FAR_UPSIDE  추가 종상향·역세권 특례 등이 실제 확정될 경우
+```
+정비계획에 용적률이 확정되어 있으면(far.KINDS `정비계획`) 그 값이 해당 시나리오의 확정값이다. UPSIDE는 공식 근거가 없으면 확률을 부여하지 않는다.
+
+#### 세대수 (정비계획 값이 있으면 그것을 우선)
+```text
+NEW_GFA         = SITE_AREA × ALLOWED_FAR
+RESIDENTIAL_GFA = NEW_GFA × RESIDENTIAL_RATIO
+NEW_HOUSEHOLDS  = RESIDENTIAL_GFA / AVG_NEW_UNIT_GFA
+```
+
+#### 일반분양 여력
+```text
+GENERAL_SALE_UNITS = NEW_HOUSEHOLDS − MEMBER_ALLOCATION − PUBLIC/RENTAL_ALLOCATION − OTHER_REQUIRED_ALLOCATION
+GENERAL_SALE_RATIO = GENERAL_SALE_UNITS / EXISTING_HOUSEHOLDS
+```
+일반분양이 적거나 음수이면 "재건축 가능성"과 "재건축 경제성"을 분리해 표시한다.
+
+#### 1:1 재건축 테스트 (필수)
+```text
+ONE_TO_ONE_FEASIBILITY = NEW_MEMBER_CAPACITY >= EXISTING_MEMBER_DEMAND
+```
+기존 조합원조차 수용하지 못하면 `RECONSTRUCTION_ECONOMICS = STRUCTURALLY_WEAK`. 단, 종상향·완화 시나리오에서는 다시 계산한다.
+
+#### 입력값의 역할 — 독립 가점 금지
+- **대지지분**은 독립 호재점수가 아니다. `LAND_SHARE → MEMBER_RIGHT → DEVELOPMENT_CAPACITY → CONTRIBUTION → OPTION_VALUE` 경로의 입력값일 뿐이며 별도 점수로 다시 더하지 않는다.
+- **현재 용적률이 낮다**는 사실도 독립 가점하지 않는다. `EXISTING_FAR + ALLOWED_FAR + SITE_AREA + MEMBER_COUNT`로 추가 개발가능 면적을 계산한다.
+- **연식(노후도)**은 독립 상승요인이 아니다. 양(+)으로는 정비사업 Eligibility에만, 음(−)으로는 상품성 저하·수선비·전세 경쟁력 저하·Buyer Pool 감소로 작동한다. 음의 효과는 Downside Floor·Exit Liquidity(CORE)에서 이미 반영하므로 Option Engine에서 다시 빼지 않는다. 정비사업 확률이 낮은 오래된 아파트는 결과적으로 패널티가 될 수 있다.
+
+### 14.5 분담금·공사비·기간·지연
+#### 분담금 Engine
+```text
+TOTAL_PROJECT_COST, GENERAL_SALE_REVENUE, OTHER_REVENUE,
+MEMBER_CONTRIBUTION_TOTAL, MEMBER_CONTRIBUTION_PER_UNIT
+MEMBER_CONTRIBUTION = NEW_UNIT_VALUE − MEMBER_RIGHT_VALUE     (사업 전체 수지와 교차검증)
+```
+포함 비용: 공사비, 금융비, 설계비, 조합운영비, 철거비, 각종 부담금, 이주비 금융비용, 예비비, 사업지연 비용.
+
+#### 공사비 Stress Test (최소 3개)
+```text
+CONSTRUCTION_COST_BASE / CONSTRUCTION_COST_STRESS / CONSTRUCTION_COST_SEVERE
+```
+공사비 상승에 따른 분담금 증가를 계산한다. (기존 `redev.scenario.KEYS = 보수/기준/낙관`은 이 세 단계로 통일: 낙관→BASE, 기준→STRESS, 보수→SEVERE. 기존 배율은 관측치가 아닌 감도 가정이므로 `HEURISTIC`으로 표시한다.)
+
+#### 사업기간 Engine
+```text
+YEARS_TO_NEXT_STAGE / YEARS_TO_APPROVAL / YEARS_TO_COMPLETION
+```
+완공까지 15년 걸리는 5억과 5년 걸리는 5억의 미래가치를 같게 보지 않는다. 기존 `stage_duration_ref`(단계별 소요기간 참조)를 이 세 변수의 원천으로 쓴다.
+
+#### Delay Cost
+```text
+DELAY_COST = Financing Cost + Opportunity Cost + Additional Maintenance + Construction Inflation + Regulatory Risk
+```
+사업기간이 늘수록 Option Value를 할인한다.
+
+#### Option Decay
+진전이 없는 구축은 Option Value가 시간이 지나며 줄 수 있다.
+```text
+OPTION_DECAY = No_Stage_Progress + Rising_Construction_Cost + Resident_Disagreement + Policy_Reversal + New_Supply_Competition
+```
+장기간 Stage 0~1에 머물면 `AGING_DISCOUNT > OPTION_PREMIUM`이 될 수 있다. 기존 코드의 정체 판정(`STALL_MONTHS = 36`)은 `No_Stage_Progress`의 입력이다.
+
+### 14.6 완료 후 가치 · 순증가치 · Option Value
+#### 완료 후 가격
+`POST_REDEV_LIQUID_EXIT_PRICE`: §10의 대체재 집합 5종으로 산출한 **실제 매도 가능한** Liquid Exit Price. 평균 호가·주변 최고가 복사 금지.
+
+#### 순증가치
+```text
+NET_REDEVELOPMENT_UPSIDE =
+    Post_Project_Liquid_Exit_Value
+  − Base_Case_Liquid_Exit_Value
+  − Member_Contribution
+  − Extra_Taxes
+  − Financing_Cost
+  − Delay_Cost
+  − Required_Cash_Infusion
+```
+`신축가 − 현재가`로 계산하지 않는다.
+
+#### Option Value
+```text
+OPTION_VALUE = Σ[ Scenario_Probability × Net_Incremental_Terminal_Wealth ]
+```
+정책·사업·완공은 포함관계이므로 독립확률처럼 중복 합산하지 않는다. 시나리오 트리의 **말단 노드 확률(상호배타, 합 1)**로 구현한다.
+
+#### 권장 Scenario Tree
+```text
+BASE
+│
+├─ 정책 변화 없음
+│   └─ 기존 구축으로 5년 보유                          → TW_BASE
+│
+└─ 정책/계획 진전
+    │
+    ├─ 사업 중단
+    │   └─ 노후 구축 상태 (+ Option Decay)             → TW_ABANDON
+    │
+    └─ 사업 공식 진입
+        │
+        ├─ 지연                                       → TW_DELAY
+        │
+        └─ 정상 진행
+            │
+            ├─ 5년 내 미완공 (잔여 옵션가치로 매도)     → TW_PROJECT
+            │
+            └─ 완공 또는 가치 상당부분 선반영           → TW_COMPLETE
+```
+각 말단마다 §13 Terminal Wealth를 계산한다. 5년 규칙(§12)에 따라 미완공 말단의 매도가는 `EXIT_VALUE_AT_YEAR_5`다.
+
+#### 종상향 Option (별도 Branch)
+```text
+예: CURRENT_FAR 220% / BASE_ALLOWED_FAR 250% / UPZONING_ALLOWED_FAR 350%
+BASE_REDEV_VALUE, UPZONING_REDEV_VALUE 를 따로 계산
+UPZONING_OPTION_VALUE = P(UPZONING) × (UPZONING_TW − BASE_TW)
+```
+"350%가 될 수도 있다"는 말만으로 P를 부여하지 않는다.
+
+#### 역세권 특례
+역세권이라는 이유만으로 완화를 적용하지 않는다. 반드시 확인: 역세권 정의, 거리 기준, 측정 기준점(단지 경계/중심), 대상 용도지역, 적용 가능한 사업유형, 공공기여, 임대주택 의무, 최대 허용 용적률, 조례 시행일, 해당 필지 적용 여부.
+```text
+STATION_POLICY = VERIFIED_APPLICABLE | VERIFIED_NOT_APPLICABLE | POTENTIALLY_APPLICABLE | UNKNOWN
+```
+`VERIFIED_APPLICABLE`일 때만 FAR_POLICY에 들어가고, `POTENTIALLY_APPLICABLE`은 FAR_UPSIDE Branch에만 둔다.
+
+### 14.7 Stage Premium 실증
+Stage별 가격 프리미엄은 가능하면 실증으로 학습한다. 각 전환(PRE_PROJECT → FORMAL_ENTRY → OPERATOR → APPROVAL → DISPOSITION → CONSTRUCTION) 전후의 `단지/시군구`, `단지/생활권`, `단지/대체재` **상대가격** 변화를 측정한다. 단순 상승률은 금지(시장 전체 효과 제거).
+
+#### 지역 간 전이 금지
+서울에서 측정한 Stage Premium을 인천·경기에 그대로 적용하지 않는다. `REGION, PRICE_TIER, PROJECT_TYPE, INITIAL_FAR, LAND_SHARE, MARKET_CYCLE`로 분리하고, 표본이 부족하면 `STAGE_PREMIUM_STATUS = PROXY`.
+
+#### 현재 실측 상태 (2026-09-04, 시군구 중앙값 대비, ±12개월 창)
+| 지역 | 단계 | 표본 | 중앙값 Δ | 상태 |
+|---|---|---:|---:|---|
+| 서울 | 추진위 승인 | 29 | +4.6% | PROXY(표본 소) |
+| 서울 | 조합설립 | 50 | +1.2% | PROXY |
+| 서울 | 사업시행인가 | 27 | +3.0% | PROXY |
+| 서울 | 관리처분 | 18 | +2.9% | PROXY |
+| 서울 | 착공 | 7 | +7.3% | PROXY(표본 극소) |
+| 경기 | 정비구역지정/추진위/안전진단/관리처분/착공/준공 | 5~21 | −6%~+1% | PROXY(표본 극소, 방향 불일치) |
+| 인천 | 정비구역지정/추진위/조합설립 | 7~8 | −6%~+20% | PROXY(표본 극소) |
+어느 값도 확정 계수로 쓰지 않는다. 가격대·사업유형·초기 용적률 분리 전이라 `STAGE_PREMIUM_STATUS = PROXY`다.
+
+### 14.8 Pure Alpha / Executable · Data Confidence
+- 토허·실거주 의무가 있는 정비사업 후보도 Universe에서 삭제하지 않는다. `Pure Alpha = IN_UNIVERSE`, `Executable = BLOCKED`. 정비사업 가치가 아무리 높아도 Hard Gate(§16)를 통과시키지 않는다.
+- 모든 주요 입력에 `VERIFIED | PROXY | HEURISTIC | UNKNOWN`을 붙인다. Option Value가 높아도 근거가 약하면 순위에 직접 반영하지 않는다. Confidence는 기대수익을 올리는 점수가 아니라 오차폭을 넓히는 변수다(§32).
+
+### 14.9 Double Counting 방지
+다음 구조는 금지한다: `재건축 기대 → Price Runway +20 → Optionality +20 → Future Price +20`.
+
+- 정비사업 효과가 이미 최근 거래가격에 반영됐다면 그것은 Entry/Settlement 가격에 들어 있다. Option Engine은 **현재 가격에 아직 포함되지 않은 미래 순증분**만 계산한다.
+- `option_already_priced_ratio = 시장이 얹어 놓은 프리미엄(현재가 − 정비사업 미반영 기준가) / OPTION_VALUE`를 가능하면 추정한다. 기존 코드 `redev.naked.Premium(implied, expected_net, efficiency)`이 이 변수의 원천이며, `efficiency`의 역수 개념을 `option_already_priced_ratio`로 통일한다.
+- Price Runway(§5) ↔ Option Value: 분리, 합산 금지.
+- Settlement(§11) ↔ Option 뉴스 급등: 급등은 정착이 아님.
+- 대지지분·낮은 용적률·연식: 사업성 입력값일 뿐, 별도 점수 금지(§14.4).
+- 연식의 음(−) 효과: CORE(Downside/Exit)에서 한 번만.
+- Future Choice Set(§10) ↔ 완료 후 대체재 집합: 같은 집합을 다른 목적으로 쓰되 신축 전환가치를 FCP 점수에 재투입 금지.
+- Buyer Depth(§6): 정비사업으로 늘어나는 미래 구매자는 완료 후 Liquid Exit Price 안에 이미 들어 있으므로 Buyer Depth 점수에 다시 넣지 않는다.
+
+### 14.10 필수 출력 컬럼과 코드 변수 대응
+정비사업 후보별 최소 출력(`rules/option_stage_registry.csv` / 향후 `redev_option` 테이블):
+
+```text
+project_type, option_stage, option_stage_label, stage_verification,
+existing_far, existing_households, site_area, land_share,
+base_allowed_far, policy_allowed_far, upside_allowed_far,
+estimated_new_households, member_households, general_sale_units, general_sale_ratio,
+estimated_member_contribution, contribution_status,
+years_to_next_stage, years_to_completion,
+project_probability, probability_status,
+base_case_liquid_exit, project_case_liquid_exit, upside_case_liquid_exit,
+base_terminal_wealth, project_terminal_wealth, upside_terminal_wealth,
+net_project_upside, option_value, option_already_priced_ratio,
+option_data_confidence, option_research_status, option_research_priority
+```
+
+기존 코드 변수와의 정규화(같은 뜻은 하나로):
+
+| MASTER 변수 | 기존 코드 | 처리 |
+|---|---|---|
+| `option_stage` 0~8 | `redev.stage.STAGES` 한글 11단계, `redevelopment_project.stage` | 매핑표(§14.2) 추가, 한글 라벨은 `stage_label_kr`로 보존 |
+| `existing_far` | `redev_candidate.current_far`, `screening.Candidate.current_far` | `existing_far`로 통일 |
+| `land_share` | `redev_candidate.land_share_m2` | `land_share`(㎡)로 통일 |
+| `base/policy/upside_allowed_far` | `redev.far.KINDS`(정비계획/역세권특례/조례/법정상한), `redevelopment_project.planned_far` | KINDS→시나리오 매핑: 조례·법정상한→BASE, 역세권특례→POLICY(검증 시)/UPSIDE, 정비계획→해당 시나리오 확정값 |
+| `estimated_new_households / member_households / general_sale_units` | `feasibility.Feasibility.new_units / member_units / general_units` | 이름만 통일 |
+| `estimated_member_contribution` | `Feasibility.member_price − right_value`, `proportion_rate`(비례율) | 비례율은 보조 출력으로 유지 |
+| `CONSTRUCTION_COST_BASE/STRESS/SEVERE` | `redev.scenario.KEYS`(보수/기준/낙관) | 낙관→BASE, 기준→STRESS, 보수→SEVERE, 배율 `HEURISTIC` |
+| `years_to_*` | `redev.stage.Duration.months`, `stage_duration_ref` | 개월→년 환산 |
+| `option_already_priced_ratio` | `redev.naked.Premium.implied / efficiency` | §14.9 |
+| `option_value` | (기존) `Optionality`, `redev_mispricing` 모델 점수 | `Optionality`는 폐기·통일. `redev_mispricing`은 consensus 점수에서 제거 예정(§35 체크리스트) |
+| `probability_status / stage_verification` | `Project.verified`, `Project.data_grade` | 4단계 상태값으로 통일 |
+
+### 14.11 Quick Scan에서의 사용
+642 → 수천 개 Universe의 Quick Scan에서는 정밀 Option Value를 전부 계산하지 않는다. 다음만 **Option Deep Dive 연구대상**으로 올린다(랭킹 승격이 아니다).
+
+- A. 사업단계 증거: Stage 2 이상이 공식 확인됨
+- B. 구조적 사업성: 낮은 기존 용적률 + 충분한 대지 + 의미 있는 일반분양 가능성 — 실제 계산으로 확인된 경우만
+- C. 정책 Option: 공식 정책 변경으로 용적률·용도지역 변경 가능성이 구체화됨
+
+출력: `OPTION_RESEARCH_PRIORITY = HIGH | MEDIUM | LOW | NONE`. 이 값은 연구 순서일 뿐 점수·순위에 들어가지 않으며, §30의 Settlement Promotion Gate와 §33의 `NO_CHEAPNESS_PROMOTION`을 대체하지 않는다.
+
+#### Cheap Old Apartment 방지
+싸고 오래됐다는 이유만으로 정비사업 후보를 상위에 올리지 않는다. `Low Price + Old Age + Low Product Quality + No Settlement + No Official Project` 패턴은 `PERSISTENT_CHEAPNESS_RISK = HIGH`, `OPTION_PROMOTION = BLOCK`. Settlement Evidence 규칙(§30, §33)을 그대로 적용한다.
+
+### 14.12 회귀 예시
+부평 동아1차 76㎡급은 **회귀 테스트용 예시**일 뿐 특별대우하지 않는다. 모든 수도권 후보에 같은 규칙을 적용한다. 예시 결과와 다른 재건축 후보 10개 이상의 회귀 결과는 `RESEARCH_LOG_REDEVELOPMENT_OPTION_v0.1.md`에 둔다. 요지: `OPTION_STAGE = 0 / PRE_PROJECT`, 현재 용적률 약 219.5%·대지지분 약 14.1평은 `NEEDS_VERIFICATION`, 정비구역 미확인, 역세권 종상향은 `STATION_POLICY = POTENTIALLY_APPLICABLE`(개별 단지 적용 미확정), 350%는 `FAR_UPSIDE` 시나리오로만 존재 → `OPTION_VALUE = UNKNOWN / NOT_CALCULATED`이며 0으로 확정하지 않는다.
+
+### 14.13 연구 우선순위와 백테스트
+고도화 순서:
+1. 수도권 정비사업 전체 Registry 구축
+2. 단지별 현재 Stage 자동 매핑 ← `tools/build_option_stage_registry.py`(v0.1 구현)
+3. Stage별 과거 전환율
+4. Stage별 상대가격 변화 ← 서울·경기·인천 1차 실측(§14.7, PROXY)
+5. 사업기간 분포
+6. 기존/허용 용적률
+7. 대지지분
+8. 일반분양률
+9. 분담금
+10. 공사비 민감도
+11. 준공 후 Liquid Exit Price
+12. 5년 보유 시점 Remaining Option Value
+13. Terminal Wealth 통합
+14. Walk-Forward Backtest
+
+백테스트는 §17의 2015/2017/2019/2021/2023 시점을 그대로 쓰고, 각 시점에 알 수 있었던 정보만 사용한다(미래에 사업이 성공했다는 사실을 과거 평가에 넣지 않는다). 옵션 전용 KPI: `Option Value Calibration`, `Stage Conversion Calibration`, `False Positive Redevelopment Rate`, `Missed Redevelopment Winner Rate`. **Stage 0~1에서 싸 보였지만 5년간 아무 일도 없었던 구축**을 반드시 Failure Case로 포함한다.
+
+---
+
+## 15. Good Buy 가격
 
 적정 매수가를 과거 저점만으로 정하지 않는다.
 
@@ -281,9 +688,11 @@ CASH도 하나의 실제 후보로 포함한다.
 
 동일 아파트도 매수가에 따라 순위가 실시간으로 달라져야 한다.
 
+정비사업 후보의 Good Buy는 확률가중 `EXPECTED_TW`(§13)에서 역산하되, `OPTION_VALUE = NOT_CALCULATED`인 후보는 `TW_BASE`만으로 역산하고 그 사실을 표시한다.
+
 ---
 
-## 15. 토허 Hard Gate
+## 16. 토허 Hard Gate
 
 비거주 투자 기본 시나리오에서 국내 일반 토허 + 실거주 의무가 있으면 Executable Ranking에서 제외한다.
 
@@ -300,7 +709,7 @@ Pure Alpha Ranking에는 남겨 정책 변경 Watchlist로 관리한다.
 
 ---
 
-## 16. 백테스트 목표
+## 17. 백테스트 목표
 
 평가시점 후보 Universe를 고정한 뒤 2015/2017/2019/2021/2023 등에서 Walk-Forward 검증한다.
 
@@ -311,12 +720,13 @@ Pure Alpha Ranking에는 남겨 정책 변경 Watchlist로 관리한다.
 - Missed Better Alternative
 - Feature Survival
 - Gate False Negative
+- (정비사업, §14.13) Option Value Calibration · Stage Conversion Calibration · False Positive Redevelopment Rate · Missed Redevelopment Winner Rate
 
-‘그때 올랐는가’가 아니라 **같은 자기자본으로 더 좋은 선택이 있었는가**를 본다.
+'그때 올랐는가'가 아니라 **같은 자기자본으로 더 좋은 선택이 있었는가**를 본다.
 
 ---
 
-## 17. 현재 3억원 비거주 — 50개 유니버스 잠정 스크리닝 TOP10
+## 18. 현재 3억원 비거주 — 50개 유니버스 잠정 스크리닝 TOP10
 
 | 평균순위 | 후보 | 스크리닝 입력가격 | TOP10 생존율 | P90 |
 |---:|---|---:|---:|---:|
@@ -355,7 +765,7 @@ Pure Alpha Ranking에는 남겨 정책 변경 Watchlist로 관리한다.
 
 ---
 
-## 18. 다음 연구 우선순위
+## 19. 다음 연구 우선순위
 
 1. **Universe Expansion Engine 구축 — 50개 수동 후보군을 폐기하고 수도권 단지×면적 수천 개에서 자동 후보 생성**
 2. Hard Gate 기반 1,000~2,000개 실행가능 후보 Quick Scan
@@ -367,10 +777,11 @@ Pure Alpha Ranking에는 남겨 정책 변경 Watchlist로 관리한다.
 8. 2019 유사가격 30~50개 블라인드 역검증 및 2015/2017/2021/2023 Walk-Forward 확대
 9. Exit Price Error / Rank Regret / Winner Recall 백테스트
 10. 중복 변수 제거 및 CORE 6개로 압축
+11. 정비사업 Option Value Engine 고도화(§14.13 순서) — 특히 Stage 전환율과 지역별 Stage Premium
 
 ---
 
-## 19. 작업공간 이전 및 기준문서 운영 규칙
+## 20. 작업공간 이전 및 기준문서 운영 규칙
 
 2026-09-03부터 이 문서를 아파트 투자엔진의 단일 기준문서로 사용한다. 이전 대화와 개별 산출물에 있는 내용은 다음 원칙으로 승계한다.
 
@@ -379,16 +790,18 @@ Pure Alpha Ranking에는 남겨 정책 변경 Watchlist로 관리한다.
 - 과거 TOP10/TOP20은 당시 유니버스·입력가격의 스냅샷이며 최신 추천으로 자동 승계하지 않는다.
 - 새 백테스트에서 살아남은 규칙만 이 문서의 CORE 또는 Hard Gate로 승격한다.
 - 이후 확정된 변경은 이 문서에 누적하고, 실험 결과와 폐기된 가설은 별도 연구 로그에 남긴다.
+- 로컬 코드(`land-invest-analyzer`)가 이 문서와 충돌하면 이 문서를 우선하되, 기존 구현을 바로 삭제하지 않고 diff를 먼저 남긴다.
 
 ### 승계된 핵심 산출물
 
 - `RESEARCH_LOG_AGGRESSIVE_v0.1.md`: 균형형·공격형·고공격형 가중치 민감도와 100회 반복 결과
 - `RESEARCH_LOG_FCP_v0.1.md`: Future Choice Set/FCP 설계, 중복 변수 제거, 50개 유니버스 확장 결과
+- `RESEARCH_LOG_REDEVELOPMENT_OPTION_v0.1.md`: 정비사업 Option Value Engine 병합 diff, 변수 통일, 구현/미구현, 회귀 결과
 - `3억_비거주_TOP20_투자판단표_2026-08-31.xlsx`: 초기 정성 TOP20과 동탄 출발 임장시간
 - `아내와_함께보는_3억_비거주_아파트_TOP20_2026-08-31.xlsx`: 쉬운 설명용 3억원 결과표
 - `직원약사와_함께보는_1억_비거주_아파트_TOP20_평택출발_2026-08-31.xlsx`: 1억원·평택 출발 결과표
 
-## 20. 사용자 시나리오 레지스트리
+## 21. 사용자 시나리오 레지스트리
 
 기본 조건은 `비거주 투자 · 5년 보유 · 수도권 · 토허/실거주 Hard Gate · 세후/이자후/비용후 Terminal Wealth`다.
 
@@ -401,7 +814,7 @@ Pure Alpha Ranking에는 남겨 정책 변경 Watchlist로 관리한다.
 
 투자금이 바뀌면 기존 순위와 Capital Efficiency를 재사용하지 않는다. 같은 후보라도 대출·세금·미사용 현금의 미래가치가 달라지므로 전체 Feasibility와 Terminal Wealth를 다시 계산한다.
 
-## 21. 현재 데이터·정책 블로커
+## 22. 현재 데이터·정책 블로커
 
 ### 실행 전 필수
 
@@ -410,6 +823,7 @@ Pure Alpha Ranking에는 남겨 정책 변경 Watchlist로 관리한다.
 3. 실제 차주 조건에 따른 LTV·DSR·주택담보대출 총액한도 계산
 4. 취득세·양도세·농특세·인지세·중개보수·법무비·수리비·보유비용의 시행일별 규칙 검증
 5. 현재 매매 호가·최근 실거래·전세 호가·최근 전세 실거래를 분리 수집하고 정상체결가격 산출
+6. (정비사업) 수도권 정비사업 Registry의 단계·일자·용적률·세대수 원자료, 역세권 특례 조례 원문, 단계별 전환율
 
 ### 정책값 검증 원칙
 
@@ -419,7 +833,7 @@ Pure Alpha Ranking에는 남겨 정책 변경 Watchlist로 관리한다.
 - 행정구역 개편으로 코드가 바뀐 지역은 필지 단위 고시가 없으면 보수적으로 Gate하되 `scope_uncertainty`를 표시한다.
 - 정책 데이터가 0건이거나 범위가 비어 있으면 통과로 보지 않고 `UNKNOWN/NEEDS_CHECK`로 처리한다. 다만 전체 화면이 비는 것을 막기 위해 실행순위와 조사대기 목록을 분리한다.
 
-## 22. 다음 구현 라운드
+## 23. 다음 구현 라운드
 
 1. Hard Gate 데이터부터 완성한다: 토허 → LTV/DSR → 세금·비용 → 실제 매물.
 2. 1억·3억·5억·10억원별 Investable Universe를 블라인드로 다시 생성한다.
@@ -429,12 +843,13 @@ Pure Alpha Ranking에는 남겨 정책 변경 Watchlist로 관리한다.
 6. 2015/2017/2019/2021/2023 Walk-Forward로 CORE와 Exit Price를 검증한다.
 7. 검증 통과 후보만 실행가능 TOP10/TOP20으로 승격한다.
 8. 화면에는 평균순위·TOP10 생존율·TOP5 진입률·P90·Good Buy·Confidence를 함께 표시한다.
+9. 정비사업 Option Engine: Stage Registry → 사업성·분담금 → 시나리오 트리 TW → Hold vs Switch 연결(§35 체크리스트).
 
 UI는 현재 단계에서 Streamlit 기능을 유지한 Fluent형 외관을 사용하고, 서비스 완성 후 React 프런트엔드로 분리한다. 시작화면과 결과화면은 전문성을 우선하되 비전문가도 판단 근거를 이해할 수 있게 설명한다.
 
 ---
 
-## 23. Universe Expansion Engine — 확정 구조
+## 24. Universe Expansion Engine — 확정 구조
 
 ### 목적
 현재의 50개 후보는 연구용 정성 유니버스일 뿐이며 최종 추천 Universe로 사용하지 않는다. 사용자가 한 번도 언급하지 않은 단지가 #1로 올라올 수 있어야 객관적인 엔진으로 본다.
@@ -445,6 +860,7 @@ UI는 현재 단계에서 Streamlit 기능을 유지한 Fluent형 외관을 사�
 3. K-apt 공동주택관리정보: 단지코드, 세대수, 사용승인일, 면적구성, 주차·관리 특성 등 기본정보 결합
 4. 토허·대출·세금·비용 정책테이블: 평가일 기준 Hard Gate와 Terminal Wealth 계산
 5. 현재 호가 데이터는 실거래와 별도 필드로 유지하며 실행가격 확인용으로만 사용
+6. 정비사업 공식 등록부(서울 정보몽땅·경기데이터드림·인천 renewal): §14 Stage Registry
 
 ### Funnel
 - 원시 수도권 Universe: 단지×전용면적×타입 기준 **수천 개**
@@ -466,6 +882,7 @@ UI는 현재 단계에서 Streamlit 기능을 유지한 Fluent형 외관을 사�
 5. Downside Floor
 6. Exit Liquidity
 7. Data Confidence — 점수 직접 가산 금지
+8. Option Research Priority — 점수 아님, 연구 순서(§14.11)
 
 ### Quick Scan 원칙
 - 목적은 정밀한 순위가 아니라 **Winner Recall** 확보다.
@@ -500,10 +917,10 @@ Coverage가 기준 미달이면 `FULL CAPITAL UNIVERSE TOP20`이라는 표현을
 저비용 집계로 후보를 넓게 남긴다. 목표는 좋은 후보 누락 최소화다.
 
 ### Stage D — Deep 300
-P25/Median/P75, Money Arrival, Buyer Budget Migration, Leader Transmission Failure, Future Choice Set 초안, 공급·전세·동호조건 정규화를 수행한다.
+P25/Median/P75, Money Arrival, Buyer Budget Migration, Leader Transmission Failure, Future Choice Set 초안, 공급·전세·동호조건 정규화, 정비사업 Option Deep Dive(§14.11 대상만)를 수행한다.
 
 ### Stage E — Terminal Wealth 100
-하락/보수/기준/강세 시나리오별 Liquid Exit Price, 이자, 세금, 대출잔액, 매도비용, 미사용현금 미래가치를 계산한다.
+하락/보수/기준/강세 시나리오별 Liquid Exit Price, 이자, 세금, 대출잔액, 매도비용, 미사용현금 미래가치를 계산한다. 정비사업 후보는 §14.6 시나리오 트리를 추가한다.
 
 ### Stage F — Executable 30~50
 현재 호가/급매/최근 정상체결가격을 비교하고 실제로 Good Buy 이하 물건이 존재하는 후보만 최종 실행순위에 둔다.
@@ -517,7 +934,7 @@ P25/Median/P75, Money Arrival, Buyer Budget Migration, Leader Transmission Failu
 - Coverage Drop Alert
 - Winner Recall / Gate False Negative
 
-## 24. Universe Expansion 데이터 수집 구현 우선순위
+## 25. Universe Expansion 데이터 수집 구현 우선순위
 
 1. 서울·경기·인천 시군구 법정동 코드 목록 확보
 2. 최근 24개월 매매 실거래 일괄수집 → 단지×면적 그룹 생성
@@ -534,7 +951,7 @@ P25/Median/P75, Money Arrival, Buyer Budget Migration, Leader Transmission Failu
 
 ---
 
-## 25. 공공데이터 API 연결 상태 — 2026-09-03
+## 26. 공공데이터 API 연결 상태 — 2026-09-03
 
 ### 준비 완료
 - 공공데이터포털 인증키 확보. 인증키 원문은 문서/코드/Library에 저장하지 않고 환경변수 `DATA_GO_KR_SERVICE_KEY`로만 주입한다.
@@ -568,8 +985,9 @@ P25/Median/P75, Money Arrival, Buyer Budget Migration, Leader Transmission Failu
 - URL을 로그로 남길 때 `serviceKey` query parameter를 마스킹한다.
 - 기존 노출 키는 가능하면 추후 재발급하고 새 키는 `.env`에서만 관리한다.
 
+---
 
-## 26. 외부 탐색 후보 유입 규칙 — Claude 30개 후보 추가 (2026-09-03)
+## 27. 외부 탐색 후보 유입 규칙 — Claude 30개 후보 추가 (2026-09-03)
 
 사용자가 별도 Claude 스캔에서 발견한 30개 후보를 **Discovery Candidate Pool**에 추가한다. 이 목록의 Claude 점수(75~84)는 현재 MASTER의 CORE 점수와 정의·가중치가 다르므로 **절대 이식하지 않는다**. 매수가·실투자금도 원자료 검증 전에는 `SOURCE_REPORTED`로만 보관한다.
 
@@ -578,16 +996,15 @@ P25/Median/P75, Money Arrival, Buyer Budget Migration, Leader Transmission Failu
 - 사용자 또는 Claude가 골랐다는 이유로 Ranking 가점 금지.
 - 기존 Universe와 중복 후보는 동일 기본키로 병합하고 연구횟수는 점수에 반영하지 않는다.
 - 토허/실거주 Hard Gate를 먼저 재검증한다. 수원 영통구 후보 등 실행불가 후보는 Pure Alpha 연구목록에는 남기되 비거주 Executable Ranking에서는 제외한다.
-- 호재 미반영 목록이므로 교통·산업·정비사업 등은 이름 자체로 가점하지 않고, 검증된 확률×순가치만 Terminal Wealth에 반영한다.
+- 호재 미반영 목록이므로 교통·산업·정비사업 등은 이름 자체로 가점하지 않고, 검증된 확률×순가치만 Terminal Wealth에 반영한다(§14).
 - 신규 후보는 실거래·전세·K-apt·정상체결가격을 동일 기준으로 채운 뒤 Quick Scan에 진입한다.
 - Claude 원점수는 `external_source_score`로 보관 가능하나 최종점수/순위 계산에는 사용하지 않는다.
 
 이번 30개 추가로 수동/외부 Discovery Pool의 폭은 넓어지지만, `FULL CAPITAL UNIVERSE` 표기는 금지한다. 자동 수도권 전수 Universe가 완성될 때까지 `PARTIAL VERIFIED UNIVERSE`를 유지한다.
 
-
 ---
 
-## 27. Discovery Universe 수동·웹 확장 상태 — 2026-09-03
+## 28. Discovery Universe 수동·웹 확장 상태 — 2026-09-03
 
 API 전수 수집 전에도 Winner Recall을 높이기 위해 주변 경쟁상품을 넓게 발굴한다.
 
@@ -614,15 +1031,13 @@ API 전수 수집 전에도 Winner Recall을 높이기 위해 주변 경쟁상�
 - Terminal Wealth 100개
 - Executable 30~50개
 
-
 ### 2026-09-03 Round 4 업데이트
 - Discovery 후보 라벨을 시흥·군포·남양주·김포까지 확장했다.
 - 기본키 정규화 전 단순 누적 후보는 약 323개다.
 - 동일 단지 표기차이와 면적버킷 중복이 포함될 수 있으므로 공식 Universe 수치로 쓰지 않는다.
 - 다음 단계는 후보 추가가 아니라 300+ Discovery Pool의 기본키 정규화 → Hard Gate → Quick Scan 재정렬이다.
 
-
-## 27. Discovery Universe 진행상태 — 2026-09-03 19시대
+## 29. Discovery Universe 진행상태 — 2026-09-03 19시대
 
 - 수동/웹 기반 블라인드 Discovery Registry를 323개에서 **346개 단지×면적 후보**로 확장했다.
 - 신규 후보는 기존 후보에 가점을 주는 방식이 아니라 동일 생활권·유사가격·대체평형을 기계적으로 펼쳐 생성한다.
@@ -630,10 +1045,9 @@ API 전수 수집 전에도 Winner Recall을 높이기 위해 주변 경쟁상�
 - 다음 단계는 후보 확대를 계속하면서 동시에 최소비용 Hard/Data Gate를 적용해 첫 Blind Quick Scan을 시작하는 것이다.
 - 기존 50개 및 기존 TOP10은 Seed 추천이 아니라 회귀 테스트 세트로만 유지한다.
 
-
 ---
 
-## 27. 346 Discovery Universe Quick Scan — 2026-09-03
+## 30. 346 Discovery Universe Quick Scan — 2026-09-03
 
 ### 실행 결과
 - Discovery 후보 346개를 단지×면적 단위로 1차 정규화했다.
@@ -648,6 +1062,8 @@ Cheapness와 같은 생활권 상단 대비 가격차만으로 Deep Scan에 승�
 
 청구1차59와 호매실동쌍용59는 단순 상대가격 기준으로는 상위였으나 최근 원장 재검증에서 새로운 가격대 정착이 약해 Deep 우선순위를 낮췄다. 이는 `Persistent Cheapness ≠ Recoverable Discount` 규칙의 실제 사례로 보존한다.
 
+정비사업 후보도 이 Gate를 그대로 통과해야 한다. `OPTION_RESEARCH_PRIORITY = HIGH`는 Deep 승격 사유가 아니다(§14.11).
+
 ### 산출물
 - `QUICK_SCAN_346_v0.1.csv`
 - `DEEP_SHORTLIST_60_v0.1.csv`
@@ -658,7 +1074,7 @@ Terminal Wealth와 Executable TOP20은 실제 차주 DSR, 최신 정책테이블
 
 ---
 
-## 28. 대규모 선택 로직 시뮬레이션 — 2026-09-04
+## 31. 대규모 선택 로직 시뮬레이션 — 2026-09-04
 
 현재 Deep Shortlist를 대상으로 100,000회 Monte Carlo + 추가 500,000회 확인 시뮬레이션 + 50,000개 점수식 랜덤 탐색을 수행했다.
 
@@ -676,7 +1092,7 @@ Terminal Wealth와 Executable TOP20은 실제 차주 DSR, 최신 정책테이블
 
 ---
 
-## 29. Missingness-aware Ranking — 2026-09-04 시뮬레이션 반영
+## 32. Missingness-aware Ranking — 2026-09-04 시뮬레이션 반영
 
 ### 핵심 원칙
 `UNKNOWN != 중간값`.
@@ -685,7 +1101,7 @@ Terminal Wealth와 Executable TOP20은 실제 차주 DSR, 최신 정책테이블
 
 각 핵심 변수는 최소 다음 필드를 가진다.
 - `value`
-- `measurement_status = VERIFIED | PROXY | UNKNOWN`
+- `measurement_status = VERIFIED | PROXY | HEURISTIC | UNKNOWN` (정비사업 입력값 §14.8과 동일 체계)
 - `uncertainty_width`
 - `source_date`
 
@@ -708,7 +1124,49 @@ UNKNOWN 값은 점수에 고정 중립값으로 직접 사용하지 않고 Monte
 세부 결과는 `RESEARCH_LOG_SELECTION_SIMULATION_v0.2.md`와 `SELECTION_MONTE_CARLO_320K_v0.2.csv`에서 관리한다.
 
 ---
-## 31. Walk-Forward Backtest v0.1 — 2026-09-04
+
+## 33. Universe Expansion v0.3 — 2026-09-04
+
+### 확장 결과
+- `DISCOVERY_REGISTRY_642_v0.3.csv`: **346 → 642**, 순증 +296
+- 서울 73 / 경기 553 / 인천 16 단지×면적 후보
+- 행정권역 표현 기준 17 → 57개로 확대
+- `QUICK_SCAN_642_DATA_AWARE_v0.2.csv`: Settlement missingness를 중립값으로 오인하지 않는 Data-aware Quick Scan
+- `RESEARCH_LOG_UNIVERSE_EXPANSION_v0.3.md`: 신규 후보/토허/데이터 품질/Promotion 결과 기록
+
+### Pure Alpha / Executable 분리
+- 토허 후보는 Universe에서 삭제하지 않는다.
+- 서울 전역 및 경기 12개 일반 토허 범위 후보는 `Pure Alpha=IN_UNIVERSE`로 남기고, 비거주 Executable에서는 `PURE_ALPHA_ONLY_TORHEO_BLOCK_FOR_NONRESIDENT`로 분리한다.
+- 경기 12개: 과천, 광명, 성남 분당·수정·중원, 수원 영통·장안·팔달, 안양 동안, 용인 수지, 의왕, 하남.
+- 2025-10-20 효력 발생, 현재 확인한 지정기한은 2026-12-31.
+- 인천의 외국인 토허와 국내 일반 매수자 토허를 절대 혼용하지 않는다.
+- 일반 토허 범위 밖도 사업/필지별 토허는 계약 직전 별도 확인한다.
+- 정비사업 후보도 같은 규칙이다(§14.8).
+
+### Settlement Evidence 규칙 강화
+낮은 가격 또는 큰 Price Runway만으로 Deep에 승격시키지 않는다.
+- 반복 정상거래로 가격대 유지/상향 확인 → Deep 우선
+- 비중립 Settlement Proxy → 검토 승격
+- 거래량만 강함 → Data Enrichment 우선, Settlement는 UNKNOWN 유지
+- Settlement UNKNOWN → 후보는 보존하지만 `NO_CHEAPNESS_PROMOTION`
+- UNKNOWN은 중립값 0.5로 계산하지 않는다.
+
+### 현재 Data-aware Quick Scan
+- Quick Data Ready: 611
+- Data Verify Required: 31
+- Settlement Evidence Pass: 23
+- Settlement Proxy Review: 14
+- Liquidity-only Evidence: 15
+- Settlement Verify Required: 590
+- Deep Priority: 23
+- Data Enrichment Priority: 15
+
+### 데이터 한계
+이번 642 Registry는 누락 최소화를 위한 Discovery 확대다. 최근 단일 실거래는 정상체결 Median이 아니며, 전세/24개월 분포/거래회전이 없는 후보는 Deep 투자점수를 확정하지 않는다. 최종 순위는 외부 네트워크 환경에서 `UNIVERSE_COLLECTOR_v0.1`을 실행해 매매·전월세 원장을 확보한 뒤 산출한다.
+
+---
+
+## 34. Walk-Forward Backtest v0.1 — 2026-09-04
 
 공개 실거래 연도별 평균으로 2015→2020, 2017→2022, 2019→2024, 2021→2026의 4개 진입시점을 1차 재구성했다. 표본은 총 71 단지×면적-기간 관측치다.
 
@@ -731,43 +1189,13 @@ CORE 계산 전에 `Market Regime Layer`를 둔다.
 
 주의: 이번 v0.1은 수도권 전체 원장이 아니라 공개 실거래 페이지에서 재구성한 1차 패널이다. 정식 CORE 승격 전 200+ 관측치와 거래량·P25·전세·금리·공급을 포함한 확대 Walk-Forward를 수행한다.
 
-
 ---
 
-## 30. Universe Expansion v0.3 — 2026-09-04
+## 35. 변경 이력
 
-### 확장 결과
-- `DISCOVERY_REGISTRY_642_v0.3.csv`: **346 → 642**, 순증 +296
-- 서울 73 / 경기 553 / 인천 16 단지×면적 후보
-- 행정권역 표현 기준 17 → 57개로 확대
-- `QUICK_SCAN_642_DATA_AWARE_v0.2.csv`: Settlement missingness를 중립값으로 오인하지 않는 Data-aware Quick Scan
-- `RESEARCH_LOG_UNIVERSE_EXPANSION_v0.3.md`: 신규 후보/토허/데이터 품질/Promotion 결과 기록
-
-### Pure Alpha / Executable 분리
-- 토허 후보는 Universe에서 삭제하지 않는다.
-- 서울 전역 및 경기 12개 일반 토허 범위 후보는 `Pure Alpha=IN_UNIVERSE`로 남기고, 비거주 Executable에서는 `PURE_ALPHA_ONLY_TORHEO_BLOCK_FOR_NONRESIDENT`로 분리한다.
-- 경기 12개: 과천, 광명, 성남 분당·수정·중원, 수원 영통·장안·팔달, 안양 동안, 용인 수지, 의왕, 하남.
-- 2025-10-20 효력 발생, 현재 확인한 지정기한은 2026-12-31.
-- 인천의 외국인 토허와 국내 일반 매수자 토허를 절대 혼용하지 않는다.
-- 일반 토허 범위 밖도 사업/필지별 토허는 계약 직전 별도 확인한다.
-
-### Settlement Evidence 규칙 강화
-낮은 가격 또는 큰 Price Runway만으로 Deep에 승격시키지 않는다.
-- 반복 정상거래로 가격대 유지/상향 확인 → Deep 우선
-- 비중립 Settlement Proxy → 검토 승격
-- 거래량만 강함 → Data Enrichment 우선, Settlement는 UNKNOWN 유지
-- Settlement UNKNOWN → 후보는 보존하지만 `NO_CHEAPNESS_PROMOTION`
-- UNKNOWN은 중립값 0.5로 계산하지 않는다.
-
-### 현재 Data-aware Quick Scan
-- Quick Data Ready: 611
-- Data Verify Required: 31
-- Settlement Evidence Pass: 23
-- Settlement Proxy Review: 14
-- Liquidity-only Evidence: 15
-- Settlement Verify Required: 590
-- Deep Priority: 23
-- Data Enrichment Priority: 15
-
-### 데이터 한계
-이번 642 Registry는 누락 최소화를 위한 Discovery 확대다. 최근 단일 실거래는 정상체결 Median이 아니며, 전세/24개월 분포/거래회전이 없는 후보는 Deep 투자점수를 확정하지 않는다. 최종 순위는 외부 네트워크 환경에서 `UNIVERSE_COLLECTOR_v0.1`을 실행해 매매·전월세 원장을 확보한 뒤 산출한다.
+### 2026-09-04a — 정비사업 Option Value Engine DELTA v0.1 병합
+- 신설: §14 전체. §2 실행순서 7단계·레이어 도식, §3 정비사업 문구 금지 목록·UNKNOWN≠0, §4 "7번째 CORE 아님", §5 Runway/Option 분리, §10 완료 후 대체재 집합, §11 EVENT_SPIKE_ONLY, §12 5년 시점 잔여 옵션가치, §13 시나리오 확률가중·Opportunity Cost·Hold vs Switch, §15 Good Buy의 옵션 처리, §17·§19·§22·§23·§24 정비사업 항목, §20 로컬 코드 우선순위 규칙.
+- 변수 통일: `Optionality` → `OPTION_VALUE`; `current_far` → `existing_far`; `land_share_m2` → `land_share`; `redev.scenario.KEYS`(보수/기준/낙관) → `CONSTRUCTION_COST_SEVERE/STRESS/BASE`; `Premium.efficiency` → `option_already_priced_ratio`(§14.10 표).
+- 섹션 재정렬: 구 §27(4회 중복) → §27·§28·§29·§30, 구 §28 → §31, 구 §29 → §32, 구 §31(순서 오류) → §34, 구 §30 → §33. 구 §14~§26은 +1(§15~§27).
+- DELTA 중 제외·수정: DELTA §38 동아1차 예시 본문은 MASTER에 넣지 않고 연구로그로(특별대우 금지 규칙과의 충돌 회피); DELTA §16의 `P_policy + P_project + P_completion` 합산식은 상호배타 말단확률 트리로 대체; DELTA §33-B(구조적 사업성)는 랭킹 승격이 아닌 연구 우선순위로 한정.
+- 구현: `tools/build_option_stage_registry.py` → `rules/option_stage_registry.csv`(Stage 매핑, 나머지 N/A). 코드 체크리스트·회귀 결과는 `RESEARCH_LOG_REDEVELOPMENT_OPTION_v0.1.md`.
