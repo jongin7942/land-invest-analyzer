@@ -1267,6 +1267,11 @@ Superior Substitute Risk · Future Choice Set Risk · Supply Risk 는 v0.1 에�
 
 ## 36. 변경 이력
 
+### 2026-09-04c — Mispricing·Option Value 의 Terminal Wealth 결합
+- `invest/exit_price.py`: §35 Mispricing(신뢰도 반영, Base·Bull 만)과 §14 Option Value(NOT_CALCULATED → N/A)를 매도가 시나리오에 넣는다. Base 는 현재가 무성장(§12 Fundamental Exit Price 미구현, 성장률 미가정).
+- `scoring/weights.py`: `relative` 0.15 → 0, `redevelopment` 0.08 → 0 (점수 이중계산 제거). 순위 변화·TW 결과는 `RESEARCH_LOG_TW_COMBINE_v0.1.md`.
+- 결과: 무성장 Base 에서 EXPECTED_TW > 0 후보 0개 → TW 순위는 저가순으로 퇴화. **§12 Exit Price Engine 이 다음 라운드 1순위.**
+
 ### 2026-09-04b — Relative Price Gap Engine DELTA 병합
 - 신설 §35(급지·생활권 데이터 구축, 대장 자동 선정, Leader Set 4종, 역사 비율 밴드·국면별 정상비율, 구조/회복 분해, Transmission P, 합의, Mispricing, TOP50 결과표, 백테스트 KPI). §5 Price Runway 의 Leader Transmission 은 §35.7 로 연결.
 - 변수 정규화: 기존 leader_kind 5종(LOCAL/PRICE/FLOW/CAPITAL_COHORT/METRO) → 4종(LOCAL/GRADE/UPPER_GRADE/BUYER_CHOICE). 기존 `relative_gap`(features/relative.py, 동일 시군구 비교단지 중앙값 비율) 은 §35.5 Observed Gap 의 전신 → 통일 대상(체크리스트).

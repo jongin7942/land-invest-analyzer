@@ -28,8 +28,13 @@ BASE: dict[str, float] = {
     "momentum": 0.10,
     "supply": 0.12,
     "catalyst": 0.12,
-    "redevelopment": 0.08,
-    "relative": 0.15,
+    # 2026-09-04 MASTER_SPEC §14·§35 결합: 정비사업 옵션과 상대가격 Mispricing 은
+    # 점수가 아니라 Liquid Exit Price / Terminal Wealth 의 입력이다(invest/exit_price.py).
+    # 같은 사실을 consensus 점수로 또 더하면 Double Counting 이라 0 으로 내린다.
+    # 0 이면 for_models() 가 빼고 남은 모델끼리 정규화한다. 순위 변화는
+    # RESEARCH_LOG_TW_COMBINE_v0.1.md 에 기록.
+    "redevelopment": 0.0,
+    "relative": 0.0,
     "jeonse": 0.10,
     "risk": 0.08,
     "capital_efficiency": 0.05,
