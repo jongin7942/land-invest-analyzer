@@ -1078,7 +1078,8 @@ def cmd_supply(args):
             except cat_repo.CatalystImportError as e:
                 sys.exit(f"공급 파일에 문제가 있습니다:\n  {e}")
         print(f"입주물량 {s['inserted']}건 등록"
-              + (f" · 미검증 {s['unverified']}건" if s["unverified"] else ""))
+              + (f" · 미검증 {s['unverified']}건" if s["unverified"] else "")
+              + (f" · 분양시점 추정 {s['estimated_announce']}건" if s.get("estimated_announce") else ""))
 
 
 def cmd_landarea(args):

@@ -90,9 +90,19 @@ def import_transit(conn: sqlite3.Connection, path: str | Path) -> dict:
     return {"projects": len(projects), "stations": stations, "unverified": unverified}
 
 
+def _shift_ym(ym: str, months: int) -> str:
+    total = int(ym[:4]) * 12 + (int(ym[4:6]) - 1) + months
+    return f"{total // 12:04d}{total % 12 + 1:02d}"
+
+
 def import_supply(conn: sqlite3.Connection, path: str | Path) -> dict:
+    """§18 look-ahead 방지 — announced_ym(언제 알았나) 없이는 feature 가 이 행을
+    보지 않는다(features/supply.py). 예전 임포터는 이 칸을 아예 안 썼다 - 마이그레이션
+    014 가 칸을 만들었는데 임포터가 못 따라가서, 데이터를 넣어도 공급 feature 가
+    영원히 빈손이었다. 비어 있으면 "분양은 준공 30개월 전" 관행으로 역산해서 채운다.
+    """
     rows = _rows_of(path)
-    inserted = unverified = 0
+    inserted = unverified = estimated_announce = 0
     for i, r in enumerate(rows, start=2):
         lawd = (r.get("lawd_cd") or "").strip()
         name = (r.get("complex_name") or "").strip()
@@ -102,21 +112,30 @@ def import_supply(conn: sqlite3.Connection, path: str | Path) -> dict:
         if not (lawd and name and ym and stage and households):
             raise CatalystImportError(
                 f"{i}행: lawd_cd · complex_name · households · move_in_ym · stage 는 필수입니다")
+
+        announced = (r.get("announced_ym") or "").strip()
+        note = r.get("note") or ""
+        if not announced:
+            announced = _shift_ym(ym, -30)
+            estimated_announce += 1
+            note = (note + " · " if note else "") +                 "announced_ym 미입력 — 분양 관행(준공 30개월 전)으로 역산한 추정값"
+
         conn.execute(
             "INSERT INTO supply_plan (lawd_cd, emd_name, complex_name, households, "
-            "move_in_ym, stage, kind, lat, lon, source_name, source_url, last_verified, "
-            "note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) "
+            "move_in_ym, announced_ym, stage, kind, lat, lon, source_name, source_url, "
+            "last_verified, note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
             "ON CONFLICT(lawd_cd, complex_name, move_in_ym) DO UPDATE SET "
-            "households=excluded.households, stage=excluded.stage, kind=excluded.kind, "
-            "lat=excluded.lat, lon=excluded.lon, last_verified=excluded.last_verified",
-            (lawd, r.get("emd_name") or None, name, households, ym, stage,
+            "announced_ym=excluded.announced_ym, households=excluded.households, "
+            "stage=excluded.stage, kind=excluded.kind, lat=excluded.lat, lon=excluded.lon, "
+            "last_verified=excluded.last_verified, note=excluded.note",
+            (lawd, r.get("emd_name") or None, name, households, ym, announced, stage,
              (r.get("kind") or "").strip() or None, _num(r.get("lat")), _num(r.get("lon")),
              r.get("source_name"), r.get("source_url"),
-             r.get("last_verified") or None, r.get("note")))
+             r.get("last_verified") or None, note))
         inserted += 1
         if not (r.get("last_verified") or "").strip():
             unverified += 1
-    return {"inserted": inserted, "unverified": unverified}
+    return {"inserted": inserted, "unverified": unverified, "estimated_announce": estimated_announce}
 
 
 def opened_stations(conn: sqlite3.Connection) -> list[sqlite3.Row]:
@@ -218,11 +237,15 @@ TRANSIT_TEMPLATE = """project_name,kind,station_name,lawd_cd,lat,lon,status,stat
 # 예) GTX-A,GTX,동탄,41597,37.2001,127.0985,개통,2024-03-30,,202403,국토교통부 보도자료,https://...,2026-08-31,
 """
 
-SUPPLY_TEMPLATE = """lawd_cd,emd_name,complex_name,households,move_in_ym,stage,kind,lat,lon,source_name,source_url,last_verified,note
+SUPPLY_TEMPLATE = """lawd_cd,emd_name,complex_name,households,move_in_ym,announced_ym,stage,kind,lat,lon,source_name,source_url,last_verified,note
 # stage: 계획 / 분양 / 착공 / 입주예정 / 입주완료
 # kind:  신규분양 / 재건축 / 재개발 / 공공 / 기타
+# announced_ym: 이 공급을 **언제 알 수 있었나**(분양공고일 등). move_in_ym(입주월)과
+#   다르다 - 과거 시점 모델이 나중에 발표된 계획을 알면 look-ahead 다(§18).
+#   비우면 "분양은 관행적으로 준공 30개월 전" 이라는 통념으로 move_in_ym 에서
+#   역산한다(추정 — note 에 남는다). 실제 분양공고일을 알면 직접 적으세요.
 # lat/lon 을 채우면 반경별(1/3/5km) 공급 분석이 됩니다. 비우면 시군구 단위로만 셉니다.
-# 예) 28237,산곡동,○○자이,1200,202803,착공,재개발,37.4870,126.7210,입주자모집공고,https://...,2026-08-31,
+# 예) 28237,산곡동,○○자이,1200,202803,202601,착공,재개발,37.4870,126.7210,입주자모집공고,https://...,2026-08-31,
 """
 
 
