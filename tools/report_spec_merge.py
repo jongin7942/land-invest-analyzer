@@ -11,9 +11,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = (ROOT / "spec" / "MASTER_SPEC.md").read_text(encoding="utf-8")
 LOG = (ROOT / "spec" / "RESEARCH_LOG_REDEVELOPMENT_OPTION_v0.1.md").read_text(encoding="utf-8")
+LOG2 = (ROOT / "spec" / "RESEARCH_LOG_RELATIVE_GAP_v0.1.md").read_text(encoding="utf-8")
 OUT = ROOT / "reports" / "spec_merge_2026-09-04.html"
 
-TEMPLATE = """<title>MASTER SPEC 정비사업 옵션 병합</title>
+TEMPLATE = """<title>MASTER SPEC 2차 병합 보고</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
 <style>
 :root{--bg:#f7f5f0;--paper:#fffdf9;--ink:#1e2a1f;--muted:#5f6b60;--line:#d9d3c5;--accent:#1f6f50;--accent-soft:#e3efe7;--warn:#9a5b10;--warn-soft:#f6ead6;--code:#eef0ea;}
@@ -52,21 +53,23 @@ details summary{cursor:pointer;font-weight:700;color:var(--accent);}
 <div class="wrap">
 <header>
   <div class="eyebrow">수도권 아파트 투자 엔진 · 기준문서</div>
-  <h1>MASTER SPEC — 정비사업 Option Value Engine v0.1 병합</h1>
-  <p>2026-09-04 · 병합 전 원본 git b22a2e0 → 병합본 v2026-09-04a · 전체 테스트 102 통과 · Stage Registry 2,404건</p>
+  <h1>MASTER SPEC — 정비사업 옵션(§14) + 대장/후행주 상대가격 엔진(§35) 병합</h1>
+  <p>2026-09-04 · v2026-09-04b · 생활권 358 · 대장 1,257 · Pair 20,294 · 전달 에피소드 56,631 · Stage Registry 2,404</p>
 </header>
 <nav>
-  <a href="#todo">종인님이 하실 일</a><a href="#changed">변경 섹션</a><a href="#vars">새 변수·공식</a>
+  <a href="#todo">종인님이 하실 일</a><a href="#rel">2차: 대장/후행주 엔진 보고 18항목</a><a href="#changed">변경 섹션</a><a href="#vars">새 변수·공식</a>
   <a href="#conflict">수정·제외한 DELTA</a><a href="#nv">NEEDS_VERIFICATION</a><a href="#dc">Double Counting</a>
   <a href="#code">코드 체크리스트</a><a href="#spec">MASTER_SPEC 전문</a><a href="#log">연구로그 전문</a>
 </nav>
 
 <section id="todo"><h2>종인님이 하실 일</h2>
-<div class="todo"><strong>지금은 없습니다.</strong> 병합본은 <code>land-invest-analyzer/spec/MASTER_SPEC.md</code>에 있고, 이 페이지가 그 사본입니다. ChatGPT Work 쪽 MASTER_SPEC.md를 이 병합본으로 교체해 주시면 양쪽 기준이 같아집니다(아래 "MASTER_SPEC 전문"을 복사하거나 로컬 파일을 올리시면 됩니다).</div>
+<div class="todo"><strong>지금은 없습니다.</strong> 두 DELTA 모두 병합·구현·실행을 마쳤고 순위는 바뀌지 않았습니다(Mispricing·Option Value 는 아직 점수에 넣지 않음). 병합본은 <code>land-invest-analyzer/spec/MASTER_SPEC.md</code>에 있고, 이 페이지가 그 사본입니다. ChatGPT Work 쪽 MASTER_SPEC.md를 이 병합본으로 교체해 주시면 양쪽 기준이 같아집니다(아래 "MASTER_SPEC 전문"을 복사하거나 로컬 파일을 올리시면 됩니다).</div>
 <p class="meta">앞서 드린 세 가지(세법 규칙 32건 원문 확인 · 동아 보유 조건값 · 나머지 spec 파일 5개)는 그대로 남아 있습니다.</p>
 </section>
 
-<section id="changed"><h2>2. 변경된 섹션</h2><div class="md" data-src="changed"></div></section>
+<section id="rel"><h2>2차 DELTA — 급지별 대장/후행주 상대가격 갭 엔진 (§35) 구현 보고</h2><div class="md" data-src="rel"></div></section>
+
+<section id="changed"><h2>1차 DELTA — 정비사업 옵션 §14 · 2. 변경된 섹션</h2><div class="md" data-src="changed"></div></section>
 <section id="vars"><h2>3. 새로 추가된 변수·공식</h2><div class="md" data-src="vars"></div></section>
 <section id="conflict"><h2>4. 기존 규칙과 충돌하여 수정·제외한 DELTA 항목</h2><div class="md" data-src="conflict"></div></section>
 <section id="nv"><h2>5. NEEDS_VERIFICATION 으로 남긴 항목</h2><div class="md" data-src="nv"></div></section>
@@ -99,6 +102,7 @@ def main() -> int:
     src = {
         "spec": SPEC,
         "log": LOG,
+        "rel": LOG2,
         "changed": section(LOG, "## 1. 병합된 규칙", "## 3. 새 변수"),
         "vars": section(LOG, "## 3. 새 변수", "## 4. 기존 규칙"),
         "conflict": section(LOG, "## 4. 기존 규칙", "## 5. NEEDS_VERIFICATION"),

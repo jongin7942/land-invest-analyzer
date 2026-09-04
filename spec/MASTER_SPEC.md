@@ -2,7 +2,7 @@
 
 업데이트 기준일: 2026-09-04 (v2026-09-04a — 정비사업 Option Value Engine DELTA v0.1 병합, 섹션 번호 재정렬)
 
-> 이 문서가 단일 기준문서(Single Source of Truth)다. 병합 전 원본은 git `b22a2e0`(`spec/MASTER_SPEC.md`, 2026-09-03판)이고, 병합 diff·회귀결과는 `RESEARCH_LOG_REDEVELOPMENT_OPTION_v0.1.md`에 있다. 변경 이력은 §35.
+> 이 문서가 단일 기준문서(Single Source of Truth)다. 병합 전 원본은 git `b22a2e0`(`spec/MASTER_SPEC.md`, 2026-09-03판)이고, 병합 diff·회귀결과는 `RESEARCH_LOG_REDEVELOPMENT_OPTION_v0.1.md`에 있다. 변경 이력은 §36.
 
 ## 1. 최종 목표
 
@@ -1191,7 +1191,87 @@ CORE 계산 전에 `Market Regime Layer`를 둔다.
 
 ---
 
-## 35. 변경 이력
+## 35. Relative Price Gap Engine — 급지별 대장/준대장 상대가격 갭 + 후행주 탐색 (v0.1, 2026-09-04)
+
+### 36.0 목적과 위치
+수도권 전체에서 **상위 급지·동일 급지의 대장 가격이 먼저 오른 뒤, 역사적 상대가격 관계에 비해 아직 덜 따라간 단지×면적**을 객관적으로 찾는다. 이 모듈은 §1 목적함수(동일 자기자본 5년 후 Terminal Wealth 최대화)를 돕는 **설명·예측 모듈**이며 목적함수를 대체하지 않는다. 출력 `Relative Mispricing`은 점수에 더하지 않고 Liquid Exit Price(§12)·Terminal Wealth(§13)의 입력으로만 쓴다. 특정 단지의 순위를 올리기 위한 로직은 없다(§3).
+
+### 36.1 절대가격이 아니라 비율
+`Follower / Leader Price Ratio`를 월별로 계산하고 과거 여러 시장국면과 비교한다. 단순 차액(4억)은 쓰지 않는다. 2021 같은 극단적 유동성 장세의 비율을 정상값으로 자동 채택하지 않는다 — 과열 국면 월은 정상비율 계산에서 뺀다.
+
+### 36.2 급지 체계 — 데이터로 구축
+행정구역으로 급지를 나누지 않는다. 법정동 단위로
+- **급지(tier)**: 최근 24개월 ㎡단가(log) 를 1차원 자연분류(8단계)로 나눈다. 1 = 최고 급지.
+- **생활권(life_zone)**: 중심점 거리 ≤ 2.5km · 12개월 변화율 상관 ≥ 0.75 · 가격수준 근접(log 차 ≤ 0.35) 인 법정동을 묶는다(union-find, 생활권 지름 ≤ 5km).
+- 통근축·학군·상급지 구매자 이동·외부 매수자 이동·신축 가격은 v0.1 에 넣지 못했다 → `method = PROXY` 로 표시하고 순차 반영한다. 수동 급지표를 쓰면 반드시 `PROXY`.
+저장: `relative_zone`(법정동→생활권·급지), `complex.life_zone`, `life_zone`.
+
+### 36.3 대장 자동 선정
+생활권×면적별로 **LEADER_1~3** 을 뽑는다. 최고가 하나로 정하지 않고 다음 다섯 항목의 생활권 내 백분위 순위 평균(동일가중, HEURISTIC)으로 정한다: 최근 60개월 상위 3위 안 비율(지속적 상위 가격) · 거래량(24개월 표본) · 하락기 상대강도(2021~22 고점→2023 저점, 생활권 중앙값 대비) · 선행성(내 12개월 변화율 vs 3개월 뒤 생활권 변화율 상관 − 반대 방향 상관) · 설명력(생활권 변화율과의 상관). 84㎡ 대장과 59㎡ 대장은 따로 뽑는다. 저장: `zone_leader`.
+
+### 36.4 Follower 의 Leader Set
+후보마다 Leader 를 하나만 두지 않는다.
+- **LOCAL** 같은 생활권 대장 · **GRADE** 같은 급지의 가장 가까운 다른 생활권 대장 · **UPPER_GRADE** 한 단계 위 급지의 가장 가까운 생활권 대장 · **BUYER_CHOICE** 같은 총액대(1.10~1.35배)·10km 안에서 실제 비교되는 상급 상품(면적이 달라도 됨 — 총액 비교).
+기존 `relative/leaders.py` 의 LOCAL/PRICE/FLOW/CAPITAL_COHORT/METRO 다섯 종류는 이 넷으로 정규화한다(PRICE·CAPITAL_COHORT → BUYER_CHOICE, FLOW → 대장 선정의 거래량 항목, METRO → 폐지: 수도권 최고가는 Buyer Pool 이 겹치지 않는다).
+
+### 36.5 Historical Relative Price Band 와 국면별 정상비율
+Pair 마다 ≥ 60개월의 비율로 P10/P25/Median/P75/P90 을 계산한다(과열 월 제외). 현재 비율 = 최근 6개월 중앙값. **정상비율**은 현 시장국면(§34 Regime, 시군구 월별)과 같은 과거 국면의 중앙값을 우선 쓰고(≥ 12개월), 없으면 과열 제외 장기 중앙값을 쓴다. `Observed Relative Gap = (정상 − 현재) / 정상`. 이 값은 곧바로 상승여력이 아니다.
+
+### 36.6 구조적 가격차와 회복 가능한 가격차
+`Observed Gap = Structural Gap + Recoverable Gap`.
+- 회복가능 비중은 **그 Pair 의 실제 과거 전달 실적**(§35.7 추종률 중앙값)으로만 정한다. 과거 평균으로 무조건 회귀한다고 보지 않는다.
+- 구조 변화·구조 격차 플래그가 확인될 때마다 회복가능 비중을 10%p 씩 낮춘다(HEURISTIC): 학군(학원가 밀도 2배 이상 격차), 연식·상품성(12년 이상), 세대수(3배 이상), 역 접근(1km 밖 vs 500m 안), 최근 5년 내 1.5km 철도 개통(§35.10 평균회귀 함정).
+- 전달 실적이 없으면 분해하지 않는다(전부 회복가능으로 두면 "Spread 가 크다 = 기회" 가 된다).
+- **학군은 구조적 가격차에 명시적으로 넣는다.** 학군이 구조적으로 다른 Pair 는 Historical Ratio 가 낮게 유지되는 것이 정상 Gap 이다. `School-driven Buyer Depth`·`School Premium Persistence` 는 학업성취도 데이터 확보 후 정식화한다(현재 학원가 밀도 대리값 = PROXY).
+
+### 36.7 Leader Transmission Probability
+정의: 대장의 가격 상승이 그 후행 후보로 실제 전파될 확률. Pair 의 과거 에피소드(Leader 12개월 상승 ≥ 8%, 간격 ≥ 24개월)마다 Follower 의 24개월 추종률(= Follower 상승 / Leader 상승)을 재고, 0.5 이상이면 성공. `P = 성공/에피소드`. 에피소드 ≥ 3 → VERIFIED, 1~2 → PROXY, 0 → UNKNOWN(중립값 금지). 같은 에피소드 원장으로 Gap 축소율(12/36/60개월)을 함께 저장한다.
+
+### 36.8 Leader Move / Follower Settlement 확인
+- **Leader Move Confirmation**: Leader P25·Median·P75 12개월 상승이 모두 +1% 이상이고 거래량이 줄지 않으면 CONFIRMED, Median 만 오르면 PARTIAL, 아니면 NONE. 호가만으로 판정하지 않는다(실거래 스냅샷만 사용).
+- **Follower Settlement Start**: P25↑ · Median↑ · 거래량↑ · Gap 축소 중 하나 이상. 아무 움직임도 없으면 `Persistent Cheapness` 로 보고 할인율을 Alpha 로 인정하지 않는다(전세 Floor·매매-전세 Gap 은 v0.2).
+
+### 36.9 Multi-Leader Consensus 와 Relative Mispricing
+Leader ≥ 3 개의 Gap 이 모두 +5% 이상이고 산포 ≤ 12%p 면 STRONG, 모두 양이면 OK, 한 Leader 에만 크게 싸면 DISTORTED, 그 밖 WEAK, Leader 3개 미만 THIN.
+```text
+Relative Mispricing = Recoverable Gap × Transmission P × Settlement 계수(무반응 0.5)
+                      × 과열/하락전환 계수(0.5) × Leader Move 계수(CONFIRMED 1.0 · PARTIAL 0.7 · NONE 0.4)
+```
+Superior Substitute Risk · Future Choice Set Risk · Supply Risk 는 v0.1 에서 차감하지 못했다(N/A, §10·§24 결합 후). Follower 집계는 Leader 별 Mispricing 의 중앙값.
+
+### 36.10 Mean Reversion 함정 방지
+생활권 구조 변화·신축 대단지 입주·학군 변화·철도 개통·산업축·대규모 재개발·행정/도시계획 변화·재건축 진행도 급변·상품성 격차 확대·인구구조 변화가 있으면 과거 Ratio 를 폐기하거나 낮은 Confidence 를 준다. `Past Relative Ratio ≠ Future Fair Ratio`. `Future Fair Relative Ratio`(§35.13)는 별도 추정.
+
+### 36.11 결과표
+- `RELATIVE_LAG_TOP50`: 구조적 가격차를 제거한 뒤에도 덜 따라갔고, 합의 STRONG/OK, Leader Move 확인, Follower 움직임 시작, Mispricing > 3% 인 후보.
+- `FALSE_CHEAP_TOP50`: 대장 대비 12% 이상 싸지만 구조적 비중 ≥ 60% · 과거 전달확률 < 30% · Follower 무반응 중 하나로 가격차가 정상인 후보(Value Trap 확인용).
+- 정기 스캔 출력: Leader Rally(급지) · Follower Lag · Recoverable Gap · Settlement Start · Best Entry(TW 최대). Best Entry 는 §13 TW 완성 후.
+후보별 출력 컬럼: 급지·생활권·Local/Grade/Upper Leader·현재가·Leader 현재가·현재 비율·역사 중앙값·현 국면 정상비율·구조적/회복가능 가격차·Transmission P·Relative Mispricing·Settlement Evidence·(Future Choice Set Risk·5년 Liquid Exit·TW 는 N/A→§13 결합 후).
+
+### 36.12 정비사업 옵션 엔진과의 결합
+`Relative Mispricing` 과 `Renewal Option Mispricing`(§14)은 분리한다. 주변 신축과의 가격차가 재건축 초기단계 때문이라면 두 번 가점하지 않는다: 정비사업 Stage ≥ 2 후보의 상대가격 Gap 중 옵션으로 설명되는 부분은 §14 에서만 계산하고 §36 회복가능 Gap 에서 뺀다(v0.2 구현).
+
+### 36.13 도시변화·시장국면과의 결합
+- `Future Fair Relative Ratio`: GTX·공원·도시재편으로 정상비율 자체가 바뀔 수 있다(예: 65% → 72%). 실측 전에는 N/A.
+- Market Regime 별로 Gap 축소확률·평균 축소폭·소요시간·재확대 위험을 추정한다. "현재 Gap 이 큰 것" 과 "현재 Gap 을 사야 하는 것" 을 구분한다. 상승장 말기의 급격한 추격은 되돌림도 크다.
+
+### 36.14 백테스트와 KPI
+과거 "대장 상승 → 후행 상승" Pair 를 대량 수집해(에피소드 원장 `relative_backtest_episodes.csv`) 1·3·5년 뒤 Gap 축소를 확인하고, **실패사례**(대장은 올랐는데 후행은 끝까지 못 따라간 경우)를 같은 비중으로 학습한다. KPI: Relative Gap Winner Recall · Leader Transmission Accuracy · Gap Closure Error · False Cheap Rate · Structural Gap Misclassification · Multi-Leader Consensus Accuracy · Relative Value Rank Regret · Leader Transmission Failure Rate. Future Leakage 금지(에피소드 당시 알 수 있던 정보만).
+
+### 36.15 절대 규칙
+특정 단지에 맞춰 정상비율 조정 금지 · 2021 고점 비율 자동 채택 금지 · 면적 다르면 보정(BUYER_CHOICE 는 총액 비교 + ㎡단가 프리미엄 별도 표시) · 학군 등 구조 프리미엄 무시 금지 · 호가로 Leader Rally 판정 금지 · 싸다는 이유만으로 추천 금지 · 무조건 평균회귀 가정 금지 · 사용자 언급 단지 가점 금지 · 기존 TOP10 보호 금지 · Future Leakage 금지 · UNKNOWN 중립값 채움 금지.
+
+구현: `apt_engine/relative/{store,zones,gap}.py`, `tools/run_relative_gap.py`. 실행 결과·§35.27 보고 항목은 `RESEARCH_LOG_RELATIVE_GAP_v0.1.md`.
+
+---
+
+## 36. 변경 이력
+
+### 2026-09-04b — Relative Price Gap Engine DELTA 병합
+- 신설 §35(급지·생활권 데이터 구축, 대장 자동 선정, Leader Set 4종, 역사 비율 밴드·국면별 정상비율, 구조/회복 분해, Transmission P, 합의, Mispricing, TOP50 결과표, 백테스트 KPI). §5 Price Runway 의 Leader Transmission 은 §35.7 로 연결.
+- 변수 정규화: 기존 leader_kind 5종(LOCAL/PRICE/FLOW/CAPITAL_COHORT/METRO) → 4종(LOCAL/GRADE/UPPER_GRADE/BUYER_CHOICE). 기존 `relative_gap`(features/relative.py, 동일 시군구 비교단지 중앙값 비율) 은 §35.5 Observed Gap 의 전신 → 통일 대상(체크리스트).
+- 구현: `apt_engine/relative/{store,zones,gap}.py`, `tools/run_relative_gap.py`; DB `relative_zone`, `zone_leader`, `complex.life_zone` 채움. 결과·보고 18항목은 `RESEARCH_LOG_RELATIVE_GAP_v0.1.md`.
+- 기존 `relative` 모델(consensus 가중 0.15)이 relative_gap 을 점수로 직접 쓰는 것은 §35.0 과 충돌 → 이번 라운드 미변경, 체크리스트.
 
 ### 2026-09-04a — 정비사업 Option Value Engine DELTA v0.1 병합
 - 신설: §14 전체. §2 실행순서 7단계·레이어 도식, §3 정비사업 문구 금지 목록·UNKNOWN≠0, §4 "7번째 CORE 아님", §5 Runway/Option 분리, §10 완료 후 대체재 집합, §11 EVENT_SPIKE_ONLY, §12 5년 시점 잔여 옵션가치, §13 시나리오 확률가중·Opportunity Cost·Hold vs Switch, §15 Good Buy의 옵션 처리, §17·§19·§22·§23·§24 정비사업 항목, §20 로컬 코드 우선순위 규칙.
