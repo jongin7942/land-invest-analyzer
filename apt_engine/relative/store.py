@@ -118,11 +118,16 @@ def change(series: list, t: int, months: int) -> float | None:
 
 # ── 적재 ──────────────────────────────────────────────────────────────
 
-def load_complexes(conn: sqlite3.Connection) -> dict[int, Complex]:
+MIN_HOUSEHOLDS = 1000   # 종인님 규칙(2026-09-05): 1,000세대 미만 단지는 집계·추천에서 제외. 세대수 없는 단지도 제외.
+
+
+def load_complexes(conn: sqlite3.Connection, *, min_households: int = MIN_HOUSEHOLDS) -> dict[int, Complex]:
+    """집계용 단지 목록. 기본은 1,000세대 이상만 — 모든 집계 도구가 이 로더를 쓰므로 여기서 한 번에 거른다."""
     out: dict[int, Complex] = {}
     for r in conn.execute(
             "SELECT id, name, lawd_cd, emd_name, lat, lon, apt_households, approval_year "
-            "  FROM complex WHERE canonical_id IS NULL AND lat IS NOT NULL AND lawd_cd IS NOT NULL"):
+            "  FROM complex WHERE canonical_id IS NULL AND lat IS NOT NULL AND lawd_cd IS NOT NULL "
+            "   AND apt_households >= ?", (min_households,)):
         out[int(r["id"])] = Complex(int(r["id"]), r["name"] or "", r["lawd_cd"], r["emd_name"] or "",
                                     float(r["lat"]), float(r["lon"]),
                                     int(r["apt_households"]) if r["apt_households"] else None,

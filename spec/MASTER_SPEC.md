@@ -931,6 +931,7 @@ Coverage가 기준 미달이면 `FULL CAPITAL UNIVERSE TOP20`이라는 표현을
 
 ### Stage B — Hard Gate
 토허/실거주, 자금조달, 거래가능성, 데이터 최소품질만 본다. Alpha 점수는 사용하지 않는다.
+**단지 규모 Gate(2026-09-05 확정)**: 세대수 1,000 미만(또는 세대수 미상) 단지는 Universe 집계와 모든 추천 순위에서 제외한다. 소규모 단지는 거래가 드물어 가격 신호가 흔들리고 Buyer Pool 이 얇아 대장 전파·Exit Liquidity 를 논할 수 없다. 급지·생활권·대장·Pair·Exit Price 패널·실측 드리프트도 같은 기준으로 집계한다(`relative/store.load_complexes(min_households=1000)`). 개별 단지 조회는 가능하되 "추천 대상 아님" 을 표시한다.
 
 ### Stage C — Quick Scan 1,000
 저비용 집계로 후보를 넓게 남긴다. 목표는 좋은 후보 누락 최소화다.
@@ -1285,6 +1286,11 @@ Superior Substitute Risk · Future Choice Set Risk · Supply Risk 는 v0.1 에�
 ---
 
 ## 36. 변경 이력
+
+### 2026-09-05b — 단지 규모 Gate(1,000세대), Exit Price v0.2, 투자시점
+- §24 Stage B 에 1,000세대 미만 제외 규칙 확정. 수도권 좌표 단지 10,123 → 1,478(서울 400·인천 209·경기 869).
+- Exit Price v0.2: 이론 변수(C) IC 0.32 · Recall@20 44% · 예측 상위 20% 의 71% 가 중앙값 이상. 상호작용·사이클 변수는 상대 순위 모델에서 제외(악화). 사이클은 §12 시장 수준 시나리오에만 사용.
+- 투자시점: 진입 시점 전세가율이 이후 5년 시장 수익과 순위상관 0.96(n=11), 기준금리 −0.49. 2026-06 전세가율 0.56 은 시계열 최저 → 시장 Base 가정 낙관 편향 경고. 상세 `RESEARCH_LOG_EXIT_PRICE_v0.1.md` §6~7.
 
 ### 2026-09-05 — Exit Price Engine v0.1 실행·채택
 - §12 에 "가격 이론 → 변수" 표와 Walk-Forward 규약, 계급도·계급 상승 조건 정의 추가.
