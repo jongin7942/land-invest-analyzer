@@ -23,6 +23,12 @@ from apt_engine.trace import Calc, Evidence
 
 # 이만큼은 있어야 중앙값이 의미를 갖는다.
 MIN_SAMPLES = 3
+
+# **재는 반경**. 노출도(catalyst 의 800m)와 일부러 다르게 둔다 - 측정에 필요한
+# 것은 '역 근처와 먼 곳의 대비' 이지 정확한 역세권 경계가 아니다. 800m 로 재면
+# 표본이 모자라 15개 역 중 6개만 사례가 됐고, 1,200m 면 11개가 된다.
+# 넓힌 만큼 효과가 희석되므로 delta 가 작게 나오는 쪽으로 치우친다(안전한 방향).
+MEASURE_RADIUS_M = 1200
 # 개통 전후로 얼마나 떨어진 시점을 비교할 것인가.
 DEFAULT_OFFSET_MONTHS = 12
 
@@ -58,19 +64,84 @@ def shift_ym(ym: str, months: int) -> str:
     return f"{total // 12:04d}{total % 12 + 1:02d}"
 
 
-def _median_price(conn: sqlite3.Connection, complex_ids: list[int],
-                  area_band: str, ym: str) -> tuple[float | None, int]:
+# 그 달에 스냅샷이 없으면 이만큼까지 앞뒤로 찾는다. 개통 ±12개월을 비교하는
+# 계산이라 한두 달 차이는 결과를 바꾸지 않는다.
+SNAPSHOT_TOLERANCE_MONTHS = 3
+
+
+def _paired_medians(conn: sqlite3.Connection, complex_ids: list[int],
+                    area_band: str, before_ym: str, after_ym: str,
+                    tolerance: int = SNAPSHOT_TOLERANCE_MONTHS
+                    ) -> tuple[float | None, float | None, int]:
+    """전·후 **둘 다** 값이 있는 단지만으로 두 중앙값을 낸다. (전, 후, 표본 수).
+
+    따로 내면 그 사이 들어온 신축이 중앙값을 밀어올려 '역 때문에 올랐다' 로
+    읽힌다. 같은 집단을 비교해야 그 역이 만든 몫에 가까워진다.
+    """
+    before = _prices_at(conn, complex_ids, area_band, before_ym, tolerance)
+    after = _prices_at(conn, complex_ids, area_band, after_ym, tolerance)
+    both = sorted(set(before) & set(after))
+    if not both:
+        return None, None, 0
+    return (statistics.median([before[c] for c in both]),
+            statistics.median([after[c] for c in both]),
+            len(both))
+
+
+def _prices_at(conn: sqlite3.Connection, complex_ids: list[int], area_band: str,
+               ym: str, tolerance: int) -> dict[int, float]:
+    """단지 → 그 시점에 가장 가까운 대표가격."""
     if not complex_ids:
-        return None, 0
+        return {}
+    lo, hi = shift_ym(ym, -tolerance), shift_ym(ym, tolerance)
     marks = ",".join("?" for _ in complex_ids)
     rows = conn.execute(
-        f"SELECT representative_price FROM price_snapshot "
-        f"WHERE complex_id IN ({marks}) AND area_band = ? AND as_of_ym = ?",
-        [*complex_ids, area_band, ym]).fetchall()
-    values = [r[0] for r in rows if r[0]]
+        f"SELECT complex_id, representative_price, as_of_ym FROM price_snapshot "
+        f" WHERE complex_id IN ({marks}) AND area_band = ? "
+        f"   AND as_of_ym BETWEEN ? AND ? AND representative_price IS NOT NULL",
+        [*complex_ids, area_band, lo, hi]).fetchall()
+    best: dict[int, tuple[int, float]] = {}
+    for r in rows:
+        gap = abs(_ym_index(r["as_of_ym"]) - _ym_index(ym))
+        cur = best.get(r["complex_id"])
+        if cur is None or gap < cur[0]:
+            best[r["complex_id"]] = (gap, float(r["representative_price"]))
+    return {cid: v for cid, (_, v) in best.items()}
+
+
+def _median_price(conn: sqlite3.Connection, complex_ids: list[int],
+                  area_band: str, ym: str,
+                  tolerance: int = SNAPSHOT_TOLERANCE_MONTHS) -> tuple[float | None, int]:
+    """단지들의 그 시점 대표가격 중앙값. (중앙값, 표본 수).
+
+    단지마다 **그 달에 가장 가까운** 스냅샷 하나씩만 센다. 거래가 없는 달은
+    스냅샷이 안 생기므로, 그 달만 고집하면 역세권 11개 중 1개만 잡히는 일이
+    생긴다(실측). 한 단지가 여러 달로 중복 집계되지 않게 단지당 하나로 자른다.
+    """
+    if not complex_ids:
+        return None, 0
+    lo = shift_ym(ym, -tolerance)
+    hi = shift_ym(ym, tolerance)
+    marks = ",".join("?" for _ in complex_ids)
+    rows = conn.execute(
+        f"SELECT complex_id, representative_price, as_of_ym FROM price_snapshot "
+        f" WHERE complex_id IN ({marks}) AND area_band = ? "
+        f"   AND as_of_ym BETWEEN ? AND ? AND representative_price IS NOT NULL",
+        [*complex_ids, area_band, lo, hi]).fetchall()
+    best: dict[int, tuple[int, float]] = {}
+    for r in rows:
+        gap = abs(_ym_index(r["as_of_ym"]) - _ym_index(ym))
+        cur = best.get(r["complex_id"])
+        if cur is None or gap < cur[0]:
+            best[r["complex_id"]] = (gap, float(r["representative_price"]))
+    values = [v for _, v in best.values()]
     if not values:
         return None, 0
     return statistics.median(values), len(values)
+
+
+def _ym_index(ym: str) -> int:
+    return int(ym[:4]) * 12 + int(ym[4:6]) - 1
 
 
 def _split_by_distance(conn: sqlite3.Connection, station_id: int, lawd_cd: str | None,
@@ -93,7 +164,7 @@ def _split_by_distance(conn: sqlite3.Connection, station_id: int, lawd_cd: str |
 
 
 def build(conn: sqlite3.Connection, station_row: sqlite3.Row, *, area_band: str,
-          radius_m: int = transit.NEAR_RADIUS_M,
+          radius_m: int = MEASURE_RADIUS_M,
           offset_months: int = DEFAULT_OFFSET_MONTHS) -> Analogue | None:
     """개통한 역 하나의 선행사례. 표본이 모자라면 None — 만들지 않는다."""
     opened_ym = station_row["opened_ym"]
@@ -108,12 +179,14 @@ def build(conn: sqlite3.Connection, station_row: sqlite3.Row, *, area_band: str,
     if len(near) < MIN_SAMPLES or len(far) < MIN_SAMPLES:
         return None
 
-    nb, nb_n = _median_price(conn, near, area_band, before_ym)
-    fb, fb_n = _median_price(conn, far, area_band, before_ym)
-    na, na_n = _median_price(conn, near, area_band, after_ym)
-    fa, fa_n = _median_price(conn, far, area_band, after_ym)
+    # 전후 둘 다 값이 있는 단지만 쓴다 - 신축 유입으로 집단이 바뀌면
+    # 그 변화가 역의 효과로 둔갑한다.
+    nb, na, near_n = _paired_medians(conn, near, area_band, before_ym, after_ym)
+    fb, fa, far_n = _paired_medians(conn, far, area_band, before_ym, after_ym)
+    nb_n = na_n = near_n
+    fb_n = fa_n = far_n
 
-    if not all([nb, fb, na, fa]) or min(nb_n, fb_n, na_n, fa_n) < MIN_SAMPLES:
+    if not all([nb, fb, na, fa]) or min(near_n, far_n) < MIN_SAMPLES:
         return None
 
     ratio_before = nb / fb
