@@ -16,3 +16,4 @@ access.db
 access.db-wal
 access.db-shm
 cloudflared.exe
+reports/
