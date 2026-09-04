@@ -79,7 +79,9 @@ def load_points() -> dict[str, list[tuple[float, float]]]:
                         else "인천" if addr.startswith("인천") else None)
                 if not sido:
                     continue
-                key = (round(la, 5), round(lo, 5))
+                # 같은 건물에 학원 20개가 있는 것이 곧 '학원가' 다. 좌표로 합치지 않는다 —
+                # 파일이 둘 다 있을 때 같은 학원이 두 번 들어오는 것만 이름+좌표로 거른다.
+                key = (round(la, 5), round(lo, 5), r.get("시설명") or r.get("학원명") or "")
                 if key in seen:
                     continue
                 seen.add(key)
