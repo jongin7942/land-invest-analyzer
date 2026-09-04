@@ -1286,6 +1286,11 @@ Superior Substitute Risk · Future Choice Set Risk · Supply Risk 는 v0.1 에�
 
 ## 36. 변경 이력
 
+### 2026-09-05 — Exit Price Engine v0.1 실행·채택
+- §12 에 "가격 이론 → 변수" 표와 Walk-Forward 규약, 계급도·계급 상승 조건 정의 추가.
+- 결과: 시장·모멘텀만 쓰면 순위가 거꾸로(IC −0.23, 평균회귀), 이론 변수 + 일자리(국민연금 사업장)로 IC +0.26 · 승자 포착률 40%. **시장 수준은 예측하지 않고 과거 분포(최저/중앙/상위20%)를 Bear/Base/Bull 가정으로 분리**한다. 계급 상승 조건 중 lift 1.5 를 넘는 '호재'는 아직 없음(역 개통 1.17 · 신축 입주 1.16 · 학원가 1.13), 이미 오른 시군구는 0.54.
+- `rules/exit_price_2026.csv` 가 §13 TW 의 매도가 입력이 됐다(`invest/exit_price.py`). 상세: `RESEARCH_LOG_EXIT_PRICE_v0.1.md`.
+
 ### 2026-09-04c — Mispricing·Option Value 의 Terminal Wealth 결합
 - `invest/exit_price.py`: §35 Mispricing(신뢰도 반영, Base·Bull 만)과 §14 Option Value(NOT_CALCULATED → N/A)를 매도가 시나리오에 넣는다. Base 는 현재가 무성장(§12 Fundamental Exit Price 미구현, 성장률 미가정).
 - `scoring/weights.py`: `relative` 0.15 → 0, `redevelopment` 0.08 → 0 (점수 이중계산 제거). 순위 변화·TW 결과는 `RESEARCH_LOG_TW_COMBINE_v0.1.md`.
