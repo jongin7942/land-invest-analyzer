@@ -13,6 +13,7 @@ import argparse
 import csv
 import json
 import math
+import pickle
 import sys
 import time
 from collections import Counter, defaultdict
@@ -35,6 +36,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--bands", default="84,59,74")
     ap.add_argument("--lams", default="0.3,1,3,10")
+    ap.add_argument("--relative", action="store_true", help="목표를 진입연도 내 중앙값 대비 편차로(시장 수준 분리)")
+    ap.add_argument("--no-cache", action="store_true")
     args = ap.parse_args()
     bands = tuple(args.bands.split(","))
     lams = [float(x) for x in args.lams.split(",")]
@@ -49,7 +52,20 @@ def main() -> int:
         jobs = jobs_mod.Jobs(cx, conn)
     print(f"[일자리] 스냅샷 {jobs.yms} · 법정동 코드 매핑 {len(jobs.code_of)}")
     pb = panel_mod.PanelBuilder(cx, prices, jeonse, stations, jobs=jobs if jobs.available else None)
-    rows = pb.build(ENTRY_YEARS)
+    cache = ROOT / "logs" / f"_exit_panel_{'_'.join(bands)}.pkl"
+    if cache.exists() and not args.no_cache:
+        rows = pickle.loads(cache.read_bytes()); print(f"[패널] 캐시 {cache.name} {len(rows)}행")
+    else:
+        rows = pb.build(ENTRY_YEARS); cache.write_bytes(pickle.dumps(rows))
+    market_level = {}
+    if args.relative:
+        by_y = {}
+        for r in rows:
+            if r.target is not None: by_y.setdefault(r.entry_ym, []).append(r.target)
+        market_level = {ym: median(v) for ym, v in by_y.items()}
+        for r in rows:
+            if r.target is not None: r.target = r.target - market_level[r.entry_ym]
+        print(f"[상대화] 진입연도별 시장 중앙값 5년 log 수익: { {k: round(v,3) for k, v in sorted(market_level.items())} }")
     with_t = [r for r in rows if r.target is not None]
     print(f"[패널] 행 {len(rows)} · 목표 있음 {len(with_t)} · 진입연도 {ENTRY_YEARS[0]}~{ENTRY_YEARS[-1]} ({time.time()-t0:.0f}s)", flush=True)
     miss = Counter(f for r in rows for f in panel_mod.FEATURES if r.x.get(f) is None)
@@ -86,6 +102,10 @@ def main() -> int:
         if r is not None:
             now_rows.append(r)
     preds = []
+    mk = sorted(market_level.values()) if market_level else []
+    mkt_q = {q: percentile(mk, q) for q in (0.2, 0.5, 0.8)} if mk else {0.2: 0.0, 0.5: 0.0, 0.8: 0.0}
+    if market_level:
+        print(f"[시장 수준 시나리오] 과거 5년 log 수익 P20/P50/P80 = {mkt_q[0.2]:.3f}/{mkt_q[0.5]:.3f}/{mkt_q[0.8]:.3f} (진입연도 {len(mk)}개)")
     for r in now_rows:
         p = final.predict(r.x)
         if p is None:
@@ -93,11 +113,12 @@ def main() -> int:
         preds.append({
             "complex_id": r.complex_id, "band": r.band, "name": cx[r.complex_id].name, "lawd_cd": cx[r.complex_id].lawd_cd,
             "price_now": round(r.price), "pred_log5y": round(p, 4),
-            "base_factor": round(math.exp(p + final.resid_q[0.5]), 4),
-            "bear_factor": round(math.exp(p + final.resid_q[0.2]), 4),
-            "bull_factor": round(math.exp(p + final.resid_q[0.8]), 4),
+            "base_factor": round(math.exp(p + mkt_q[0.5] + final.resid_q[0.5]), 4),
+            "bear_factor": round(math.exp(p + mkt_q[0.2] + final.resid_q[0.2]), 4),
+            "bull_factor": round(math.exp(p + mkt_q[0.8] + final.resid_q[0.8]), 4),
+            "market_scenario_log": {"bear": round(mkt_q[0.2], 4), "base": round(mkt_q[0.5], 4), "bull": round(mkt_q[0.8], 4)},
             "tier": r.x.get("tier"), "dist_center_km": round(r.x["dist_center_km"], 2) if r.x.get("dist_center_km") is not None else None,
-            "model": f"{best[0]}|lam={best[1]}", "status": "SCENARIO_WALKFORWARD_v0.1",
+            "model": f"{best[0]}|lam={best[1]}" + ("|relative" if args.relative else ""), "status": "SCENARIO_WALKFORWARD_v0.1",
         })
     with (ROOT / "rules" / "exit_price_2026.csv").open("w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(preds[0].keys())); w.writeheader(); w.writerows(preds)
@@ -113,9 +134,9 @@ def main() -> int:
         "final_coef": {fe: round(b, 4) for fe, b in zip(feats, final.beta[1:])}, "final_n": final.n,
         "resid_q": {str(k): round(v, 4) for k, v in final.resid_q.items()},
         "now_pred_dist": {q: round(percentile(pf, q), 4) for q in (0.1, 0.25, 0.5, 0.75, 0.9)},
-        "donga_482": donga, "seconds": round(time.time() - t0),
+        "donga_482": donga, "relative_mode": args.relative, "market_level_by_entry": {k: round(v, 4) for k, v in sorted(market_level.items())}, "market_scenario_log": {str(k): round(v, 4) for k, v in mkt_q.items()}, "seconds": round(time.time() - t0),
     }
-    (ROOT / "reports" / "exit_price_backtest.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+    (ROOT / "reports" / ("exit_price_backtest_relative.json" if args.relative else "exit_price_backtest.json")).write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
     (ROOT / "reports" / "hierarchy_2026.json").write_text(json.dumps(hier, ensure_ascii=False, indent=1), encoding="utf-8")
     print("동아 482:", donga)
     print("계급도 요약:", json.dumps({k: hier[k] for k in ("tier_gap_pct_now", "promotion_base_rate", "conditions")}, ensure_ascii=False)[:1500])
