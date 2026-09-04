@@ -33,6 +33,7 @@ HELD = sa.HeldAsset(
     occupancy=R,                         # 실거주 / 임대 / 전세승계 (기본 시나리오는 비거주)
     other_home_disposal_date=R,          # 기존 1주택 처분 시점
     current_market_price=R,              # 지금 팔면 받을 가격 (저층 실거래 기준)
+    agent_vat_registered=R,              # 매도 중개사무소가 일반과세자인가 (부가세 10% 여부)
 )
 HOLDING_YEARS = 5
 HELD_SALE_PRICE_5Y = None                # 5년 뒤 매도가 시나리오 — 엔진 Base/Bear/Bull 에서 가져올 것

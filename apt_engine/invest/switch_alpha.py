@@ -68,12 +68,14 @@ class HeldAsset:
     temporary_two_home: bool = True
     other_home_disposal_date: str | object = USER_INPUT_REQUIRED
     current_market_price: int | object = USER_INPUT_REQUIRED  # 지금 팔면 받을 가격(저층 시세)
+    agent_vat_registered: bool | None | object = USER_INPUT_REQUIRED  # 매도 중개사무소가 일반과세자인가
+    official_price: int | object = USER_INPUT_REQUIRED  # 공시가격 — 보유세(재산세·종부세) 계산용
 
     def missing(self) -> list[str]:
         out = []
         for k in ("purchase_date", "mortgage_amount", "interest_rate", "repayment_type",
                   "assumed_deposit", "occupancy", "other_home_disposal_date",
-                  "current_market_price"):
+                  "current_market_price", "agent_vat_registered", "official_price"):
             if getattr(self, k) == USER_INPUT_REQUIRED:
                 out.append(k)
         return out
@@ -149,9 +151,12 @@ def hold_case(conn: sqlite3.Connection, held: HeldAsset, *, as_of: str | date,
     tl = timeline_mod.build(
         conn, capital=cap, as_of=as_of, holding_years=holding_years,
         sale_price=expected_sale_price, occupancy=held.occupancy,
+        official_price=held.official_price if isinstance(held.official_price, int) else None,
         interest_rate=held.interest_rate, repayment_type=held.repayment_type,
-        house_count=held.house_count_at_purchase, lawd_cd=held.lawd_cd,
-        allow_unverified=allow_unverified)
+        house_count=held.house_count_at_purchase,
+        agent_vat_registered=held.agent_vat_registered if isinstance(held.agent_vat_registered, bool) else None,
+        region={"11": "서울", "28": "인천", "41": "경기"}.get(held.lawd_cd[:2]),
+        lawd_cd=held.lawd_cd, allow_unverified=allow_unverified)
     tw = _terminal_wealth(tl)
     calc = Calc(value=tw, unit="원", formula="TW_hold = 매각 순수입 + Σ(연간 순현금흐름)",
                 inputs={"매수가": units.fmt_eok(held.purchase_price),
@@ -194,10 +199,17 @@ def switch_case(conn: sqlite3.Connection, held: HeldAsset, alt: Alternative, *,
         exclusive_area_m2=held.exclusive_area_m2, temporary_two_home=held.temporary_two_home,
         interest_rate=held.interest_rate, repayment_type=held.repayment_type,
         requested_mortgage=held.mortgage_amount, allow_unverified=allow_unverified)
-    fee, vat, _ = cost_mod.brokerage(conn, price=sale_now, as_of=as_of,
+    # 중개보수 조례는 시도별이다. lawd_cd 앞 두 자리로 시도를 고른다(전국 규칙은 없다).
+    region = {"11": "서울", "28": "인천", "41": "경기"}.get(held.lawd_cd[:2])
+    fee, vat, _ = cost_mod.brokerage(conn, price=sale_now, as_of=as_of, region=region,
+                                     agent_vat_registered=held.agent_vat_registered,
                                      allow_unverified=allow_unverified)
-    # 부가세는 중개사무소가 일반과세자일 때만 붙는다 — 모르면 붙이지 않되 그 사실을 남긴다.
-    fee_sell = (fee.amount + (vat.amount or 0)) if fee.amount is not None else None
+    # 부가세는 중개사무소가 일반과세자일 때만 붙는다. agent_vat_registered 가 None 이면
+    # 부가세를 모르는 것이므로 항목 자체를 비운다 — 0 으로 세지 않는다.
+    if fee.amount is None or (held.agent_vat_registered is None):
+        fee_sell = None
+    else:
+        fee_sell = fee.amount + (vat.amount or 0)
     items["보유자산 매도 중개보수"] = fee_sell
     gains = cg_mod.compute(conn, sale_price=sale_now, purchase_price=held.purchase_price,
                            expenses=(cap_held.total_purchase_cost - held.purchase_price) + (fee_sell or 0),
