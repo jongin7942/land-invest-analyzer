@@ -707,6 +707,118 @@ def geocode_complexes(*, limit: int | None = None, db_path: str | None = None,
     return stats
 
 
+def collect_supply(*, limit: int | None = None, db_path: str | None = None,
+                   progress=print) -> dict:
+    """청약홈 분양정보 -> supply_plan. 정부 원천이라 announced_ym 을 실제 값으로 채운다.
+
+    한국부동산원 청약홈이 주는 필드가 supply_plan 이 요구하는 것과 정확히 맞는다 -
+    HOUSE_NM(단지명) · TOT_SUPLY_HSHLDCO(세대수) · MVN_PREARNGE_YM(입주예정월) ·
+    RCRIT_PBLANC_DE(모집공고일 = announced_ym). "분양은 준공 30개월 전" 추정을
+    쓸 필요가 없다 - 실제 공고일이 있다.
+
+    주소만 주므로 지오코딩해서 좌표·법정동을 구한다. 여러 구역에 걸친 광역 개발
+    (예: '인천계양지구 A6블록…경기도 부천시…서울특별시 강서구…')은 지오코딩이
+    실패하고, 그러면 건너뛴다 - 대표 좌표를 지어내지 않는다.
+    """
+    from datetime import date
+    from apt_engine.collectors import applyhome, geocode as geocode_mod, landinfo
+
+    CHUNK = 100
+    stats = {"targets": 0, "filled": 0, "skipped": 0, "failed": 0}
+
+    try:
+        rows = applyhome.fetch_all()
+    except applyhome.ApplyhomeError as e:
+        progress(f"청약홈 연결 실패: {e}")
+        return stats
+    metro = applyhome.metro_apartments(rows)
+    if limit:
+        metro = metro[:limit]
+    stats["targets"] = len(metro)
+    progress(f"청약홈 수도권 아파트 분양 {len(metro)}건 조회 중...")
+
+    updates: list[tuple] = []
+    logs: list[tuple] = []
+
+    def flush() -> None:
+        if not updates and not logs:
+            return
+        with get_conn(db_path) as conn:
+            for row in updates:
+                conn.execute(
+                    "INSERT INTO supply_plan (lawd_cd, emd_name, complex_name, "
+                    " households, move_in_ym, announced_ym, stage, kind, lat, lon, "
+                    " source_name, source_url, last_verified, note) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                    "ON CONFLICT(lawd_cd, complex_name, move_in_ym) DO UPDATE SET "
+                    " announced_ym=excluded.announced_ym, households=excluded.households, "
+                    " lat=excluded.lat, lon=excluded.lon, last_verified=excluded.last_verified",
+                    row)
+            for key, status, err in logs:
+                repo.log_collection(conn, applyhome.SOURCE_KEY, target=key,
+                                    period=None, status=status, error=err)
+        updates.clear()
+        logs.clear()
+
+    for i, r in enumerate(metro, 1):
+        name = r["HOUSE_NM"]
+        addr = r["HSSPLY_ADRES"]
+        approx = False
+        try:
+            coord = geocode_mod.geocode(addr, road=False) or geocode_mod.geocode(addr, road=True)
+        except geocode_mod.GeocodeError as e:
+            stats["failed"] += 1
+            logs.append((name, "FAILED", str(e)[:300]))
+            coord = None
+
+        if not coord:
+            # 공공택지지구 블록 분양은 지번이 아직 없어 통째로는 지오코딩이 안 된다.
+            # "시도 시군구 읍면동" 만 남기고 재시도한다 - 실제 행정구역 이름이라 된다.
+            # 좌표는 못 구해도 lawd_cd 만 맞으면 시군구 단위 집계에는 들어간다
+            # (features/supply.py 는 lawd_cd 로만 거른다).
+            prefix = applyhome.admin_prefix(addr)
+            if prefix:
+                try:
+                    coord = geocode_mod.geocode(prefix, road=False)
+                except geocode_mod.GeocodeError:
+                    coord = None
+                if coord:
+                    approx = True
+
+        if not coord:
+            stats["skipped"] += 1
+            logs.append((name, "EMPTY", f"주소를 지오코딩하지 못함: {addr[:200]}"))
+        else:
+            try:
+                found = landinfo.pnu_at(coord[0], coord[1])
+            except landinfo.LandInfoError:
+                found = None
+            dong_code = found[0][:10] if found else None
+            if not dong_code:
+                stats["skipped"] += 1
+                logs.append((name, "EMPTY", "좌표는 찾았지만 법정동을 못 찾음"))
+            else:
+                move_in = (r.get("MVN_PREARNGE_YM") or "").strip()
+                announced = (r.get("RCRIT_PBLANC_DE") or "").replace("-", "")[:6]
+                note = (f"청약홈 관리번호 {r.get('HOUSE_MANAGE_NO', '')} · {addr[:150]}")
+                if approx:
+                    note += " · 지번 없는 공공택지 블록이라 행정동 중심 근사 좌표(시군구 단위만 신뢰)"
+                updates.append((
+                    dong_code[:5], None, name, int(r["TOT_SUPLY_HSHLDCO"]),
+                    move_in, announced, "분양", "신규분양",
+                    None if approx else coord[0], None if approx else coord[1],
+                    applyhome.SOURCE_NAME, applyhome.SOURCE_URL,
+                    date.today().isoformat(), note))
+                stats["filled"] += 1
+
+        if i % CHUNK == 0 or i == len(metro):
+            flush()
+            progress(f"  {i}/{len(metro)} (채움 {stats['filled']} · "
+                     f"건너뜀 {stats['skipped']} · 실패 {stats['failed']})")
+    flush()
+    return stats
+
+
 def collect_land_area(*, limit: int | None = None, db_path: str | None = None,
                       progress=print) -> dict:
     """단지 대지면적과 현재 용적률. 좌표가 있어야 한다.

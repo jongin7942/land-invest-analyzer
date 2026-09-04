@@ -1080,6 +1080,15 @@ def cmd_supply(args):
         print(f"입주물량 {s['inserted']}건 등록"
               + (f" · 미검증 {s['unverified']}건" if s["unverified"] else "")
               + (f" · 분양시점 추정 {s['estimated_announce']}건" if s.get("estimated_announce") else ""))
+        return
+
+    if args.action == "collect":
+        s = ingest.collect_supply(limit=args.limit, db_path=args.db)
+        print(f"\n대상 {s['targets']:,}개 · 채움 {s['filled']:,}개 · "
+              f"건너뜀 {s['skipped']:,}개 · 실패 {s['failed']:,}개")
+        if s["skipped"]:
+            print("  건너뛴 건은 광역 개발 등 주소가 여러 구역에 걸쳐 지오코딩이 "
+                  "안 된 것입니다. 대표 좌표를 지어내지 않았습니다.")
 
 
 def cmd_landarea(args):
@@ -2560,8 +2569,9 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument("path", nargs="?")
 
     sp = sub.add_parser("supply", help="입주물량 입력")
-    sp.add_argument("action", choices=["template", "import"])
+    sp.add_argument("action", choices=["template", "import", "collect"])
     sp.add_argument("path", nargs="?")
+    sp.add_argument("--limit", type=int, help="collect: 한 번에 처리할 건수")
 
     gc = sub.add_parser("geocode", help="단지 좌표 채우기 (V-World)")
     gc.add_argument("--limit", type=int, help="한 번에 처리할 단지 수")
