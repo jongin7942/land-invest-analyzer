@@ -85,8 +85,14 @@ def _time_relevance(expected_completion: str | None, *, as_of: str,
 
 
 def load(conn: sqlite3.Connection, complex_id: int, *,
-         as_of: cutoff_mod.AsOf) -> list[CatalystView]:
-    """이 단지에 걸린 호재들의 **그 시점 상태**."""
+         as_of: cutoff_mod.AsOf, price: int | None = None) -> list[CatalystView]:
+    """이 단지에 걸린 호재들의 **그 시점 상태**.
+
+    `price` 를 주면 `impact_ratio` 가 적힌 호재의 경제효과를 그 단지 가격에
+    맞춰 만든다(마이그레이션 025). 같은 역 앞이라도 3억짜리와 15억짜리가 같은
+    금액을 받으면 안 되기 때문이다. 측정되는 것이 애초에 비율이라(역세권/비역세권
+    가격비율의 변화) 비율로 적고 금액은 읽을 때 만드는 편이 원본에 가깝다.
+    """
     observable = as_of.observable
     with cutoff_mod.guard(conn, observable) as g:
         rows = g.execute(
@@ -112,8 +118,17 @@ def load(conn: sqlite3.Connection, complex_id: int, *,
             realization = state["realization_probability"]
             if realization is None:
                 missing.append("실현확률")
+            # 비율이 적혀 있으면 단지 가격에 맞춰 금액을 만든다. 금액이 직접
+            # 적힌 경우(확정 보상금 등)보다 비율 쪽을 우선한다 - 단지 가격에
+            # 따라 움직이는 편이 실제에 가깝다.
+            ratio = state["impact_ratio"] if "impact_ratio" in state.keys() else None
             impact = state["economic_impact"]
-            if impact is None:
+            if ratio is not None and price:
+                impact = int(price * float(ratio))
+            elif ratio is not None and not price:
+                impact = None
+                missing.append("경제효과(비율은 있으나 단지 대표가격을 못 구함)")
+            if impact is None and "경제효과(비율은 있으나 단지 대표가격을 못 구함)" not in missing:
                 missing.append("경제효과")
             priced = state["priced_in_fraction"]
             if priced is None:
@@ -184,7 +199,7 @@ def feature(conn: sqlite3.Connection, complex_id: int, *,
             price: int | None = None) -> Feature:
     """남은 호재 알파 합계. 가격 대비 비율로 낸다(단지 크기에 무관하게 비교하려고)."""
     key = "catalyst_alpha"
-    views = load(conn, complex_id, as_of=as_of)
+    views = load(conn, complex_id, as_of=as_of, price=price)
     if not views:
         return Feature.missing(key, "그 시점에 알려진 호재가 없습니다")
 

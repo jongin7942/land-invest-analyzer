@@ -1125,6 +1125,21 @@ def cmd_catalyst(args):
                   "`transit import`(lat/lon 포함)를 먼저 하세요.")
         return
 
+    if args.action == "plan":
+        as_of = args.as_of or _today()
+        from apt_engine.catalyst import build_transit, transit as transit_mod
+        print(f"미개통 노선을 채점용 호재로 만듭니다 (기준일 {as_of})...")
+        with get_conn(args.db) as conn:
+            transit_mod.compute_distances(conn)
+            s = build_transit.build(conn, as_of_day=as_of,
+                                    area_band=args.band or area.DEFAULT_BAND)
+        print(f"\n미개통 역 {s['stations']}개 · 호재 {s['catalysts']}개 · "
+              f"노출 단지 {s['exposures']:,}건 · 건너뜀 {s['skipped']}개")
+        if s["skipped"]:
+            print("  건너뛴 역은 같은 종류 노선의 개통 사례가 없어 경제효과를 "
+                  "만들 수 없는 것입니다 — 지하철 평균으로 대신하지 않습니다.")
+        return
+
     if args.action == "show":
         as_of = args.as_of or _today()
         with get_conn(args.db) as conn:
@@ -2581,7 +2596,7 @@ def build_parser() -> argparse.ArgumentParser:
     la.add_argument("--limit", type=int, help="한 번에 처리할 단지 수")
 
     ct = sub.add_parser("catalyst", help="촉매 생성·조회")
-    ct.add_argument("action", choices=["build", "show"])
+    ct.add_argument("action", choices=["build", "plan", "show"])
     ct.add_argument("query", nargs="?", help="show: 단지명 일부")
     ct.add_argument("--complex-id", type=int)
     ct.add_argument("--as-of", help="기준일 YYYY-MM-DD (기본 오늘)")

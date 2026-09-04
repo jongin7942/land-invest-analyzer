@@ -51,6 +51,8 @@ SPEC: dict[str, list[tuple[str, bool]]] = {
     "momentum": [("momentum_6m", True), ("price_acceleration", True),
                  ("discovery_lag", False)],
     # 공급이 적을수록 좋고, 절벽이면 그 뒤가 좋다(§13)
+    # supply_ratio 는 투자기간에 맞춰 바뀐다 - spec_for() 참고. 여기 적힌 3y 는
+    # 기간을 안 넘겼을 때의 기본값이다.
     "supply": [("supply_ratio_3y", False), ("supply_cliff", True)],
     # 아직 반영되지 않은 호재 (§17)
     "catalyst": [("catalyst_alpha", True)],
@@ -65,6 +67,38 @@ SPEC: dict[str, list[tuple[str, bool]]] = {
     # 같은 돈으로 더 큰 자산 (§28·§29)
     "capital_efficiency": [("capital_efficiency", True)],
 }
+
+
+# features/supply.py 가 계산해 두는 지평들. 투자기간에 맞는 것을 고른다.
+SUPPLY_HORIZONS = (1, 2, 3, 5)
+
+
+def supply_key_for(horizon_years: int | None) -> str:
+    """투자기간에 맞는 공급 지평. 없으면 그보다 긴 쪽으로 올린다.
+
+    4년 투자면 3년치로 내리는 게 아니라 5년치로 올린다 - 기간 안에 들어올 공급을
+    빠뜨리는 쪽보다 넉넉히 세는 쪽이 안전하다.
+    """
+    if not horizon_years:
+        return "supply_ratio_3y"
+    for y in SUPPLY_HORIZONS:
+        if y >= horizon_years:
+            return f"supply_ratio_{y}y"
+    return f"supply_ratio_{SUPPLY_HORIZONS[-1]}y"
+
+
+def spec_for(model: str, horizon_years: int | None = None) -> list[tuple[str, bool]]:
+    """모델의 입력 목록. 공급만 투자기간에 따라 지평이 달라진다.
+
+    SPEC 을 그대로 쓰면 2년 투자와 5년 투자가 같은 3년치 공급을 본다. 그러면
+    투자기간이 순위에 아무 영향도 주지 못한다(실측으로 30위까지 완전히 동일했다).
+    """
+    spec = SPEC[model]
+    if model != "supply" or not horizon_years:
+        return spec
+    want = supply_key_for(horizon_years)
+    return [(want if key.startswith("supply_ratio") else key, higher)
+            for key, higher in spec]
 
 
 def build_ranks(feature_sets: dict[int, FeatureSet]) -> dict[str, normalize.Ranked]:
@@ -97,11 +131,12 @@ def _higher_is_better(key: str) -> bool:
 
 
 def score_one(model: str, complex_id: int, feature_set: FeatureSet,
-              ranks: dict[str, normalize.Ranked]) -> ModelScore:
+              ranks: dict[str, normalize.Ranked],
+              horizon_years: int | None = None) -> ModelScore:
     """모델 하나. 입력이 하나도 없으면 점수를 만들지 않는다."""
-    spec = SPEC.get(model)
-    if spec is None:
+    if model not in SPEC:
         raise ValueError(f"모르는 모델: {model} (가능: {', '.join(SPEC)})")
+    spec = spec_for(model, horizon_years)
 
     used: dict[str, float] = {}
     missing: list[str] = []
@@ -131,5 +166,7 @@ def score_one(model: str, complex_id: int, feature_set: FeatureSet,
 
 
 def score_all(complex_id: int, feature_set: FeatureSet,
-              ranks: dict[str, normalize.Ranked]) -> dict[str, ModelScore]:
-    return {m: score_one(m, complex_id, feature_set, ranks) for m in SPEC}
+              ranks: dict[str, normalize.Ranked],
+              horizon_years: int | None = None) -> dict[str, ModelScore]:
+    return {m: score_one(m, complex_id, feature_set, ranks, horizon_years)
+            for m in SPEC}

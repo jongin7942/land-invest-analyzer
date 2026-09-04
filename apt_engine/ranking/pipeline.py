@@ -233,7 +233,9 @@ def run(conn: sqlite3.Connection, *, as_of: cutoff_mod.AsOf, profile: Profile,
     candidates: list[Candidate] = []
     for row in feasible_rows:
         fs = feature_sets[row.complex_id]
-        scores = models_mod.score_all(row.complex_id, fs, ranks)
+        # 투자기간을 넘긴다 - 공급 모델이 기간에 맞는 지평을 고른다.
+        scores = models_mod.score_all(row.complex_id, fs, ranks,
+                                      horizon_years=horizon_years)
         cons = consensus_mod.combine(row.complex_id, scores, weights)
         kill = kill_mod.evaluate(fs)
         survival = thesis_mod.evaluate(cons, weights)
