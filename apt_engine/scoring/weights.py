@@ -18,9 +18,9 @@ from dataclasses import dataclass
 HEURISTIC = "HEURISTIC"
 BACKTESTED = "BACKTESTED"
 
-# 모델 9종 (§49)
+# 모델 10종 (§49 의 9종 + access)
 MODELS = ("value", "momentum", "supply", "catalyst", "redevelopment",
-          "relative", "jeonse", "risk", "capital_efficiency")
+          "relative", "jeonse", "risk", "capital_efficiency", "access")
 
 # 기본 가중치. 합이 1 이 아니어도 된다 — 쓸 수 있는 모델만 골라 정규화한다.
 BASE: dict[str, float] = {
@@ -33,6 +33,11 @@ BASE: dict[str, float] = {
     "jeonse": 0.10,
     "risk": 0.08,
     "capital_efficiency": 0.05,
+    # access 는 다른 항목보다 작게 잡았다. 측정된 폭 자체가 작기 때문이다
+    # (5년에 ~500m +0.66%p vs 2km 밖 -0.75%p). 방향이 18년 내내 뒤집히지
+    # 않았고 밴드 다섯 개가 순서대로 늘어서서 넣을 만하지만, 크기를 부풀리지
+    # 않는다. 다른 값들과 마찬가지로 백테스트가 이 자리를 대체한다.
+    "access": 0.06,
 }
 
 # 국면별 조정 배율. 침체기에 모멘텀을 크게 보면 계속 떨어지는 걸 사게 되고,

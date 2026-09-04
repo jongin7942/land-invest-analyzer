@@ -56,6 +56,9 @@ SPEC: dict[str, list[tuple[str, bool]]] = {
     "supply": [("supply_ratio_3y", False), ("supply_cliff", True)],
     # 아직 반영되지 않은 호재 (§17)
     "catalyst": [("catalyst_alpha", True)],
+    # 역세권 격차가 벌어지는 속도. '역세권이라 비싸다' 는 이미 값에 있으므로
+    # 세지 않는다 - 앞으로 더 벌어질 몫만 센다(features/access.py).
+    "access": [("station_access_drift", True)],
     # 재건축은 별도 엔진에서 온다 (§19~§22)
     "redevelopment": [("redev_mispricing", True)],
     # 비교단지 대비 위치 (§10)

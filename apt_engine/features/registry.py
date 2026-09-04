@@ -146,6 +146,10 @@ REGISTRY: dict[str, Entry] = {e.feature_key: e for e in (
        "같은 생활권 비교단지가 함께 움직이는가(§10). **Alpha 가 아니라 신뢰도**"),
     _e("buyer_pool", SUSTAINABILITY, ROLE_ALPHA, True,
        "이 가격대를 살 수 있는 수요층의 두께"),
+    # 수준이 아니라 '벌어지는 속도' 다. 역세권이라 비싼 것은 이미 값에 있어서
+    # 알파가 아니고, 그 격차가 계속 벌어진다는 사실만 알파다(features/access.py).
+    _e("station_access_drift", SUSTAINABILITY, ROLE_ALPHA, True,
+       "역까지 거리 밴드의 연 추세 × 투자기간. 2008~2025년 자체 측정", "access"),
     _e("next_node_score", MOVEMENT, ROLE_ALPHA, True,
        "이미 오른 칸 바로 아래이면서 아직 초기인가(§16)"),
     _e("effective_supply_risk", SUSTAINABILITY, ROLE_RISK, False,
