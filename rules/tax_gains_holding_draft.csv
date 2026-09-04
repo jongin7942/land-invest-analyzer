@@ -1,0 +1,44 @@
+tax_kind,rule_key,conditions_json,bracket_min,bracket_max,rate,progressive_deduction,fixed_amount,rate_formula,rate_decimals,max_amount,base_kind,effective_from,effective_to,source_name,source_url,last_verified,status,verification,note
+# ─────────────────────────────────────────────────────────────────────────────
+# 양도소득세·장기보유특별공제·지방소득세·재산세·공정시장가액비율 — 초안 (2026-09-04)
+#
+# 보유 vs 갈아타기(SWITCH_ALPHA) 계산에 이 다섯 가지가 없어서 엔진이 결론을 내지 못했다.
+# 법령에서 옮겨 적었지만 **원문 대조는 아직이다.** last_verified 를 비워 두었으므로
+# 엔진은 allow_unverified 없이는 이 행을 쓰지 않는다. 종인님이 원문을 확인하고
+# `cli rule verify tax --id <id> --date YYYY-MM-DD` 로 표시하면 그때부터 '확정'으로 계산한다.
+#
+# 넣지 않은 것: 종합부동산세(기본공제 12억/9억을 빼는 구조를 holding.py 가 아직 지원하지
+# 않음 → 코드 수정 후), 조정대상지역 다주택 중과세율(+20%p/+30%p — 부평구는 비조정이라
+# 이번 계산엔 불필요, 2026-05-09 유예 종료 · 2027~28 한시 완화안은 확정 뒤 반영),
+# 1세대1주택 비과세·장특공제 표2(실거주 요건 — 동아는 일시적 2주택 처분시점이 정해진 뒤).
+# ─────────────────────────────────────────────────────────────────────────────
+양도소득세,cg/기본공제,{},0,,,,2500000,,,,양도소득금액,2026-01-01,,소득세법 제103조(양도소득 기본공제 연 250만원),https://www.law.go.kr/법령/소득세법/제103조,,ENACTED,NEEDS_VERIFICATION,[초안 — 원문 대조 필요] 자산 종류별 연 250만원
+양도소득세,cg/기본세율/1400만이하,{},0,14000000,0.06,0,,,,,과세표준,2026-01-01,,소득세법 제55조제1항·제104조제1항제1호 기본세율,https://www.law.go.kr/법령/소득세법/제55조,,ENACTED,NEEDS_VERIFICATION,[초안 — 원문 대조 필요]
+양도소득세,cg/기본세율/5000만이하,{},14000000,50000000,0.15,1260000,,,,,과세표준,2026-01-01,,소득세법 제55조제1항 기본세율,https://www.law.go.kr/법령/소득세법/제55조,,ENACTED,NEEDS_VERIFICATION,[초안 — 원문 대조 필요] 누진공제 126만
+양도소득세,cg/기본세율/8800만이하,{},50000000,88000000,0.24,5760000,,,,,과세표준,2026-01-01,,소득세법 제55조제1항 기본세율,https://www.law.go.kr/법령/소득세법/제55조,,ENACTED,NEEDS_VERIFICATION,[초안 — 원문 대조 필요] 누진공제 576만
+양도소득세,cg/기본세율/1.5억이하,{},88000000,150000000,0.35,15440000,,,,,과세표준,2026-01-01,,소득세법 제55조제1항 기본세율,https://www.law.go.kr/법령/소득세법/제55조,,ENACTED,NEEDS_VERIFICATION,[초안 — 원문 대조 필요] 누진공제 1544만
+양도소득세,cg/기본세율/3억이하,{},150000000,300000000,0.38,19940000,,,,,과세표준,2026-01-01,,소득세법 제55조제1항 기본세율,https://www.law.go.kr/법령/소득세법/제55조,,ENACTED,NEEDS_VERIFICATION,[초안 — 원문 대조 필요] 누진공제 1994만
+양도소득세,cg/기본세율/5억이하,{},300000000,500000000,0.40,25940000,,,,,과세표준,2026-01-01,,소득세법 제55조제1항 기본세율,https://www.law.go.kr/법령/소득세법/제55조,,ENACTED,NEEDS_VERIFICATION,[초안 — 원문 대조 필요] 누진공제 2594만
+양도소득세,cg/기본세율/10억이하,{},500000000,1000000000,0.42,35940000,,,,,과세표준,2026-01-01,,소득세법 제55조제1항 기본세율,https://www.law.go.kr/법령/소득세법/제55조,,ENACTED,NEEDS_VERIFICATION,[초안 — 원문 대조 필요] 누진공제 3594만
+양도소득세,cg/기본세율/10억초과,{},1000000000,,0.45,65940000,,,,,과세표준,2026-01-01,,소득세법 제55조제1항 기본세율,https://www.law.go.kr/법령/소득세법/제55조,,ENACTED,NEEDS_VERIFICATION,[초안 — 원문 대조 필요] 누진공제 6594만
+장기보유특별공제,ltd/표1/3년,"{""holding_years_gte"": 3, ""holding_years_lt"": 4}",0,,0.06,0,,,,,양도차익,2026-01-01,,소득세법 제95조제2항 표1(보유기간별 연 2%·3년 6%~15년 30%),https://www.law.go.kr/법령/소득세법/제95조,,ENACTED,NEEDS_VERIFICATION,[초안 — 원문 대조 필요] 1세대1주택 표2(거주 요건) 아님
+장기보유특별공제,ltd/표1/4년,"{""holding_years_gte"": 4, ""holding_years_lt"": 5}",0,,0.08,0,,,,,양도차익,2026-01-01,,소득세법 제95조제2항 표1,https://www.law.go.kr/법령/소득세법/제95조,,ENACTED,NEEDS_VERIFICATION,[초안 — 원문 대조 필요]
+장기보유특별공제,ltd/표1/5년,"{""holding_years_gte"": 5, ""holding_years_lt"": 6}",0,,0.10,0,,,,,양도차익,2026-01-01,,소득세법 제95조제2항 표1,https://www.law.go.kr/법령/소득세법/제95조,,ENACTED,NEEDS_VERIFICATION,[초안 — 원문 대조 필요]
+장기보유특별공제,ltd/표1/6년,"{""holding_years_gte"": 6, ""holding_years_lt"": 7}",0,,0.12,0,,,,,양도차익,2026-01-01,,소득세법 제95조제2항 표1,https://www.law.go.kr/법령/소득세법/제95조,,ENACTED,NEEDS_VERIFICATION,[초안 — 원문 대조 필요]
+장기보유특별공제,ltd/표1/7년,"{""holding_years_gte"": 7, ""holding_years_lt"": 8}",0,,0.14,0,,,,,양도차익,2026-01-01,,소득세법 제95조제2항 표1,https://www.law.go.kr/법령/소득세법/제95조,,ENACTED,NEEDS_VERIFICATION,[초안 — 원문 대조 필요]
+장기보유특별공제,ltd/표1/8년,"{""holding_years_gte"": 8, ""holding_years_lt"": 9}",0,,0.16,0,,,,,양도차익,2026-01-01,,소득세법 제95조제2항 표1,https://www.law.go.kr/법령/소득세법/제95조,,ENACTED,NEEDS_VERIFICATION,[초안 — 원문 대조 필요]
+장기보유특별공제,ltd/표1/9년,"{""holding_years_gte"": 9, ""holding_years_lt"": 10}",0,,0.18,0,,,,,양도차익,2026-01-01,,소득세법 제95조제2항 표1,https://www.law.go.kr/법령/소득세법/제95조,,ENACTED,NEEDS_VERIFICATION,[초안 — 원문 대조 필요]
+장기보유특별공제,ltd/표1/10년,"{""holding_years_gte"": 10, ""holding_years_lt"": 11}",0,,0.20,0,,,,,양도차익,2026-01-01,,소득세법 제95조제2항 표1,https://www.law.go.kr/법령/소득세법/제95조,,ENACTED,NEEDS_VERIFICATION,[초안 — 원문 대조 필요]
+장기보유특별공제,ltd/표1/11년,"{""holding_years_gte"": 11, ""holding_years_lt"": 12}",0,,0.22,0,,,,,양도차익,2026-01-01,,소득세법 제95조제2항 표1,https://www.law.go.kr/법령/소득세법/제95조,,ENACTED,NEEDS_VERIFICATION,[초안 — 원문 대조 필요]
+장기보유특별공제,ltd/표1/12년,"{""holding_years_gte"": 12, ""holding_years_lt"": 13}",0,,0.24,0,,,,,양도차익,2026-01-01,,소득세법 제95조제2항 표1,https://www.law.go.kr/법령/소득세법/제95조,,ENACTED,NEEDS_VERIFICATION,[초안 — 원문 대조 필요]
+장기보유특별공제,ltd/표1/13년,"{""holding_years_gte"": 13, ""holding_years_lt"": 14}",0,,0.26,0,,,,,양도차익,2026-01-01,,소득세법 제95조제2항 표1,https://www.law.go.kr/법령/소득세법/제95조,,ENACTED,NEEDS_VERIFICATION,[초안 — 원문 대조 필요]
+장기보유특별공제,ltd/표1/14년,"{""holding_years_gte"": 14, ""holding_years_lt"": 15}",0,,0.28,0,,,,,양도차익,2026-01-01,,소득세법 제95조제2항 표1,https://www.law.go.kr/법령/소득세법/제95조,,ENACTED,NEEDS_VERIFICATION,[초안 — 원문 대조 필요]
+장기보유특별공제,ltd/표1/15년이상,"{""holding_years_gte"": 15}",0,,0.30,0,,,,,양도차익,2026-01-01,,소득세법 제95조제2항 표1,https://www.law.go.kr/법령/소득세법/제95조,,ENACTED,NEEDS_VERIFICATION,[초안 — 원문 대조 필요] 상한 30%
+장기보유특별공제,ltd/표1/3년미만,"{""holding_years_lt"": 3}",0,,0,0,,,,,양도차익,2026-01-01,,소득세법 제95조제2항(3년 미만 공제 없음),https://www.law.go.kr/법령/소득세법/제95조,,ENACTED,NEEDS_VERIFICATION,[초안 — 원문 대조 필요] 공제 0
+지방소득세,lit/양도소득분,{},0,,0.10,0,,,,,양도소득세액,2026-01-01,,지방세법 제103조의3(양도소득에 대한 개인지방소득세 = 양도소득세 산출세액의 10%),https://www.law.go.kr/법령/지방세법/제103조의3,,ENACTED,NEEDS_VERIFICATION,[초안 — 원문 대조 필요]
+재산세,pt/주택/6000만이하,{},0,60000000,0.001,0,,,,,과세표준,2026-01-01,,지방세법 제111조제1항제3호 주택 표준세율,https://www.law.go.kr/법령/지방세법/제111조,,ENACTED,NEEDS_VERIFICATION,[초안 — 원문 대조 필요] 1주택 9억이하 특례세율(제111조의2)은 별도
+재산세,pt/주택/1.5억이하,{},60000000,150000000,0.0015,30000,,,,,과세표준,2026-01-01,,지방세법 제111조제1항제3호,https://www.law.go.kr/법령/지방세법/제111조,,ENACTED,NEEDS_VERIFICATION,[초안 — 원문 대조 필요] 누진공제 3만
+재산세,pt/주택/3억이하,{},150000000,300000000,0.0025,180000,,,,,과세표준,2026-01-01,,지방세법 제111조제1항제3호,https://www.law.go.kr/법령/지방세법/제111조,,ENACTED,NEEDS_VERIFICATION,[초안 — 원문 대조 필요] 누진공제 18만
+재산세,pt/주택/3억초과,{},300000000,,0.004,630000,,,,,과세표준,2026-01-01,,지방세법 제111조제1항제3호,https://www.law.go.kr/법령/지방세법/제111조,,ENACTED,NEEDS_VERIFICATION,[초안 — 원문 대조 필요] 누진공제 63만
+공정시장가액비율,fmr/재산세/주택,"{""tax_kind"": ""재산세""}",0,,0.60,0,,,,,공시가격,2026-01-01,,지방세법 시행령 제109조(주택 60%; 1주택 특례비율은 별도),https://www.law.go.kr/법령/지방세법시행령/제109조,,ENACTED,NEEDS_VERIFICATION,[초안 — 원문 대조 필요] 1세대1주택 특례(43~45%)는 해당 시 별도 행
+공정시장가액비율,fmr/종합부동산세/주택,"{""tax_kind"": ""종합부동산세""}",0,,0.60,0,,,,,공시가격,2026-01-01,,종합부동산세법 시행령 제2조의4(주택 60%),https://www.law.go.kr/법령/종합부동산세법시행령/제2조의4,,ENACTED,NEEDS_VERIFICATION,[초안 — 원문 대조 필요]
