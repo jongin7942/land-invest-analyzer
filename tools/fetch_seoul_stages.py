@@ -123,7 +123,9 @@ def list_rows(op) -> list[dict]:
             break
         rows.extend(got)
         seen.update(r["no"] for r in got)
-        page += 1
+        # 서버는 pageSize 와 무관하게 시작 위치를 (cpage-1)*10 으로 잡는다.
+        # 100행씩 받으려면 cpage 를 10씩 건너뛰어야 한다(실측: cpage=2 가 11번째 행부터).
+        page += PAGE_SIZE // 10
         time.sleep(0.2)
     if not rows:
         raise SystemExit("목록을 못 읽었습니다 — 폼 값이 바뀐 것 같습니다.")
@@ -239,7 +241,8 @@ def main() -> int:
             print(f"  {i}/{len(rows)} · 이번에 수집 {done}")
     CACHE.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
 
-    stages = list(SECTIONS.values())
+    # 최초 인가일과, 그것이 없을 때의 변경인가일(_approx)을 나란히 적는다.
+    stages = [s for base in SECTIONS.values() for s in (base, base + "_approx")]
     with OUT.open("w", encoding="utf-8", newline="") as f:
         w = csv.writer(f)
         w.writerow(["no", "gu", "biz_type", "project", "jibun", "stage_now", "slug",
