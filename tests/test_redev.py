@@ -212,6 +212,44 @@ def test_오피스텔_세대수는_대지지분_계산에_섞이지_않는다(db
         assert c.land_share_m2 == pytest.approx(100.0)   # 50000/500, 1000 이 아니다
 
 
+def test_이제_통과하지_않는_단지는_후보에서_지워진다(db):
+    """예전에는 upsert 만 해서 한 번 통과한 단지가 영원히 후보로 남았다.
+
+    실제로 사고가 났다. 대지면적 수집이 고쳐지기 전 current_far 가 219.5 가
+    아니라 2.195(100 으로 나뉜 값)로 들어 있던 시절에 스크리닝이 돌았고,
+    용적률 통과선을 가볍게 통과한 단지들이 표에 눌러앉았다. 나중에 용적률이
+    제대로 채워진 뒤에도 그 행들은 그대로였다.
+    """
+    with get_conn(db) as conn:
+        cid = add_complex(conn, "용적률이고쳐질단지", approval_year=1988,
+                          far=2.2, land_area=45000)
+        screening.save(conn, screening.screen(conn, as_of=TODAY), as_of=TODAY)
+        assert conn.execute("SELECT COUNT(*) FROM redev_candidate WHERE complex_id=?",
+                            (cid,)).fetchone()[0] == 1
+
+        # 용적률이 제대로 채워졌다 — 이제 통과선(200%)을 넘는다.
+        conn.execute("UPDATE complex SET current_far = 220.0 WHERE id = ?", (cid,))
+        screening.save(conn, screening.screen(conn, as_of=TODAY), as_of=TODAY)
+        assert conn.execute("SELECT COUNT(*) FROM redev_candidate WHERE complex_id=?",
+                            (cid,)).fetchone()[0] == 0,             "통과하지 않게 된 단지가 후보로 남아 있으면 안 된다"
+
+
+def test_사람이_조사한_단지는_탈락해도_지우지_않는다(db):
+    """자동 정리가 사람의 기록을 지울 수는 없다."""
+    with get_conn(db) as conn:
+        cid = add_complex(conn, "조사한단지", approval_year=1988,
+                          far=150, land_area=45000)
+        screening.save(conn, screening.screen(conn, as_of=TODAY), as_of=TODAY)
+        redev_repo.set_manual_status(conn, cid, status="완료", note="정비계획 확인함")
+
+        conn.execute("UPDATE complex SET current_far = 260.0 WHERE id = ?", (cid,))
+        saved, cleared = screening.save(conn, screening.screen(conn, as_of=TODAY),
+                                        as_of=TODAY)
+        row = conn.execute("SELECT manual_status FROM redev_candidate WHERE complex_id=?",
+                           (cid,)).fetchone()
+        assert row is not None and row["manual_status"] == "완료"
+
+
 def test_스크리닝_저장은_사람이_정한_조사상태를_덮어쓰지_않는다(db):
     with get_conn(db) as conn:
         cid = add_complex(conn, "후보", approval_year=1988, far=150, land_area=45000)

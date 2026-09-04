@@ -1383,8 +1383,10 @@ def cmd_redev(args):
         with get_conn(args.db) as conn:
             found = screening.screen(conn, as_of=as_of, lawd_cd=args.lawd,
                                      min_age=args.min_age, max_far=args.max_far)
-            saved = screening.save(conn, found, as_of=as_of)
-        print(f"1차 스크리닝 (기준일 {as_of}) — 통과 {saved}개")
+            saved, cleared = screening.save(conn, found, as_of=as_of,
+                                            lawd_cd=args.lawd)
+        print(f"1차 스크리닝 (기준일 {as_of}) — 통과 {saved}개"
+              + (f" · 더 이상 통과하지 않아 지운 단지 {cleared}개" if cleared else ""))
         print(f"  조건: 사용승인 {args.min_age}년 이상 · 현재 용적률 {args.max_far:g}% 이하 · "
               f"아파트 {screening.MIN_HOUSEHOLDS}세대 이상")
         no_land = sum(1 for c in found if c.land_share_m2 is None)

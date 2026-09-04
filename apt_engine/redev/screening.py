@@ -166,11 +166,38 @@ def screen(conn: sqlite3.Connection, *, as_of: str | date, lawd_cd: str | None =
 
 
 def save(conn: sqlite3.Connection, candidates: list[Candidate], *,
-         as_of: str | date) -> int:
-    """스크리닝 결과 저장. manual_status 는 사람이 정한 값이라 덮어쓰지 않는다."""
+         as_of: str | date, lawd_cd: str | None = None) -> tuple[int, int]:
+    """스크리닝 결과 저장. (저장, 정리) 를 돌려준다.
+
+    ── 왜 지우는 단계가 필요한가 ────────────────────────────────────
+    예전에는 upsert 만 했다. 그래서 **한 번 통과한 단지는 영원히 후보로 남았다.**
+    실제로 사고가 났다: 대지면적 수집이 고쳐지기 전 `current_far` 가 219.5 가
+    아니라 2.195(100 으로 나뉜 값)로 들어 있던 시절에 스크리닝이 돌았고,
+    용적률 200% 통과선을 2.195 로 가볍게 통과한 단지 1,156개가 표에 눌러앉았다.
+    나중에 용적률이 제대로 채워진 뒤에도 그 행들은 그대로 남아 있었다.
+
+    후보 목록은 '지금 기준으로 통과하는 단지' 여야 한다. 그래서 이번 선별에
+    없는 단지는 지운다.
+
+    다만 **사람이 손댄 행은 남긴다.** manual_status 가 '미조사' 가 아니면
+    누군가 조사·판단을 적어 넣은 것이고, 그 기록을 자동 정리가 지울 수는 없다.
+    대신 그런 행이 남았다는 사실은 호출부가 알 수 있게 개수로 돌려준다.
+    """
     day = rules.as_ymd(as_of)
     rank_by_region: dict[str, int] = {}
     saved = 0
+
+    keep = {c.complex_id for c in candidates}
+    scope = ("SELECT rc.complex_id FROM redev_candidate rc "
+             "  JOIN complex c ON c.id = rc.complex_id "
+             " WHERE (rc.manual_status IS NULL OR rc.manual_status = '미조사')")
+    params: list = []
+    if lawd_cd:
+        scope += " AND c.lawd_cd = ?"
+        params.append(lawd_cd)
+    stale = [r[0] for r in conn.execute(scope, params) if r[0] not in keep]
+    for cid in stale:
+        conn.execute("DELETE FROM redev_candidate WHERE complex_id = ?", (cid,))
     for c in candidates:
         rank_by_region[c.lawd_cd] = rank_by_region.get(c.lawd_cd, 0) + 1
         conn.execute(
@@ -187,4 +214,4 @@ def save(conn: sqlite3.Connection, candidates: list[Candidate], *,
              rank_by_region[c.lawd_cd],
              json.dumps(c.reason, ensure_ascii=False), ENGINE_VERSION))
         saved += 1
-    return saved
+    return saved, len(stale)
