@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>아파트 투자 후보 초대</title>
+<style>
+  body { font-family: "IBM Plex Sans KR", "Malgun Gothic", system-ui, sans-serif; background: #141F2C; color: #fff; margin: 0; display: flex; min-height: 100vh; align-items: center; justify-content: center; word-break: keep-all; overflow-wrap: anywhere; }
+  .box { background: #fff; color: #141F2C; padding: 28px 30px; border-radius: 12px; max-width: 420px; margin: 20px; box-shadow: 0 8px 30px rgba(0,0,0,.3); text-align: center; }
+  h1 { font-size: 20px; margin: 0 0 8px; }
+  p { margin: 6px 0; line-height: 1.5; }
+  .muted { color: #5F6E7E; font-size: 13px; }
+  button { margin-top: 14px; font-size: 17px; font-weight: 700; padding: 12px 28px; border: 0; border-radius: 10px; background: #B25E28; color: #fff; cursor: pointer; width: 100%; }
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>아파트 투자 후보</h1>
+  <p><b>{{ label }}</b>님, 초대받으셨습니다.</p>
+  <form method="post">
+    <button type="submit">입장하기</button>
+  </form>
+  <p class="muted">입장하면 이 기기에서만 열립니다. 링크를 다른 사람에게 보내도 열리지 않습니다.</p>
+</div>
+</body>
+</html>

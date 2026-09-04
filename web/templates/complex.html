@@ -1,0 +1,72 @@
+<style>
+  .cx { max-width: 860px; margin: 0 auto; padding: 20px 16px 48px; font-family: "IBM Plex Sans KR", "Malgun Gothic", system-ui, sans-serif; color: #141F2C; }
+  .cx h1 { font-size: 22px; margin: 0 0 2px; }
+  .cx .sub { color: #5F6E7E; font-size: 14px; margin-bottom: 14px; }
+  .cx .bands a { display: inline-block; padding: 4px 10px; border: 1px solid #D6DEE7; border-radius: 999px; margin-right: 6px; text-decoration: none; color: inherit; font-size: 13px; }
+  .cx .bands a.on { background: #141F2C; color: #fff; border-color: #141F2C; }
+  .cx .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin: 14px 0; }
+  .cx .tile { background: #fff; border: 1px solid #D6DEE7; border-radius: 8px; padding: 10px 12px; }
+  .cx .tile .k { font-size: 11.5px; color: #5F6E7E; letter-spacing: .05em; text-transform: uppercase; }
+  .cx .tile .v { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .cx .tile .v small { font-size: 12px; color: #5F6E7E; font-weight: 400; }
+  .cx h2 { font-size: 15px; margin: 18px 0 8px; }
+  .cx table { width: 100%; border-collapse: collapse; font-size: 13.5px; background: #fff; border: 1px solid #D6DEE7; border-radius: 8px; overflow: hidden; }
+  .cx th, .cx td { padding: 7px 10px; border-bottom: 1px solid #E6ECF2; text-align: left; }
+  .cx th { font-size: 12px; color: #5F6E7E; font-weight: 600; }
+  .cx td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .cx .bar { display: inline-block; width: 90px; height: 6px; background: #E6ECF2; border-radius: 3px; vertical-align: middle; margin-right: 6px; }
+  .cx .bar i { display: block; height: 100%; background: #141F2C; border-radius: 3px; }
+  .cx .muted { color: #5F6E7E; font-size: 12.5px; }
+  .cx .hist { display: flex; align-items: flex-end; gap: 3px; height: 120px; padding: 8px 0 0; border-bottom: 1px solid #D6DEE7; }
+  .cx .hist div { flex: 1; background: #2C7E79; opacity: .85; min-width: 6px; position: relative; }
+  .cx .hist div span { position: absolute; bottom: -18px; left: 0; right: 0; text-align: center; font-size: 9.5px; color: #5F6E7E; }
+  .cx .note { margin-top: 20px; padding: 12px 14px; background: #fff; border: 1px solid #D6DEE7; border-radius: 8px; font-size: 13px; color: #5F6E7E; }
+</style>
+{% set c = d.complex %}
+<div class="cx">
+  <h1>{{ c.name }}</h1>
+  <div class="sub">{{ c.region or c.lawd_cd }} · {{ c.approval_year or '—' }}년 준공 · {{ '{:,}'.format(c.apt_households or 0) }}세대</div>
+  <div class="bands">
+    {% for b in d.bands %}<a href="/complex/{{ c.id }}?band={{ b }}&h={{ d.horizon }}" class="{{ 'on' if b == d.band else '' }}">{{ b }}㎡</a>{% endfor %}
+  </div>
+
+  <div class="tiles">
+    <div class="tile"><div class="k">대표가격</div><div class="v">{{ '%.2f'|format((d.price or 0)/1e8) }}억 <small>{{ d.price_ym or '' }}</small></div></div>
+    <div class="tile"><div class="k">전세</div><div class="v">{{ '%.2f'|format((d.jeonse or 0)/1e8) if d.jeonse else '—' }}{{ '억' if d.jeonse else '' }}</div></div>
+    <div class="tile"><div class="k">갭</div><div class="v">{{ '%.2f'|format(((d.price or 0)-(d.jeonse or 0))/1e8) if (d.price and d.jeonse) else '—' }}{{ '억' if (d.price and d.jeonse) else '' }}</div></div>
+    <div class="tile"><div class="k">점수 / 신뢰도</div><div class="v">{{ d.score }} <small>/ {{ d.confidence }}{% if d.confidence < 50 %} · 약함{% endif %}</small></div></div>
+    <div class="tile"><div class="k">순위</div><div class="v">{{ d.rank }} <small>/ {{ '{:,}'.format(d.pool) }} (같은 시도·{{ d.band }}㎡)</small></div></div>
+  </div>
+
+  <h2>모델별 백분위 (0~100, 같은 시도 같은 면적대 안에서)</h2>
+  <table>
+    {% for m in d.models %}
+    <tr><td>{{ m.model }}</td>
+        <td class="num">{% if m.value is not none %}<span class="bar"><i style="width:{{ m.value }}%"></i></span>{{ m.value }}{% else %}<span class="muted">값 없음 → 가중치 재분배</span>{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+
+  {% if d.access %}
+  <h2>역세권</h2>
+  <div class="muted">{{ d.access['밴드'] }} · {{ d.access['역'] }} · 연 추세 {{ d.access['연 추세'] }} (단지 중심점 기준 · 다니는 역만)</div>
+  {% endif %}
+
+  <h2>매년 6월 대표가격</h2>
+  {% set mx = (d.history | map(attribute='p') | max) if d.history else 1 %}
+  <div class="hist">
+    {% for h in d.history %}<div style="height:{{ (h.p / mx * 100) | round(0) }}%" title="{{ h.ym[:4] }} {{ '%.2f'|format(h.p/1e8) }}억"><span>{{ h.ym[2:4] }}</span></div>{% endfor %}
+  </div>
+
+  <h2>항목 ({{ d.features|length }}개, 값이 있는 것만)</h2>
+  <table>
+    <tr><th>항목</th><th class="num">값</th><th class="num">신뢰</th></tr>
+    {% for f in d.features %}
+    <tr><td>{{ f.key }}</td><td class="num">{{ '%.4g'|format(f.value) }}</td><td class="num">{{ f.confidence }}%</td></tr>
+    {% endfor %}
+  </table>
+
+  <div class="note">
+    점수와 신뢰도는 다른 것입니다. 신뢰도 50 미만은 표본이 얇습니다. 가중치는 임시(HEURISTIC)이며 후보를 좁히는 용도입니다.
+    모델은 단지 단위 중앙값을 보므로 층·향·동 같은 개별 매물 조건은 반영되지 않습니다.
+  </div>
+</div>

@@ -1,0 +1,37 @@
+<style>
+  .sw { max-width: 760px; margin: 0 auto; padding: 20px 16px 48px; font-family: "IBM Plex Sans KR", "Malgun Gothic", system-ui, sans-serif; color: #141F2C; }
+  .sw h1 { font-size: 22px; margin: 0 0 6px; }
+  .sw p.lead { color: #5F6E7E; margin: 0 0 14px; font-size: 14px; }
+  .sw input { width: 100%; font: inherit; font-size: 17px; padding: 12px 14px; border: 1px solid #D6DEE7; border-radius: 10px; box-sizing: border-box; }
+  .sw ul { list-style: none; padding: 0; margin: 12px 0 0; }
+  .sw li a { display: flex; justify-content: space-between; gap: 10px; padding: 12px 14px; border: 1px solid #D6DEE7; border-radius: 10px; margin-bottom: 8px; text-decoration: none; color: inherit; background: #fff; }
+  .sw li a:hover { border-color: #B25E28; }
+  .sw .nm { font-weight: 600; }
+  .sw .meta { color: #5F6E7E; font-size: 13px; white-space: nowrap; }
+  .sw .empty { color: #5F6E7E; padding: 14px 0; }
+</style>
+<div class="sw">
+  <h1>단지 검색</h1>
+  <p class="lead">단지 이름 두 글자 이상. 세대수가 많은 순으로 30개까지 보입니다.</p>
+  <input id="q" type="search" placeholder="예: 동아1단지, 래미안, 힐스테이트" autofocus>
+  <ul id="list"></ul>
+  <div id="empty" class="empty" hidden>결과가 없습니다.</div>
+</div>
+<script>
+(function(){
+  const q = document.getElementById('q'), list = document.getElementById('list'), empty = document.getElementById('empty');
+  let t = null;
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  async function go(){
+    const s = q.value.trim();
+    if (s.length < 2) { list.innerHTML = ''; empty.hidden = true; return; }
+    const r = await fetch('/api/search?q=' + encodeURIComponent(s));
+    const rows = await r.json();
+    empty.hidden = rows.length > 0;
+    list.innerHTML = rows.map(x => `<li><a href="/complex/${x.id}">
+        <span class="nm">${esc(x.name)}</span>
+        <span class="meta">${esc(x.region || x.lawd_cd)} · ${x.approval_year ?? '—'}년 · ${(x.apt_households||0).toLocaleString()}세대</span></a></li>`).join('');
+  }
+  q.addEventListener('input', () => { clearTimeout(t); t = setTimeout(go, 250); });
+})();
+</script>
