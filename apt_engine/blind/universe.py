@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from apt_engine import area as area_mod
 from apt_engine.blind import cutoff as cutoff_mod
 
+MIN_HOUSEHOLDS = 1000   # 종인님 규칙(2026-09-05): 1,000세대 미만·세대수 미상 단지는 추천 Universe 에서 제외 (MASTER_SPEC §24 Stage B)
+
 
 @dataclass(frozen=True)
 class UniverseRow:
@@ -76,7 +78,7 @@ def build(conn: sqlite3.Connection, *, as_of: cutoff_mod.AsOf,
     start_ym = _shift_ym(end_ym, -window_months + 1)
 
     rows: list[UniverseRow] = []
-    excluded = {"표본부족": 0, "가격없음": 0}
+    excluded = {"표본부족": 0, "가격없음": 0, "소규모(1000세대 미만)": 0}
 
     with cutoff_mod.guard(conn, observable) as guarded:
         # price_snapshot 은 as_of_ym 으로 컷오프된다. guard 가 그걸 확인한다.
@@ -86,6 +88,7 @@ def build(conn: sqlite3.Connection, *, as_of: cutoff_mod.AsOf,
             "       c.approval_year "
             "  FROM price_snapshot s JOIN complex c ON c.id = s.complex_id "
             " WHERE s.area_band = ? AND s.as_of_ym >= ? AND s.as_of_ym <= ? "
+            "   AND COALESCE(c.apt_households, 0) >= " + str(MIN_HOUSEHOLDS) + " "
             + (" AND c.lawd_cd = ?" if lawd_cd else "") +
             " ORDER BY s.complex_id, s.as_of_ym DESC",
             (band, start_ym, end_ym) + ((lawd_cd,) if lawd_cd else ())

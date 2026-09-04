@@ -25,13 +25,13 @@ from apt_engine.relative.store import median, percentile  # noqa: E402
 
 NOW_YM = "202606"
 LAM = 0.3
-D = panel_mod.FEATURE_SETS["D_+jobs"]
+D = panel_mod.FEATURE_SETS["E_+theory2"]   # v0.3 채택 변수군(E). 이름은 D 로 유지
 LADDER = [
     ("D", D),
     ("D-jm", [f for f in D if f != "jeonse_mom1"]),
     ("D-jm-m3", [f for f in D if f not in ("jeonse_mom1", "mom3")]),
     ("D-jm-m3-jr-st", [f for f in D if f not in ("jeonse_mom1", "mom3", "jeonse_ratio", "station_km")]),
-    ("D-min", [f for f in D if f not in ("jeonse_mom1", "mom3", "jeonse_ratio", "station_km", "own_pct", "mom1", "jobs_emd", "log_academy")]),
+    ("D-min", [f for f in D if f not in ("jeonse_mom1", "mom3", "jeonse_ratio", "station_km", "own_pct", "mom1", "jobs_emd", "log_academy", "jeonse_gap_closing", "emd_rel_mom3", "own_pct_sq")]),
 ]
 
 
