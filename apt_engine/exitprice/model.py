@@ -136,11 +136,16 @@ def evaluate(f: Fit, rows: list[Row]) -> dict:
     top_act = set(sorted(range(n), key=lambda i: -act[i])[: max(1, n // 10)])
     top_pred = set(sorted(range(n), key=lambda i: -pred[i])[: max(1, n // 5)])
     recall = len(top_act & top_pred) / len(top_act)
-    # 예측 상위 10% 의 실제 중앙값 vs 전체 중앙값
+    top_pred30 = set(sorted(range(n), key=lambda i: -pred[i])[: max(1, int(n * 0.3))])
+    recall30 = len(top_act & top_pred30) / len(top_act)
+    # 예측 상위 10% 의 실제 중앙값 vs 전체 중앙값, 그리고 예측 상위 20% 안에서 실제 상위 절반(중앙값 이상)인 비율
     p10 = sorted(range(n), key=lambda i: -pred[i])[: max(1, n // 10)]
     lift = median([act[i] for i in p10]) - median(act)
+    med = median(act)
+    precision_half = sum(1 for i in top_pred if act[i] >= med) / len(top_pred)
     return {"n": n, "mae": round(mae, 4), "mae_market_only": round(base_mae, 4), "ic": round(ic, 3) if ic is not None else None,
-            "winner_recall": round(recall, 3), "top_decile_lift": round(lift, 4)}
+            "winner_recall": round(recall, 3), "winner_recall30": round(recall30, 3),
+            "precision_above_median": round(precision_half, 3), "top_decile_lift": round(lift, 4)}
 
 
 def walk_forward(rows: list[Row], features: list[str], test_years: list[int],

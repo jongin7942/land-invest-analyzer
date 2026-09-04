@@ -43,6 +43,7 @@ def main() -> int:
     hier = load("hierarchy_2026.json", {})
     tw = load("tw_combined_2026-09-04.json", {})
     rel = load("relative_gap_report.json", {})
+    mt = load("market_timing.json", {})
     preds = {}
     p = ROOT / "rules" / "exit_price_2026.csv"
     if p.exists():
@@ -86,6 +87,20 @@ def main() -> int:
     # ── 3. 동아 ──
     d74 = preds.get((482, "74")) or next((x for x in (bt.get("donga_482") or []) if x.get("band") == "74"), {})
     probe = tw.get("probe") or {}
+
+    # ── 3b. 투자 시점 ──
+    mt_rows = ""
+    for r in (mt.get("rows") or []):
+        if r["year"] < 2011:
+            continue
+        f = r.get("fwd5_log")
+        vol = r.get('metro_vol_ratio'); vol_s = "—" if vol is None else f"{vol:.2f}"
+        jr_s = rate(r.get('metro_jeonse_ratio')) if r.get('metro_jeonse_ratio') is not None else "—"
+        fwd_s = ('<b>' + pct(f, 0) + '</b>') if f is not None else ('예측 대상' if r['year'] == 2026 else '미확정')
+        mt_rows += f"<tr><td>{r['year']}</td><td>{jr_s}</td><td>{vol_s}</td><td>{r.get('bok_rate')}</td><td>{pct(r.get('metro_dd_peak'),0)}</td><td>{pct(r.get('metro_vs_ma5'),0)}</td><td>{fwd_s}</td></tr>"
+    mt_rules = mt.get("rules") or {}
+    jr = mt_rules.get("metro_jeonse_ratio") or {}
+    now = next((r for r in (mt.get("rows") or []) if r["year"] == 2026), {})
 
     # ── 4. TW 상위 ──
     tw_rows = "".join(
@@ -147,6 +162,11 @@ ul{{padding-left:18px;margin:6px 0;}} li{{margin:3px 0;}}
 <h2 style="margin-top:12px">급지가 올라간 조건 = 호재의 정의</h2>
 <div class="tbl"><table><tr><th>조건(진입 시점)</th><th>표본</th><th>5년 내 승급률</th><th>기본 대비</th></tr>{cond_rows}</table></div>
 <p class="muted">기본 승급률 {rate(base_rate)}. '기본 대비'가 1배를 뚜렷이 넘는 조건만 호재로 인정하고, 그 확률·폭으로만 가격에 넣습니다.</p>
+</div>
+
+<div class="card"><h2>투자 시점 — 수도권 전체 사이클 (매년 6월 진입 → 5년 뒤)</h2>
+<div class="tbl"><table><tr><th>진입</th><th>전세가율</th><th>거래량비</th><th>기준금리</th><th>고점대비</th><th>5년MA대비</th><th>→ 5년 수익</th></tr>{mt_rows}</table></div>
+<p class="muted">5년 뒤 수익과 가장 잘 맞은 시점 변수는 <b>전세가율</b>(순위상관 {jr.get('spearman')}, 0.70 이상이면 중앙 {pct(jr.get('fwd_when_high'),0)}, 미만이면 {pct(jr.get('fwd_when_low'),0)})이고, 그다음이 낮은 기준금리였습니다. 가격이 이미 많이 오른 뒤(2021, 5년MA 대비 +41%)의 진입은 +3%에 그쳤습니다. <b>지금(2026-06)</b>: 전세가율 {rate(now.get('metro_jeonse_ratio'))}로 시계열 최저, 거래량은 회복기 수준({now.get('metro_vol_ratio')}), 고점 대비 {pct(now.get('metro_dd_peak'),0)}. "거래는 살아났지만 전세가 받치지 않는" 국면이라 시장 수준 Base 가정(+35%)보다 신중하게 봐야 합니다. 표본 15개(한 사이클)라 확정 규칙은 아닙니다.</p>
 </div>
 
 <div class="card"><h2>부평 동아1단지 74㎡ (4.6억 저층)</h2>

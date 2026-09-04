@@ -27,8 +27,8 @@ from apt_engine.exitprice import jobs as jobs_mod, model as model_mod, panel as 
 from apt_engine.relative import store  # noqa: E402
 from apt_engine.relative.store import median, percentile  # noqa: E402
 
-ENTRY_YEARS = list(range(2011, 2022))          # 2011~2021 진입(결과 2016~2026)
-TEST_YEARS = list(range(2016, 2022))           # 학습 = 진입 ≤ T−5
+ENTRY_YEARS = list(range(2007, 2022))          # 2007~2021 진입(결과 2012~2026) — 하락기(2008~2013) 포함
+TEST_YEARS = list(range(2013, 2022))           # 학습 = 진입 ≤ T−5
 NOW_YM = "202606"                              # 현재 예측 진입 시점(스냅샷 최신 202609 − 스무딩 여유)
 
 
@@ -79,10 +79,14 @@ def main() -> int:
         for lam, res in res_by_lam.items():
             ics = [v["ic"] for v in res.values() if v.get("ic") is not None]
             recs = [v["winner_recall"] for v in res.values() if v.get("winner_recall") is not None]
+            recs30 = [v["winner_recall30"] for v in res.values() if v.get("winner_recall30") is not None]
+            precs = [v["precision_above_median"] for v in res.values() if v.get("precision_above_median") is not None]
             maes = [v["mae"] for v in res.values() if v.get("mae") is not None]
             mkt = [v["mae_market_only"] for v in res.values() if v.get("mae_market_only") is not None]
             summ = {"ic_mean": round(sum(ics) / len(ics), 3) if ics else None,
                     "recall_mean": round(sum(recs) / len(recs), 3) if recs else None,
+                    "recall30_mean": round(sum(recs30) / len(recs30), 3) if recs30 else None,
+                    "precision_mean": round(sum(precs) / len(precs), 3) if precs else None,
                     "mae_mean": round(sum(maes) / len(maes), 4) if maes else None,
                     "mae_market_only_mean": round(sum(mkt) / len(mkt), 4) if mkt else None,
                     "by_year": res}
@@ -90,7 +94,7 @@ def main() -> int:
             score = (summ["ic_mean"] or -9)
             if score > best[2]:
                 best = (name, lam, score)
-            print(f"  {name:10s} λ={lam:<4} IC {summ['ic_mean']} · Recall {summ['recall_mean']} · MAE {summ['mae_mean']} (시장중앙값 {summ['mae_market_only_mean']})", flush=True)
+            print(f"  {name:11s} λ={lam:<4} IC {summ['ic_mean']} · Recall@20 {summ['recall_mean']} · Recall@30 {summ['recall30_mean']} · 중앙값이상 {summ['precision_mean']} · MAE {summ['mae_mean']}", flush=True)
     print(f"[선택] {best[0]} λ={best[1]} (IC {best[2]})  ({time.time()-t0:.0f}s)")
 
     # ── 최종 적합(전 창) → 현재 예측 ──

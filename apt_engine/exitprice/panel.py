@@ -35,6 +35,18 @@ FEATURES = [
     # 공급
     "supply_recent", "supply_planned",
 ]
+THEORY2 = [
+    # 비선형·상호작용 (v0.2): 신축 프리미엄 소멸 구간, 급지×국면, 자기 백분위 제곱
+    "age_new", "age_mid", "age_old", "tier_x_regime", "own_pct_sq", "rel_gu_x_tier",
+    # 덜 오른 곳: 법정동 3년 상대 모멘텀(법정동 − 수도권), 전세-매매 갭 축소 속도
+    "emd_rel_mom3", "jeonse_gap_closing",
+    # 시군구 공급: 진입 후 2년 승인 세대 / 시군구 재고 (leakage 위험 — 입주예정 대리)
+    "gu_supply_ratio",
+    # 급지 내 위치: 법정동 ㎡단가 대비 자기 ㎡단가
+    "rel_emd",
+]
+DIFFUSION = ["emd_lead_months", "lead_x_cycle", "lag_catchup_gap", "vol_lead"]
+CYCLE = ["metro_dd_peak", "metro_vs_ma5", "metro_jeonse_ratio", "metro_vol_ratio", "bok_rate", "bok_rate_chg1", "metro_mom1", "metro_mom3"]
 JOB_FEATURES = ["jobs_emd", "jobs_3km"]            # 국민연금 사업장(2016~) — 그 전 진입은 PROXY 스냅샷
 JOB_GROWTH = ["jobs_growth5"]                       # 5년 전 스냅샷이 있는 진입연도(2021~)만
 FEATURE_SETS = {
@@ -42,7 +54,20 @@ FEATURE_SETS = {
     "B_+own": ["metro_mom5", "gu_mom5", "gu_mom1", "regime", "mom1", "mom3", "own_pct", "rel_gu", "log_vol", "jeonse_ratio", "jeonse_mom1"],
     "C_+theory": FEATURES,
     "D_+jobs": FEATURES + JOB_FEATURES,
+    "E_+theory2": FEATURES + JOB_FEATURES + THEORY2,
+    "F_+cycle": FEATURES + JOB_FEATURES + THEORY2 + CYCLE,
+    "G_+diffusion": FEATURES + JOB_FEATURES + THEORY2 + DIFFUSION,
+    "H_all": FEATURES + JOB_FEATURES + THEORY2 + DIFFUSION + CYCLE,
 }
+BOK: dict[int, float] = {}
+try:
+    import csv as _csv
+    from pathlib import Path as _P
+    with (_P(__file__).resolve().parents[2] / "rules" / "bok_base_rate.csv").open(encoding="utf-8") as _f:
+        for _r in _csv.DictReader(_f):
+            BOK[int(_r["year"])] = float(_r["rate_june"])
+except Exception:
+    pass
 
 
 def ym_idx(ym: str) -> int:
@@ -107,6 +132,108 @@ class PanelBuilder:
             vals = [self.gu_mom(g, t, months) for g in self.by_gu]
             vals = [v for v in vals if v is not None]
             self._cache[key] = median(vals) if vals else None
+        return self._cache[key]
+
+    def _ensure_emd(self):
+        if not hasattr(self, "by_emd"):
+            self.by_emd = {}
+            for (cid, band) in self.prices:
+                self.by_emd.setdefault(self.cx[cid].emd_key, []).append((cid, band))
+
+    def emd_mom(self, emd_key: str, t: int, months: int) -> float | None:
+        key = ("emd", emd_key, t, months)
+        if key not in self._cache:
+            self._ensure_emd()
+            vals = [change(self.prices[k].p50, t, months) for k in self.by_emd.get(emd_key, [])]
+            vals = [math.log1p(v) for v in vals if v is not None and -0.7 < v < 2.0]
+            self._cache[key] = median(vals) if len(vals) >= 3 else None
+        return self._cache[key]
+
+    def emd_level(self, emd_key: str, t: int) -> float | None:
+        key = ("emdlv", emd_key, t)
+        if key not in self._cache:
+            self._ensure_emd()
+            vals = [math.log(self.prices[k].p50[t] / store.BAND_M2[k[1]]) for k in self.by_emd.get(emd_key, []) if self.prices[k].p50[t]]
+            self._cache[key] = median(vals) if len(vals) >= 3 else None
+        return self._cache[key]
+
+    def metro_level(self, t: int) -> float | None:
+        """수도권 가격 수준 지수(log ㎡단가 중앙값). 구성 고정이 아니라 PROXY."""
+        key = ("mlevel", t)
+        if key not in self._cache:
+            vals = [math.log(s.p50[t] / store.BAND_M2[k[1]]) for k, s in self.prices.items() if s.p50[t]]
+            self._cache[key] = median(vals) if len(vals) >= 50 else None
+        return self._cache[key]
+
+    def cycle_feats(self, t: int, year: int) -> dict:
+        key = ("cycle", t)
+        if key not in self._cache:
+            lv = self.metro_level(t)
+            hist = [self.metro_level(i) for i in range(max(0, t - 120), t + 1, 3)]
+            hist = [h for h in hist if h is not None]
+            peak = max(hist) if hist else None
+            ma5 = [self.metro_level(i) for i in range(max(0, t - 59), t + 1, 3)]
+            ma5 = [h for h in ma5 if h is not None]
+            jr = []
+            for k, s in self.prices.items():
+                j = self.jeonse.get(k)
+                if j and j[t] and s.p50[t]:
+                    jr.append(j[t] / s.p50[t])
+            v_recent = sum(sum(s.n[t - 11:t + 1]) for s in self.prices.values())
+            v_prior = sum(sum(s.n[t - 47:t - 11]) for s in self.prices.values()) / 3.0
+            self._cache[key] = {
+                "metro_dd_peak": (lv - peak) if lv is not None and peak is not None else None,
+                "metro_vs_ma5": (lv - sum(ma5) / len(ma5)) if lv is not None and len(ma5) >= 10 else None,
+                "metro_jeonse_ratio": median(jr) if len(jr) >= 50 else None,
+                "metro_vol_ratio": (v_recent / v_prior) if v_prior > 0 else None,
+                "metro_mom1": self.metro_mom(t, 12), "metro_mom3": self.metro_mom(t, 36),
+                "bok_rate": BOK.get(year),
+                "bok_rate_chg1": (BOK[year] - BOK[year - 1]) if year in BOK and (year - 1) in BOK else None,
+            }
+        return self._cache[key]
+
+    def emd_lead_months(self, emd_key: str, t: int, window: int = 60, max_lag: int = 12) -> float | None:
+        """진입 전 window 개월 동안 법정동 12개월 변화율과 수도권 변화율의 교차상관이 최대인 시차.
+        양수 = 법정동이 수도권보다 먼저 움직임(얼리어답터). 자료가 얇으면 None."""
+        key = ("lead", emd_key, t)
+        if key not in self._cache:
+            e = [self.emd_mom(emd_key, i, 12) for i in range(t - window, t + 1)]
+            m = [self.metro_mom(i, 12) for i in range(t - window, t + 1)]
+            best, best_c = None, None
+            for lag in range(-max_lag, max_lag + 1):
+                pairs = []
+                for i in range(len(e)):
+                    j = i + lag           # 법정동 i 시점 vs 수도권 i+lag 시점: lag>0 이면 법정동이 앞선다
+                    if 0 <= j < len(m) and e[i] is not None and m[j] is not None:
+                        pairs.append((e[i], m[j]))
+                if len(pairs) < 24:
+                    continue
+                n = len(pairs)
+                mx = sum(a for a, _ in pairs) / n; my = sum(b for _, b in pairs) / n
+                sxx = sum((a - mx) ** 2 for a, _ in pairs); syy = sum((b - my) ** 2 for _, b in pairs)
+                if sxx <= 0 or syy <= 0:
+                    continue
+                c = sum((a - mx) * (b - my) for a, b in pairs) / math.sqrt(sxx * syy)
+                if best_c is None or c > best_c:
+                    best, best_c = lag, c
+            self._cache[key] = float(best) if best is not None and best_c is not None and best_c > 0.3 else None
+        return self._cache[key]
+
+    def metro_vol_ratio12(self, t: int) -> float | None:
+        key = ("mvol12", t)
+        if key not in self._cache:
+            rec = sum(sum(s.n[t - 11:t + 1]) for s in self.prices.values())
+            pri = sum(sum(s.n[t - 47:t - 11]) for s in self.prices.values()) / 3.0
+            self._cache[key] = (rec / pri) if pri > 0 else None
+        return self._cache[key]
+
+    def gu_supply_ratio(self, lawd: str, y0: int, y1: int) -> float | None:
+        key = ("gusup", lawd, y0, y1)
+        if key not in self._cache:
+            ids = {cid for cid, _ in self.by_gu.get(lawd, [])}
+            stock = sum((self.cx[cid].households or 0) for cid in ids if self.cx[cid].approval_year and self.cx[cid].approval_year <= y0)
+            new = sum((self.cx[cid].households or 0) for cid in ids if self.cx[cid].approval_year and y0 < self.cx[cid].approval_year <= y1)
+            self._cache[key] = (new / stock) if stock > 0 else None
         return self._cache[key]
 
     def gu_regime(self, lawd: str, t: int) -> float | None:
@@ -189,7 +316,7 @@ class PanelBuilder:
     def row(self, cid: int, band: str, entry_ym: str) -> Row | None:
         s = self.prices[(cid, band)]
         t = ym_idx(entry_ym)
-        if t < 60 or t >= N_MONTHS:
+        if t < 12 or t >= N_MONTHS:      # 12개월 이력만 요구 — 5년 모멘텀 등은 없으면 None(폴백 모델이 처리). 2007~2010 하락기 진입 포함
             return None
         p0 = smooth_price(s, t)
         if not p0:
@@ -230,6 +357,36 @@ class PanelBuilder:
         if self.jobs is not None:
             jf = self.jobs.features(c, entry_ym)
             x.update({k: jf.get(k) for k in ("jobs_emd", "jobs_3km", "jobs_growth5")})
+        # ── v0.2 이론 변수 ──
+        age = x["age"]
+        reg = x["regime"]
+        emd3 = self.emd_mom(c.emd_key, t, 36)
+        m3 = self.metro_mom(t, 36)
+        emd_lv = self.emd_level(c.emd_key, t)
+        x.update({
+            "age_new": (1.0 if age < 5 else 0.0) if age is not None else None,
+            "age_mid": (1.0 if 5 <= age < 15 else 0.0) if age is not None else None,
+            "age_old": (1.0 if age >= 25 else 0.0) if age is not None else None,
+            "tier_x_regime": (float(tier) * reg) if reg is not None else None,
+            "own_pct_sq": (own_pct ** 2) if own_pct is not None else None,
+            "rel_gu_x_tier": (x["rel_gu"] * float(tier)) if x["rel_gu"] is not None else None,
+            "emd_rel_mom3": (emd3 - m3) if emd3 is not None and m3 is not None else None,
+            "jeonse_gap_closing": (x["jeonse_mom1"] - x["mom1"]) if x["jeonse_mom1"] is not None and x["mom1"] is not None else None,
+            "gu_supply_ratio": self.gu_supply_ratio(c.lawd_cd, year, year + 2),
+            "rel_emd": (math.log(p0 / store.BAND_M2[band]) - emd_lv) if emd_lv is not None else None,
+        })
+        # ── v0.3 확산(얼리어답터/후행) 변수 ──
+        lead = self.emd_lead_months(c.emd_key, t)
+        mm1 = x["metro_mom1"] if "metro_mom1" in x else self.metro_mom(t, 12)
+        own_vol = sum(s.n[t - 11:t + 1]); own_pri = sum(s.n[t - 47:t - 11]) / 3.0
+        mv = self.metro_vol_ratio12(t)
+        x.update({
+            "emd_lead_months": lead,
+            "lead_x_cycle": (lead * mm1) if lead is not None and mm1 is not None else None,
+            "lag_catchup_gap": ((m3 - emd3) if (m3 is not None and emd3 is not None) else None) if (lead is not None and lead < 0) else (0.0 if lead is not None else None),
+            "vol_lead": ((own_vol / own_pri) / mv) if own_pri > 0 and mv else None,
+        })
+        x.update(self.cycle_feats(t, year))
         t1 = t + HORIZON
         p1 = smooth_price(s, t1) if t1 < N_MONTHS else None
         target = math.log(p1 / p0) if p1 else None
