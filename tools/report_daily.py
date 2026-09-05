@@ -44,6 +44,8 @@ def main() -> int:
     tw = load("tw_combined_2026-09-04.json", {})
     rel = load("relative_gap_report.json", {})
     mt = load("market_timing.json", {})
+    tw1 = load("tw_combined_1eok.json", {})
+    st = load("tw_stability_3eok.json", {})
     preds = {}
     p = ROOT / "rules" / "exit_price_2026.csv"
     if p.exists():
@@ -101,6 +103,14 @@ def main() -> int:
     mt_rules = mt.get("rules") or {}
     jr = mt_rules.get("metro_jeonse_ratio") or {}
     now = next((r for r in (mt.get("rows") or []) if r["year"] == 2026), {})
+
+    # ── 3c. 1억 · 안정성 ──
+    tw1_rows = "".join(
+        f"<tr><td>{r['tw_rank']}</td><td>{esc(r['name'])} {r['band']}</td><td>{r['price']/1e8:.2f}억</td><td>{(r.get('self_capital') or 0)/1e8:.2f}억</td><td>{eok(r['expected_tw'])}</td><td>{eok(r['wealth_floor'])}</td></tr>"
+        for r in (tw1.get("top20_by_tw") or [])[:8])
+    st_rows = "".join(
+        f"<tr><td>{r['mean_rank']}</td><td>{r['tw_rank']}</td><td>{esc(r['name'])} {r['band']}</td><td>{r['top10_survival']*100:.0f}%</td><td>{r['p90_rank']}</td></tr>"
+        for r in (st.get("rows") or [])[:10])
 
     # ── 4. TW 상위 ──
     tw_rows = "".join(
@@ -182,6 +192,16 @@ ul{{padding-left:18px;margin:6px 0;}} li{{margin:3px 0;}}
 <div class="card"><h2>5년 뒤 순자산이 가장 큰 후보 10 (3억 프로필 · 1,000세대 이상 · 점수 TOP100 풀)</h2>
 <div class="tbl"><table><tr><th>TW순위</th><th>단지</th><th>가격</th><th>5년 뒤 Base</th><th>기대 순이익</th><th>최악(Bear)</th><th>점수순위</th></tr>{tw_rows}</table></div>
 <p class="muted">100개 중 가격 엔진 예측이 붙은 후보 {model_priced}개, 기대 순이익 양수 {pos}개. 세금·이자·복비를 다 뺀 5년 뒤 순이익(3억 프로필, 금리 4%)입니다. 예측이 없는 후보는 무성장으로 계산돼 뒤로 밀립니다. 아직 '연구 후보'이며 실제 매물·전세 확인 전입니다.</p>
+</div>
+
+<div class="card"><h2>순위가 얼마나 흔들리나 (3억 · 시장·예측·금리·확률을 300번 흔든 결과)</h2>
+<div class="tbl"><table><tr><th>평균순위</th><th>기본 TW순위</th><th>단지</th><th>TOP10 생존율</th><th>P90(불리할 때)</th></tr>{st_rows}</table></div>
+<p class="muted">TOP10 생존율이 낮은 후보는 한두 가정에 기대는 순위입니다. 순이익은 세 시나리오 점의 선형 근사라 정확한 재계산은 아닙니다.</p>
+</div>
+
+<div class="card"><h2>자기자본 1억 — 후보 {tw1.get('computed', 0)}개 중 상위</h2>
+<div class="tbl"><table><tr><th>TW순위</th><th>단지</th><th>가격</th><th>실투자</th><th>기대 순이익</th><th>최악(Bear)</th></tr>{tw1_rows}</table></div>
+<p class="muted">1억으로 실투자금이 맞는 1,000세대 이상 단지는 24개뿐(최고가 3.1억). 기대 순이익 양수 {tw1.get('positive_tw', 0)}개.</p>
 </div>
 
 <div class="card"><h2>이번에 바뀐 것</h2><ul>
