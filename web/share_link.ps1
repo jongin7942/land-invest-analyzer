@@ -75,6 +75,11 @@ function New-Link {
     Write-Host "  ▶ $label 님에게 보낼 링크 (클립보드에 복사됨, 카톡에 붙여넣기):" -ForegroundColor Cyan
     Write-Host "    $($r.link)" -ForegroundColor White
     Write-Host "    · 처음 연 기기 한 곳에서만 열립니다. 남에게 다시 보내도 안 열립니다." -ForegroundColor DarkGray
+    # 내 카톡(나에게 보내기)으로도 보내 둔다 → 그 메시지를 상대에게 '전달'하면 끝.
+    $msg = "[아파트 엔진 앱] $label 님 전용 링크 (로그인 없이 열림, 처음 연 기기에서만)`n$($r.link)`n`n· 내 돈(1~10억)을 고르면 5년 뒤 남는 돈 순으로 수도권 1,000세대 이상 단지가 나옵니다.`n· 단지를 누르면 '앞으로(호재·위험)' 탭에 데이터로 확인된 호재·위험이 있습니다.`n· 종인 PC 가 켜져 있는 동안만 열립니다."
+    $k = & $py (Join-Path $proj "tools\kakao_send.py") $msg $r.link 2>&1
+    if ($LASTEXITCODE -eq 0) { Write-Host "    · 내 카톡으로도 보냈습니다. 그 메시지를 $label 님에게 '전달'하세요." -ForegroundColor Green }
+    else { Write-Host "    · 카톡 전송은 실패했습니다(클립보드 링크를 직접 붙여넣으세요): $k" -ForegroundColor Yellow }
     Write-Host ""
 }
 

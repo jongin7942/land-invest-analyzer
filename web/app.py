@@ -100,7 +100,7 @@ def join(token):
     if not sid:
         return render_template("share_blocked.html", title="이미 사용됐거나 끊긴 링크입니다",
                                message="다른 사람이 쓴 링크나 끊긴 링크는 열리지 않습니다."), 403
-    resp = make_response(redirect("/"))
+    resp = make_response(redirect("/app"))
     secure = (request.is_secure or request.headers.get("X-Forwarded-Proto") == "https"
               or "Cf-Ray" in request.headers)
     resp.set_cookie(share.COOKIE, share.cookie_value(sid), max_age=share.COOKIE_DAYS * 86400,
@@ -163,7 +163,7 @@ def api_share_base():
 
 # ── 화면 ────────────────────────────────────────────────────────────
 def _nav(owner: bool) -> str:
-    links = ['<a href="/">TOP100</a>', '<a href="/search">단지 검색</a>']
+    links = ['<a href="/app"><b>앱</b></a>', '<a href="/">TOP100</a>', '<a href="/search">단지 검색</a>']
     if owner:
         links += ['<a href="/admin/share">공유 링크</a>',
                   '<a href="#" onclick="recompute();return false;">다시 계산</a>']
@@ -187,6 +187,19 @@ def _nav(owner: bool) -> str:
             'font:14px/1.4 -apple-system,\'IBM Plex Sans KR\',\'Malgun Gothic\',sans-serif;'
             'border-bottom:1px solid #d6dee7;background:#fff">'
             '<b>아파트 투자 후보</b>' + "".join(links) + status + '</nav>')
+
+
+@app.route("/app")
+def app_page():
+    """tools/build_app.py 가 만든 단일 파일 앱(reports/apt_app.html). 한글이 깨지지 않게 charset 을 명시."""
+    p = REPORT_JSON.parent / "apt_app.html"
+    if not p.exists():
+        return _nav(share.is_owner(request.remote_addr, request.headers)) + \
+            "<p style='padding:16px'>앱 파일이 없습니다. tools/build_app.py 를 먼저 실행하세요.</p>"
+    resp = make_response(p.read_bytes())
+    resp.headers["Content-Type"] = "text/html; charset=utf-8"
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 @app.route("/")
