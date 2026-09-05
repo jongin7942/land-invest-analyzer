@@ -59,6 +59,9 @@ class Complex:
     academies_500m: int | None = None
     station_m: float | None = None
     station_opened_recent: bool = False   # 최근 5년 내 1.5km 안 개통 (§15 평균회귀 함정 플래그)
+    builder: str | None = None            # K-apt 시공사(브랜드 이론)
+    far: float | None = None              # 현 용적률(재건축 사업성 이론)
+    land_area: float | None = None        # 대지면적 ㎡(대지지분 이론)
 
     @property
     def emd_key(self) -> str:
@@ -125,13 +128,15 @@ def load_complexes(conn: sqlite3.Connection, *, min_households: int = MIN_HOUSEH
     """집계용 단지 목록. 기본은 1,000세대 이상만 — 모든 집계 도구가 이 로더를 쓰므로 여기서 한 번에 거른다."""
     out: dict[int, Complex] = {}
     for r in conn.execute(
-            "SELECT id, name, lawd_cd, emd_name, lat, lon, apt_households, approval_year "
+            "SELECT id, name, lawd_cd, emd_name, lat, lon, apt_households, approval_year, builder, current_far, land_area_m2 "
             "  FROM complex WHERE canonical_id IS NULL AND lat IS NOT NULL AND lawd_cd IS NOT NULL "
             "   AND apt_households >= ?", (min_households,)):
         out[int(r["id"])] = Complex(int(r["id"]), r["name"] or "", r["lawd_cd"], r["emd_name"] or "",
                                     float(r["lat"]), float(r["lon"]),
                                     int(r["apt_households"]) if r["apt_households"] else None,
-                                    int(r["approval_year"]) if r["approval_year"] else None)
+                                    int(r["approval_year"]) if r["approval_year"] else None,
+                                    builder=(r["builder"] or None), far=(float(r["current_far"]) if r["current_far"] else None),
+                                    land_area=(float(r["land_area_m2"]) if r["land_area_m2"] else None))
     return out
 
 
