@@ -153,7 +153,7 @@ ul{{padding-left:18px;margin:6px 0;}} li{{margin:3px 0;}}
 <p class="muted">IC = 예측 순위와 실제 순위의 상관(0이면 무작위). 승자 포착률 = 실제 상위 10%를 예측 상위 20%가 잡은 비율. MAE = 5년 log 수익률 오차(0.10 ≈ 10%p).</p>
 <details><summary>어떤 변수가 가장 크게 작용했나</summary><div class="tbl"><table><tr><th>변수</th><th>표준화 계수</th></tr>{coef_rows}</table></div>
 <p class="muted">양수 = 그 변수가 클수록 5년 뒤 더 오름. 학습 표본 {bt.get('final_n')}건.</p></details>
-<p class="muted">현재(2026-06 진입) 전 단지의 "시장 대비" 예측 분포: P10 {pct(dist.get('0.1'))} · 중앙 {pct(dist.get('0.5'))} · P90 {pct(dist.get('0.9'))}. 시장 전체 수준(5년)은 과거 10개 진입연도의 최저 {pct((bt.get("market_scenario_log") or {}).get("bear_used"))} · 중앙 {pct((bt.get("market_scenario_log") or {}).get("0.5"))} · 상위 20% {pct((bt.get("market_scenario_log") or {}).get("0.8"))}를 Bear/Base/Bull 로 씁니다 — 이건 예측이 아니라 가정입니다.</p>
+<p class="muted">현재(2026-06 진입) 전 단지의 "시장 대비" 예측 분포: P10 {pct(dist.get('0.1'))} · 중앙 {pct(dist.get('0.5'))} · P90 {pct(dist.get('0.9'))}. 시장 전체 수준(5년)은 <b>지금 전세가율(0.56)과 비슷했던 과거 진입연도(2011·2012·2021)</b>의 최저 +3.7% · 중앙 +10.6% · 최고 +19.9%(log)를 Bear/Base/Bull 로 씁니다 — 예측이 아니라 "비슷한 국면의 과거" 가정입니다(v0.4, 이전 라운드의 전체 분포 +3/+30/+39% 보다 보수적).</p>
 </div>
 
 <div class="card"><h2>아파트 계급도 (법정동 급지 8단계)</h2>
