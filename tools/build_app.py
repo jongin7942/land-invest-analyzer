@@ -56,6 +56,18 @@ def _regz(c) -> dict:
     st = panel_mod.reg_status(c.lawd_cd, c.emd, "20260905")
     return {"adj": st["adj"], "hot": st["hot"], "cap": st["cap"], "from": st["adj_from"], "share": _REG_SHARE.get(c.lawd_cd[:2])}
 
+
+def _macro_now() -> dict:
+    """§27.3 거시 관측 지표(M2 YoY·원/달러·공사비 YoY) — 시나리오에 넣지 않고 표기만."""
+    fp = R / "macro_timing.json"
+    if not fp.exists():
+        return {}
+    try:
+        n = json.loads(fp.read_text(encoding="utf-8")).get("now_202606") or {}
+        return {"m2": n.get("m2_yoy"), "fx": n.get("fx_usd"), "fxyoy": n.get("fx_yoy"), "cost": n.get("cost_yoy")}
+    except Exception:
+        return {}
+
 def _model_card(e: dict) -> dict:
     """모델 성적표 — v0.8(E 변수 + 부스팅 ×3시드, §24) 가 있으면 그 walk-forward 성적(전체행·2016~2021), 없으면 ridge 백테스트."""
     fu = R / "expert_theories_followup.json"
@@ -211,7 +223,7 @@ def main() -> int:
     bt = json.loads((R / "exit_price_backtest_relative.json").read_text(encoding="utf-8")) if (R / "exit_price_backtest_relative.json").exists() else {}
     e = (bt.get("backtest") or {}).get("E_+theory2|lam=3.0") or {}
     payload = {"data": data, "meta": meta, "models": {k: {"name": v["name"], "desc": v["desc"], "key": v["key"], "cashes": sorted(data.get(k, {}).keys(), key=int)} for k, v in MODELS.items() if data.get(k)}, "info": info, "years": YEARS, "scenario": scen, "asof": "2026-09-05",
-               "market": {"jr": now.get("metro_jeonse_ratio"), "rate": now.get("bok_rate"), "vol": now.get("metro_vol_ratio"), "dd": now.get("metro_dd_peak"), "mom12": now.get("metro_mom1")},
+               "market": {"jr": now.get("metro_jeonse_ratio"), "rate": now.get("bok_rate"), "vol": now.get("metro_vol_ratio"), "dd": now.get("metro_dd_peak"), "mom12": now.get("metro_mom1"), **_macro_now()},
                "model": _model_card(e),
                "conv": {f"{k[0]}|{k[1]}": {"p": fnum(v["p_next_within_5y"]), "m": fnum(v["dwell_median_months"])} for k, v in conv.items()}}
     js = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
