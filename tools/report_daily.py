@@ -46,6 +46,7 @@ def main() -> int:
     mt = load("market_timing.json", {})
     tw1 = load("tw_combined_1eok.json", {})
     st = load("tw_stability_3eok.json", {})
+    sc = load("stage_conversion.json", {})
     preds = {}
     p = ROOT / "rules" / "exit_price_2026.csv"
     if p.exists():
@@ -111,6 +112,15 @@ def main() -> int:
     st_rows = "".join(
         f"<tr><td>{r['mean_rank']}</td><td>{r['tw_rank']}</td><td>{esc(r['name'])} {r['band']}</td><td>{r['top10_survival']*100:.0f}%</td><td>{r['p90_rank']}</td></tr>"
         for r in (st.get("rows") or [])[:10])
+
+    # ── 3d. 정비사업 단계 전환율 ──
+    sc_rows = ""
+    for stage in ("구역지정/추진위(3)", "조합설립(4)", "사업시행인가(5)", "관리처분(6)", "착공(7)"):
+        cells = []
+        for reg in ("서울", "경기", "인천"):
+            v = ((sc.get(reg) or {}).get("by_stage") or {}).get(stage)
+            cells.append(f"{v['p_next_within_5y']*100:.0f}% · {v['dwell_median_m']}개월 (n={v['n']})" if v and v.get("p_next_within_5y") is not None else "—")
+        sc_rows += f"<tr><td>{esc(stage)}</td><td>{cells[0]}</td><td>{cells[1]}</td><td>{cells[2]}</td></tr>"
 
     # ── 4. TW 상위 ──
     tw_rows = "".join(
@@ -192,6 +202,11 @@ ul{{padding-left:18px;margin:6px 0;}} li{{margin:3px 0;}}
 <div class="card"><h2>5년 뒤 순자산이 가장 큰 후보 10 (3억 프로필 · 1,000세대 이상 · 점수 TOP100 풀)</h2>
 <div class="tbl"><table><tr><th>TW순위</th><th>단지</th><th>가격</th><th>5년 뒤 Base</th><th>기대 순이익</th><th>최악(Bear)</th><th>점수순위</th></tr>{tw_rows}</table></div>
 <p class="muted">100개 중 가격 엔진 예측이 붙은 후보 {model_priced}개, 기대 순이익 양수 {pos}개. 세금·이자·복비를 다 뺀 5년 뒤 순이익(3억 프로필, 금리 4%)입니다. 예측이 없는 후보는 무성장으로 계산돼 뒤로 밀립니다. 아직 '연구 후보'이며 실제 매물·전세 확인 전입니다.</p>
+</div>
+
+<div class="card"><h2>재건축·재개발은 실제로 얼마나 진행되나 (단계별 5년 내 다음 단계 도달률 · 체류기간)</h2>
+<div class="tbl"><table><tr><th>지금 단계</th><th>서울</th><th>경기</th><th>인천</th></tr>{sc_rows}</table></div>
+<p class="muted">서울 정비사업 733건·경기 349건·인천 87건의 실제 일자로 잰 값. 서울은 조합설립 뒤가 가장 느립니다(5년 안에 사업시행인가 60%, 중앙 33개월). 관리처분 이후는 80~95%로 사실상 되돌아가지 않습니다. 이 확률이 정비사업 옵션의 '사업확률' 자리에 들어갔습니다(완공 확률이 아니라 다음 단계 도달 확률).</p>
 </div>
 
 <div class="card"><h2>순위가 얼마나 흔들리나 (3억 · 시장·예측·금리·확률을 300번 흔든 결과)</h2>
