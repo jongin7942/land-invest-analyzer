@@ -25,7 +25,7 @@ from apt_engine.relative.store import median, percentile  # noqa: E402
 
 NOW_YM = "202606"
 LAM = 0.3
-D = panel_mod.FEATURE_SETS["E3_+redev"]   # v0.5: E + 정비사업 단계. 이름은 D 로 유지
+D = panel_mod.FEATURE_SETS["E_+theory2"]   # 채택 E(포착률 최고). E3(+정비단계)는 표본 112단지라 개선 없음
 LADDER = [
     ("D", D),
     ("D-jm", [f for f in D if f != "jeonse_mom1"]),
