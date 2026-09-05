@@ -106,7 +106,7 @@ svg text{font-family:"IBM Plex Mono",monospace}
   <div class="row"><span class="lbl">내 돈</span><div class="seg" id="cash"></div></div>
   <div class="row"><span class="lbl"></span><input type="range" id="cashRange" min="0" max="6" step="1" value="2" aria-label="투자금 슬라이더"><span class="mono" id="cashLabel"></span></div>
   <div class="row"><span class="lbl">지역</span><select id="sido"><option value="">전체</option><option value="11">서울</option><option value="41">경기</option><option value="28">인천</option></select><select id="gu"><option value="">시군구 전체</option></select><span class="lbl">평형</span><div class="seg" id="band"></div></div>
-  <div class="row"><span class="lbl">등급</span><div class="seg" id="grade"></div><span class="lbl">정렬</span><select id="sort"><option value="tw">남는 돈 많은 순</option><option value="fl">운 나쁠 때 덜 잃는 순</option><option value="sv">순위 믿을 만한 순</option><option value="bx">5년 뒤 오를 폭 순</option><option value="irr">연 수익률 순</option><option value="p">가격 낮은 순</option></select></div>
+  <div class="row"><span class="lbl">등급</span><div class="seg" id="grade"></div><span class="lbl">정렬</span><select id="sort"><option value="tw">남는 돈 많은 순</option><option value="fl">운 나쁠 때 덜 잃는 순</option><option value="nu">운 좋을 때 많이 남는 순</option><option value="sv">순위 믿을 만한 순</option><option value="bx">5년 뒤 오를 폭 순</option><option value="irr">연 수익률 순</option><option value="p">가격 낮은 순</option></select></div>
   <div class="row"><input type="text" id="q" placeholder="단지명 · 동네 검색"><label class="chk"><input type="checkbox" id="pos"> 남는 돈 플러스만</label><label class="chk"><input type="checkbox" id="dedupe"> 동네별 1개</label><label class="chk"><input type="checkbox" id="fav"> 즐겨찾기만</label></div>
 </div>
 
@@ -131,7 +131,7 @@ const dataOf = () => (D.data[model] || {});
 const metaOf = () => (D.meta[model] || {});
 let LV = Object.keys(dataOf()).sort((a,b)=>+a-+b);
 let cash = LV.includes("3") ? "3" : LV[0], band = "", grade = "", shown = 50, tab = "한눈에";
-function setModel(v){ model = v; LV = Object.keys(dataOf()).sort((a,b)=>+a-+b); if (!LV.includes(cash)) cash = LV.includes("3") ? "3" : LV[0]; segs("model", Object.entries(MODELS).map(([k, m]) => [k, m.name]), model, setModel); $("modelDesc").textContent = (MODELS[model] || {}).desc || ""; $("cashRange").max = LV.length - 1; setCash(cash); }
+function setModel(v){ model = v; LV = Object.keys(dataOf()).sort((a,b)=>+a-+b); if (!LV.includes(cash)) cash = LV.includes("3") ? "3" : LV[0]; segs("model", Object.entries(MODELS).map(([k, m]) => [k, m.name]), model, setModel); $("modelDesc").textContent = (MODELS[model] || {}).desc || ""; const sk = (MODELS[model] || {}).key; if (sk && [...$("sort").options].some(o => o.value === sk)) $("sort").value = sk; $("cashRange").max = LV.length - 1; setCash(cash); }
 let favs = new Set(), cmp = [];
 try { favs = new Set(JSON.parse(localStorage.getItem("ae_favs") || "[]")); } catch(e) {}
 const saveFavs = () => { try { localStorage.setItem("ae_favs", JSON.stringify([...favs])); } catch(e) {} };
@@ -152,7 +152,7 @@ function spark(hist, w=90, h=26){ const pts = hist.map((v,i)=>[i,v]).filter(p=>p
 function rows(){ let r = dataOf()[cash] || []; const sido = $("sido").value, gu = $("gu").value, q = $("q").value.trim();
   r = r.filter(x => { const i = info(key(x)); if (sido && !i.lawd.startsWith(sido)) return false; if (gu && i.lawd !== gu) return false; if (band && x.b !== band) return false; if (grade && x.g !== grade) return false;
     if (q && !(i.n.includes(q) || i.reg.includes(q) || (i.emd||"").includes(q))) return false; if ($("pos").checked && !((x.tw||0) > 0)) return false; if ($("fav").checked && !favs.has(key(x))) return false; return true; });
-  const s = $("sort").value; const k = {tw: x => -(x.tw ?? -1e9), fl: x => -(x.fl ?? -1e9), sv: x => -(x.sv ?? -1), bx: x => -((x.ex||0)/x.p), irr: x => -(x.irr ?? -1e9), p: x => x.p}[s]; r = [...r].sort((a,b) => k(a) - k(b));
+  const s = $("sort").value; const k = {tw: x => -(x.tw ?? -1e9), fl: x => -(x.fl ?? -1e9), nu: x => -(x.nu ?? -1e9), sv: x => -(x.sv ?? -1), bx: x => -((x.ex||0)/x.p), irr: x => -(x.irr ?? -1e9), p: x => x.p}[s]; r = [...r].sort((a,b) => k(a) - k(b));
   if ($("dedupe").checked){ const seen = new Set(); r = r.filter(x => { const i = info(key(x)); const kk = i.lawd + "|" + i.emd; if (seen.has(kk)) return false; seen.add(kk); return true; }); }
   return r; }
 
