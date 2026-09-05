@@ -158,12 +158,12 @@ ul{{padding-left:18px;margin:6px 0;}} li{{margin:3px 0;}}
 </style>
 <div class="wrap">
 <h1>아파트 엔진 오늘의 보고</h1>
-<div class="date">2026-09-05 · 1,000세대 이상 단지만 집계·추천 · 5년 뒤 가격 엔진 v0.6(하락기 포함·전세가율 조건부 시장·전세 룩백) · 투자 시점 · 확산 계급 · Terminal Wealth</div>
+<div class="date">2026-09-05 · 1,000세대 이상 단지만 집계·추천 · 5년 뒤 가격 엔진 v0.7(하락기 포함·전세가율×금리 조건부 시장·전세 룩백·정비 단계 전환율) · 투자 시점 · 확산 계급 · Terminal Wealth</div>
 
 <div class="card"><h2>한 줄 결론</h2><div class="big">
 ① 5년 뒤 가격을 맞히는 힘은 <b>{esc(label.get(sel.get('set',''), sel.get('set','')))}</b>이 가장 컸습니다(순위 정확도 IC {sel.get('ic')}). 시장 흐름만 보는 것보다 이론 변수를 넣었을 때 더 잘 맞는지는 아래 표에서 바로 비교됩니다.<br>
 ② 급지 사이 가격 차이는 데이터가 정했고, 5년 안에 급지가 한 단계 오르는 확률은 {rate(base_rate)}입니다. 그 확률을 실제로 올리는 조건만 '호재'로 인정합니다.<br>
-③ 부평 동아1단지 74㎡: 같은 시기 수도권 평균보다 <b>{pct(float(d74.get('pred_log5y')) if d74.get('pred_log5y') is not None else None)}</b> 더 오를 것으로 예측(시장 평균과 거의 같음). 지금과 전세가율이 비슷했던 해(2011·12·21)처럼 시장이 움직이면 5년 뒤 Bear {float(d74.get('bear_factor')):.2f}배 · Base {float(d74.get('base_factor')):.2f}배 · Bull {float(d74.get('bull_factor')):.2f}배 — 시장 수준은 예측이 아니라 '비슷한 국면의 과거' 가정입니다.
+③ 부평 동아1단지 74㎡: 같은 시기 수도권 평균보다 <b>{pct(float(d74.get('pred_log5y')) if d74.get('pred_log5y') is not None else None)}</b> 더 오를 것으로 예측(시장 평균과 거의 같음). 지금과 전세가율·금리가 비슷했던 시점처럼 시장이 움직이면 5년 뒤 Bear {float(d74.get('bear_factor')):.2f}배 · Base {float(d74.get('base_factor')):.2f}배 · Bull {float(d74.get('bull_factor')):.2f}배 — 시장 수준은 예측이 아니라 '비슷한 국면의 과거' 가정입니다.
 </div></div>
 
 <div class="card"><h2>종인님이 하실 일</h2><div class="todo"><b>지금은 없습니다.</b> 보유 vs 갈아타기의 최종 답은 여전히 계약일·대출·전세·거주형태·처분시점·중개사 과세유형·공시가격이 오면 냅니다.</div></div>
@@ -173,7 +173,7 @@ ul{{padding-left:18px;margin:6px 0;}} li{{margin:3px 0;}}
 <p class="muted">IC = 예측 순위와 실제 순위의 상관(0이면 무작위). 승자 포착률 = 실제 상위 10%를 예측 상위 20%가 잡은 비율. MAE = 5년 log 수익률 오차(0.10 ≈ 10%p).</p>
 <details><summary>어떤 변수가 가장 크게 작용했나</summary><div class="tbl"><table><tr><th>변수</th><th>표준화 계수</th></tr>{coef_rows}</table></div>
 <p class="muted">양수 = 그 변수가 클수록 5년 뒤 더 오름. 학습 표본 {bt.get('final_n')}건.</p></details>
-<p class="muted">현재(2026-06 진입) 전 단지의 "시장 대비" 예측 분포: P10 {pct(dist.get('0.1'))} · 중앙 {pct(dist.get('0.5'))} · P90 {pct(dist.get('0.9'))}. 시장 전체 수준(5년)은 <b>지금 전세가율(0.56)과 비슷했던 과거 진입연도(2011·2012·2021)</b>의 최저 +3.7% · 중앙 +10.6% · 최고 +19.9%(log)를 Bear/Base/Bull 로 씁니다 — 예측이 아니라 "비슷한 국면의 과거" 가정입니다(v0.4, 이전 라운드의 전체 분포 +3/+30/+39% 보다 보수적).</p>
+<p class="muted">현재(2026-06 진입) 전 단지의 "시장 대비" 예측 분포: P10 {pct(dist.get('0.1'))} · 중앙 {pct(dist.get('0.5'))} · P90 {pct(dist.get('0.9'))}. 시장 전체 수준(5년)은 {esc(d74.get("market_scenario_note") or "과거 분포")} 의 5년 수익 최저/중앙/최고(log {esc(d74.get("market_scenario_log") or "")})를 Bear/Base/Bull 로 씁니다 — 예측이 아니라 "지금과 비슷한 국면의 과거(분기 표본)" 가정입니다.</p>
 </div>
 
 <div class="card"><h2>아파트 계급도 (법정동 급지 8단계)</h2>
