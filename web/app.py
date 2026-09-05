@@ -168,8 +168,15 @@ def _nav(owner: bool) -> str:
         links += ['<a href="/admin/share">공유 링크</a>',
                   '<a href="#" onclick="recompute();return false;">다시 계산</a>']
     status = ('<span id="jobstatus"></span>'
-              '<script>async function recompute(){if(!confirm("순위를 다시 계산합니다 (10분쯤 걸림). 계속?"))return;'
-              'await fetch("/api/recompute",{method:"POST"});poll();}'
+              # 현금·기간·개수를 물어본다. 빈 값이면 예전과 같은 3억·5년·100개.
+              '<script>async function recompute(){'
+              'const cash=prompt("투자금 (억 단위, 예: 1 또는 3)","3");if(cash===null)return;'
+              'const horizon=prompt("투자기간 (년)","5");if(horizon===null)return;'
+              'const top=prompt("몇 개까지 볼까요? (카톡으로 보낼 땐 10)","100");if(top===null)return;'
+              'if(!confirm(cash+"억 · "+horizon+"년 · TOP"+top+" 으로 다시 계산합니다 (10분쯤 걸림). 계속?"))return;'
+              'const r=await fetch("/api/recompute",{method:"POST",headers:{"Content-Type":"application/json"},'
+              'body:JSON.stringify({cash:cash,horizon:horizon,top:top})});'
+              'const d=await r.json();if(d.error){alert(d.error);return;}poll();}'
               'async function poll(){const r=await fetch("/api/status");const d=await r.json();'
               'const el=document.getElementById("jobstatus");if(!el)return;'
               'if(d.running){el.textContent="계산 중… "+(d.elapsed||"");setTimeout(poll,5000);}'
@@ -287,10 +294,11 @@ def complex_page(cid):
 
 
 # ── 재계산 (관리자, 배경) ────────────────────────────────────────────
-def _run_job():
+def _run_job(cash: str = "3", horizon: int = 5, top: int = 100):
     log = []
     ok = True
-    for args in (["tools/dump_top100.py", "--cash", "3", "--horizon", "5"],
+    for args in (["tools/dump_top100.py", "--cash", str(cash),
+                  "--horizon", str(horizon), "--top", str(top)],
                  ["tools/report_top100.py"]):
         r = subprocess.run([str(PY), *args], cwd=str(ROOT), capture_output=True, text=True,
                            encoding="utf-8", errors="replace")
@@ -304,12 +312,22 @@ def _run_job():
 
 @app.route("/api/recompute", methods=["POST"])
 def api_recompute():
+    # 현금(억)·투자기간(년)·개수를 받는다. 안 주면 예전과 같은 3억·5년·100개.
+    body = request.get_json(silent=True) or {}
+    try:
+        cash = float(body.get("cash", 3))
+        horizon = int(body.get("horizon", 5))
+        top = int(body.get("top", 100))
+    except (TypeError, ValueError):
+        return jsonify({"error": "cash·horizon·top 은 숫자여야 합니다"}), 400
+    if not (0 < cash <= 100) or not (1 <= horizon <= 30) or not (1 <= top <= 100):
+        return jsonify({"error": "범위 밖: cash 0~100억 · horizon 1~30년 · top 1~100"}), 400
     with _lock:
         if _job["running"]:
             return jsonify({"running": True})
         _job.update(running=True, started=datetime.now(), finished=None, ok=None, just=False)
-    threading.Thread(target=_run_job, daemon=True).start()
-    return jsonify({"running": True})
+    threading.Thread(target=_run_job, args=(cash, horizon, top), daemon=True).start()
+    return jsonify({"running": True, "cash": cash, "horizon": horizon, "top": top})
 
 
 @app.route("/api/status")

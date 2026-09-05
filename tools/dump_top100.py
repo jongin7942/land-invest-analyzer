@@ -48,6 +48,8 @@ def main() -> int:
     ap.add_argument("--scan", type=int, default=5000)
     ap.add_argument("--as-of", default=None)
     ap.add_argument("--run-key", default=None)
+    ap.add_argument("--top", type=int, default=100,
+                    help="보고서에 담을 개수 (기본 100). 카톡으로 보낼 땐 10 이 읽기 좋다")
     args = ap.parse_args()
 
     as_of = cutoff_mod.AsOf(args.as_of or date.today().isoformat())
@@ -59,7 +61,7 @@ def main() -> int:
         result = pipeline.run(conn, as_of=as_of, profile=profile,
                               horizon_years=args.horizon, scan_limit=args.scan,
                               weights_source=weights_mod.HEURISTIC)
-        top = result.top100
+        top = result.top100[:args.top]
         # ★ 는 cli rank 와 같은 기준으로 센다 — TOP10 안에서 세 리스트를 만들고,
         # 그 셋 모두 5위 안(lists.CONVICTION_RANK)이어야 한다. 100개로 리스트를
         # 만들면 위험조정·비대칭 순서가 크게 달라져 아무도 못 든다.
@@ -96,6 +98,7 @@ def main() -> int:
             "regime": result.regime,
             "weights_source": result.weights.label,
             "run_key": args.run_key,
+            "top": args.top,
         }
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
