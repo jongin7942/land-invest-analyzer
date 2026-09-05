@@ -25,7 +25,7 @@ from apt_engine.relative.store import median, percentile  # noqa: E402
 
 NOW_YM = "202606"
 LAM = 0.3
-D = panel_mod.FEATURE_SETS["E_+theory2"]   # v0.3 채택 변수군(E). 이름은 D 로 유지
+D = panel_mod.FEATURE_SETS["E3_+redev"]   # v0.5: E + 정비사업 단계. 이름은 D 로 유지
 LADDER = [
     ("D", D),
     ("D-jm", [f for f in D if f != "jeonse_mom1"]),
@@ -64,13 +64,18 @@ def main() -> int:
         mt = json.loads(mt_path.read_text(encoding="utf-8"))
         now_row = next((r for r in mt["rows"] if r["year"] == 2026), None)
         jr_now = now_row.get("metro_jeonse_ratio") if now_row else None
+        rate_now = now_row.get("bok_rate") if now_row else None
         if jr_now is not None:
-            cond_years = [f"{r['year']}06" for r in mt["rows"] if r.get("metro_jeonse_ratio") is not None
-                          and abs(r["metro_jeonse_ratio"] - jr_now) <= 0.08 and f"{r['year']}06" in lvl]
+            cand = [r for r in mt["rows"] if r.get("metro_jeonse_ratio") is not None
+                    and abs(r["metro_jeonse_ratio"] - jr_now) <= 0.08 and f"{r['year']}06" in lvl]
+            # 전세가율 × 금리 두 조건(금리 ±1.0%p) — 3개 이상이면 그것을, 아니면 전세가율만
+            cand2 = [r for r in cand if rate_now is not None and r.get("bok_rate") is not None and abs(r["bok_rate"] - rate_now) <= 1.0]
+            cond_years = [f"{r['year']}06" for r in (cand2 if len(cand2) >= 3 else cand)]
+            cond_kind = "전세가율×금리" if len(cand2) >= 3 else "전세가율"
     if len(cond_years) >= 3:
         mk_c = sorted(lvl[y] for y in cond_years)
         bear_mk, base_mk, bull_mk = min(mk_c), percentile(mk_c, 0.5), max(mk_c)
-        scen_note = f"전세가율 조건부(지금 {jr_now:.2f}, 유사 진입연도 {sorted(cond_years)})"
+        scen_note = f"{cond_kind} 조건부(지금 전세가율 {jr_now:.2f}·금리 {rate_now}, 유사 진입연도 {sorted(cond_years)})"
     else:
         bear_mk, base_mk, bull_mk = min(mk), percentile(mk, 0.5), percentile(mk, 0.8)
         scen_note = "전체 진입연도 분포(조건부 표본 부족)"

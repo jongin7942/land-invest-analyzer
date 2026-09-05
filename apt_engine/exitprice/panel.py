@@ -13,6 +13,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from apt_engine.exitprice import redev as redev_mod
 from apt_engine.features import regime as regime_mod
 from apt_engine.relative import store, zones as zones_mod
 from apt_engine.relative.store import N_MONTHS, MONTHS, Complex, Series, change, haversine_m, median
@@ -57,6 +58,7 @@ FEATURE_SETS = {
     "E_+theory2": FEATURES + JOB_FEATURES + THEORY2,
     "F_+cycle": FEATURES + JOB_FEATURES + THEORY2 + CYCLE,
     "E2_+relmom": FEATURES + JOB_FEATURES + THEORY2 + ["rel_gu_mom3", "vol_lead", "emd_lead_months"],
+    "E3_+redev": FEATURES + JOB_FEATURES + THEORY2 + ["redev_stage", "redev_active"],
     "G_+diffusion": FEATURES + JOB_FEATURES + THEORY2 + DIFFUSION,
     "H_all": FEATURES + JOB_FEATURES + THEORY2 + DIFFUSION + CYCLE,
 }
@@ -100,6 +102,7 @@ class PanelBuilder:
         self.jobs = jobs
         self.tier_cx = tier_complexes or complexes
         self.tier_prices = tier_prices or prices
+        self.redev = redev_mod.load()          # 정비사업 단계 일자(그 시점 이하만 사용)
         self.by_gu: dict[str, list[tuple[int, str]]] = {}
         for (cid, band) in prices:
             self.by_gu.setdefault(complexes[cid].lawd_cd, []).append((cid, band))
@@ -381,6 +384,10 @@ class PanelBuilder:
             "gu_supply_ratio": self.gu_supply_ratio(c.lawd_cd, year, year + 2),
             "rel_emd": (math.log(p0 / store.BAND_M2[band]) - emd_lv) if emd_lv is not None else None,
         })
+        # ── v0.5 정비사업 단계(진입 시점 이하 최고 단계, §14 사다리) ──
+        rs = redev_mod.stage_at(self.redev, cid, entry_ym)
+        x["redev_stage"] = float(rs)
+        x["redev_active"] = 1.0 if rs >= 3 else 0.0
         # ── v0.3 확산(얼리어답터/후행) 변수 ──
         lead = self.emd_lead_months(c.emd_key, t)
         mm1 = x["metro_mom1"] if "metro_mom1" in x else self.metro_mom(t, 12)
