@@ -1,0 +1,133 @@
+zone_type,sido,sigungu,emd_scope,emd_list,effective_from,effective_to,source_name,source_url,confidence,note
+조정대상지역,서울,전체,ALL,,2016-11-03,2023-01-05,11.3 주택시장 안정적 관리방안(국토부 2016-11-03),https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,서울 25개구 전역. 2022-11-14 해제 대상 아님(서울 유지) → 2023-01-05 강남·서초·송파·용산 외 해제
+조정대상지역,서울,강남구,ALL,,2023-01-05,,2023년 제1차 주거정책심의위원회,https://xn--989a00af8jnslv3dba.com/wiki/조정대상지역,VERIFIED,2023-01-05 이후 유지
+조정대상지역,서울,서초구,ALL,,2023-01-05,,2023년 제1차 주거정책심의위원회,https://xn--989a00af8jnslv3dba.com/wiki/조정대상지역,VERIFIED,
+조정대상지역,서울,송파구,ALL,,2023-01-05,,2023년 제1차 주거정책심의위원회,https://xn--989a00af8jnslv3dba.com/wiki/조정대상지역,VERIFIED,
+조정대상지역,서울,용산구,ALL,,2023-01-05,,2023년 제1차 주거정책심의위원회,https://xn--989a00af8jnslv3dba.com/wiki/조정대상지역,VERIFIED,
+조정대상지역,서울,전체,ALL,,2025-10-16,,10.15 주택시장 안정화 대책,https://www.molit.go.kr/USR/NEWS/m_71/dtl.jsp?id=95091308,VERIFIED,서울 25개구 재지정(4개구는 연속 유지)
+조정대상지역,경기,과천시,ALL,,2016-11-03,2025-10-16,11.3 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,2022-11-14 해제 대상 아님(유지) → 2023-01-05 해제. 종료일은 2023-01-05
+조정대상지역,경기,과천시,ALL,,2025-10-16,,10.15 대책,https://www.molit.go.kr/USR/NEWS/m_71/dtl.jsp?id=95091308,VERIFIED,
+조정대상지역,경기,성남시,ALL,,2016-11-03,2023-01-05,11.3 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,성남 전역(분당·수정·중원). 2022-11-14: 중원구 해제·분당·수정 유지 → 2023-01-05 전부 해제
+조정대상지역,경기,성남시,ALL,,2025-10-16,,10.15 대책,https://www.molit.go.kr/USR/NEWS/m_71/dtl.jsp?id=95091308,VERIFIED,분당·수정·중원
+조정대상지역,경기,하남시,ALL,,2016-11-03,2023-01-05,11.3 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,2022-11-14 유지 → 2023-01-05 해제
+조정대상지역,경기,하남시,ALL,,2025-10-16,,10.15 대책,https://www.molit.go.kr/USR/NEWS/m_71/dtl.jsp?id=95091308,VERIFIED,
+조정대상지역,경기,고양시,ALL,,2016-11-03,2019-11-08,11.3 대책 / 국토교통부공고 제2019-1540호,https://xn--989a00af8jnslv3dba.com/wiki/조정대상지역,VERIFIED,2019-11-08 대부분 해제(삼송·원흥·지축·향동·덕은·킨텍스1단계·한류월드 지구만 유지)
+조정대상지역,경기,고양시,INCLUDE,삼송동|원흥동|지축동|향동동|덕은동|대화동|장항동,2019-11-08,2020-06-19,국토교통부공고 제2019-1540호(택지지구 → 법정동 근사),https://xn--989a00af8jnslv3dba.com/wiki/조정대상지역,PROXY,지구 경계를 법정동으로 근사(대화동=킨텍스1단계·장항동=한류월드)
+조정대상지역,경기,고양시,ALL,,2020-06-19,2022-11-14,6.17 주택시장 안정을 위한 관리방안,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,경기 전역 지정에 포함
+조정대상지역,경기,남양주시,ALL,,2016-11-03,2019-11-08,11.3 대책 / 국토교통부공고 제2019-1540호,https://xn--989a00af8jnslv3dba.com/wiki/조정대상지역,VERIFIED,2019-11-08 다산동·별내동 외 해제
+조정대상지역,경기,남양주시,INCLUDE,다산동|별내동,2019-11-08,2020-06-19,국토교통부공고 제2019-1540호,https://xn--989a00af8jnslv3dba.com/wiki/조정대상지역,VERIFIED,
+조정대상지역,경기,남양주시,EXCLUDE,화도읍|수동면|조안면,2020-06-19,2022-11-14,6.17 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+조정대상지역,경기,화성시,INCLUDE,동탄2 택지개발지구(청계동|영천동|오산동|신동|중동|목동|산척동|장지동|송동|방교동|금곡동),2016-11-03,2020-06-19,11.3 대책(동탄2 → 법정동 근사),https://www.korea.kr/special/policyCurationView.do?newsId=148868829,PROXY,동탄2 지구 경계를 법정동으로 근사
+조정대상지역,경기,화성시,ALL,,2020-06-19,2022-11-14,6.17 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+조정대상지역,경기,광명시,ALL,,2017-06-19,2023-01-05,6.19 주택시장 선별적·맞춤형 대응방안,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,2022-11-14 유지 → 2023-01-05 해제
+조정대상지역,경기,광명시,ALL,,2025-10-16,,10.15 대책,https://www.molit.go.kr/USR/NEWS/m_71/dtl.jsp?id=95091308,VERIFIED,
+조정대상지역,경기,구리시,ALL,,2018-08-28,2022-11-14,8.27 수도권 주택공급 확대 추진 및 투기지역 지정 등을 통한 시장안정 기조 강화,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+조정대상지역,경기,안양시 동안구,ALL,,2018-08-28,2022-11-14,8.27 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+조정대상지역,경기,안양시 동안구,ALL,,2025-10-16,,10.15 대책,https://www.molit.go.kr/USR/NEWS/m_71/dtl.jsp?id=95091308,VERIFIED,
+조정대상지역,경기,수원시 영통구,INCLUDE,이의동|원천동|하동|매탄동,2018-08-28,2020-02-21,8.27 대책(광교택지개발지구 → 법정동 근사),https://www.korea.kr/special/policyCurationView.do?newsId=148868829,PROXY,광교지구 일부 동만 해당
+조정대상지역,경기,수원시 팔달구,ALL,,2018-12-31,2022-11-14,12.28 주거정책심의위원회,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+조정대상지역,경기,수원시 영통구,ALL,,2020-02-21,2022-11-14,2.20 투기 수요 차단을 통한 주택시장 안정적 관리 기조 강화,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+조정대상지역,경기,수원시 권선구,ALL,,2020-02-21,2022-11-14,2.20 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+조정대상지역,경기,수원시 장안구,ALL,,2020-02-21,2022-11-14,2.20 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+조정대상지역,경기,안양시 만안구,ALL,,2020-02-21,2022-11-14,2.20 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+조정대상지역,경기,의왕시,ALL,,2020-02-21,2022-11-14,2.20 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+조정대상지역,경기,의왕시,ALL,,2025-10-16,,10.15 대책,https://www.molit.go.kr/USR/NEWS/m_71/dtl.jsp?id=95091308,VERIFIED,
+조정대상지역,경기,수원시 영통구,ALL,,2025-10-16,,10.15 대책,https://www.molit.go.kr/USR/NEWS/m_71/dtl.jsp?id=95091308,VERIFIED,
+조정대상지역,경기,수원시 장안구,ALL,,2025-10-16,,10.15 대책,https://www.molit.go.kr/USR/NEWS/m_71/dtl.jsp?id=95091308,VERIFIED,
+조정대상지역,경기,수원시 팔달구,ALL,,2025-10-16,,10.15 대책,https://www.molit.go.kr/USR/NEWS/m_71/dtl.jsp?id=95091308,VERIFIED,
+조정대상지역,경기,용인시 수지구,ALL,,2018-12-31,2022-11-14,12.28 주거정책심의위원회,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+조정대상지역,경기,용인시 수지구,ALL,,2025-10-16,,10.15 대책,https://www.molit.go.kr/USR/NEWS/m_71/dtl.jsp?id=95091308,VERIFIED,
+조정대상지역,경기,용인시 기흥구,ALL,,2018-12-31,2022-11-14,12.28 주거정책심의위원회,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+조정대상지역,경기,용인시 처인구,EXCLUDE,포곡읍|모현읍|백암면|양지면|원삼면,2020-06-19,2022-11-14,6.17 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,원삼면은 가재월리 등 일부만 제외 → 면 단위 근사
+조정대상지역,경기,부천시,ALL,,2020-06-19,2022-11-14,6.17 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+조정대상지역,경기,안산시,ALL,,2020-06-19,2022-11-14,6.17 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,단원구·상록구
+조정대상지역,경기,시흥시,ALL,,2020-06-19,2022-11-14,6.17 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+조정대상지역,경기,군포시,ALL,,2020-06-19,2022-11-14,6.17 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+조정대상지역,경기,오산시,ALL,,2020-06-19,2022-11-14,6.17 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+조정대상지역,경기,평택시,ALL,,2020-06-19,2022-09-26,6.17 대책 / 국토교통부공고 제2022-1207호,https://xn--989a00af8jnslv3dba.com/wiki/조정대상지역,VERIFIED,
+조정대상지역,경기,광주시,EXCLUDE,초월읍|곤지암읍|도척면|퇴촌면|남종면|남한산성면,2020-06-19,2022-11-14,6.17 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+조정대상지역,경기,양주시,EXCLUDE,백석읍|남면|광적면|은현면,2020-06-19,2022-09-26,6.17 대책 / 2020-12-18 읍면 해제 / 공고 제2022-1207호,https://xn--989a00af8jnslv3dba.com/wiki/조정대상지역,VERIFIED,
+조정대상지역,경기,의정부시,ALL,,2020-06-19,2022-11-14,6.17 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+조정대상지역,경기,안성시,EXCLUDE,일죽면|죽산면|삼죽면|미양면|대덕면|양성면|고삼면|보개면|서운면|금광면,2020-06-19,2022-09-26,6.17 대책 / 2020-12-18 읍면 해제 / 공고 제2022-1207호,https://xn--989a00af8jnslv3dba.com/wiki/조정대상지역,VERIFIED,
+조정대상지역,경기,김포시,EXCLUDE,통진읍|월곶면|하성면|대곶면,2020-11-20,2022-11-14,11.19 서민·중산층 주거안정 지원방안,https://xn--989a00af8jnslv3dba.com/wiki/조정대상지역,VERIFIED,
+조정대상지역,경기,파주시,EXCLUDE,문산읍|파주읍|법원읍|조리읍|월롱면|탄현면|광탄면|파평면|적성면|군내면|장단면|진동면|진서면,2020-12-18,2022-09-26,12.17 대책 / 공고 제2022-1207호,https://xn--989a00af8jnslv3dba.com/wiki/조정대상지역,VERIFIED,
+조정대상지역,경기,동두천시,EXCLUDE,광암동|걸산동|안흥동|상봉암동|하봉암동|탑동동,2021-08-30,2022-09-26,2021-08-30 추가 지정 / 공고 제2022-1207호,https://xn--989a00af8jnslv3dba.com/wiki/조정대상지역,VERIFIED,
+조정대상지역,인천,전체,ALL,,2020-06-19,2022-11-14,6.17 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,강화군·옹진군 제외. 2020-12-18 중구 을왕·남북·덕교·무의동 해제
+조정대상지역,인천,중구,EXCLUDE,을왕동|남북동|덕교동|무의동,2020-12-18,2022-11-14,2020-12-18 해제,https://xn--989a00af8jnslv3dba.com/wiki/조정대상지역,VERIFIED,중구 도서 지역 해제(전체 행의 예외)
+투기과열지구,서울,전체,ALL,,2017-08-03,2023-01-05,8.2 실수요 보호와 단기 투기수요 억제를 통한 주택시장 안정화 방안,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,2022-11-14 유지 → 2023-01-05 4개구 외 해제
+투기과열지구,서울,강남구,ALL,,2023-01-05,,2023년 제1차 주거정책심의위원회,https://xn--989a00af8jnslv3dba.com/wiki/투기과열지구,VERIFIED,
+투기과열지구,서울,서초구,ALL,,2023-01-05,,2023년 제1차 주거정책심의위원회,https://xn--989a00af8jnslv3dba.com/wiki/투기과열지구,VERIFIED,
+투기과열지구,서울,송파구,ALL,,2023-01-05,,2023년 제1차 주거정책심의위원회,https://xn--989a00af8jnslv3dba.com/wiki/투기과열지구,VERIFIED,
+투기과열지구,서울,용산구,ALL,,2023-01-05,,2023년 제1차 주거정책심의위원회,https://xn--989a00af8jnslv3dba.com/wiki/투기과열지구,VERIFIED,
+투기과열지구,서울,전체,ALL,,2025-10-16,,10.15 대책,https://www.molit.go.kr/USR/NEWS/m_71/dtl.jsp?id=95091308,VERIFIED,
+투기과열지구,경기,과천시,ALL,,2017-08-03,2023-01-05,8.2 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+투기과열지구,경기,과천시,ALL,,2025-10-16,,10.15 대책,https://www.molit.go.kr/USR/NEWS/m_71/dtl.jsp?id=95091308,VERIFIED,
+투기과열지구,경기,성남시 분당구,ALL,,2017-09-06,2023-01-05,9.5 후속조치(투기과열지구 추가 지정),https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+투기과열지구,경기,성남시 수정구,ALL,,2020-06-19,2023-01-05,6.17 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+투기과열지구,경기,성남시,ALL,,2025-10-16,,10.15 대책,https://www.molit.go.kr/USR/NEWS/m_71/dtl.jsp?id=95091308,VERIFIED,분당·수정·중원
+투기과열지구,경기,광명시,ALL,,2018-08-28,2023-01-05,8.27 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+투기과열지구,경기,광명시,ALL,,2025-10-16,,10.15 대책,https://www.molit.go.kr/USR/NEWS/m_71/dtl.jsp?id=95091308,VERIFIED,
+투기과열지구,경기,하남시,ALL,,2018-08-28,2023-01-05,8.27 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+투기과열지구,경기,하남시,ALL,,2025-10-16,,10.15 대책,https://www.molit.go.kr/USR/NEWS/m_71/dtl.jsp?id=95091308,VERIFIED,
+투기과열지구,경기,수원시,ALL,,2020-06-19,2022-11-14,6.17 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+투기과열지구,경기,수원시 영통구,ALL,,2025-10-16,,10.15 대책,https://www.molit.go.kr/USR/NEWS/m_71/dtl.jsp?id=95091308,VERIFIED,
+투기과열지구,경기,수원시 장안구,ALL,,2025-10-16,,10.15 대책,https://www.molit.go.kr/USR/NEWS/m_71/dtl.jsp?id=95091308,VERIFIED,
+투기과열지구,경기,수원시 팔달구,ALL,,2025-10-16,,10.15 대책,https://www.molit.go.kr/USR/NEWS/m_71/dtl.jsp?id=95091308,VERIFIED,
+투기과열지구,경기,안양시,ALL,,2020-06-19,2022-11-14,6.17 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+투기과열지구,경기,안양시 동안구,ALL,,2025-10-16,,10.15 대책,https://www.molit.go.kr/USR/NEWS/m_71/dtl.jsp?id=95091308,VERIFIED,
+투기과열지구,경기,안산시 단원구,EXCLUDE,대부동동|대부남동|대부북동|선감동|풍도동,2020-06-19,2022-11-14,6.17 대책 / 2022-07-05 도서 해제(공고 제2022-882호),https://xn--989a00af8jnslv3dba.com/wiki/투기과열지구,VERIFIED,
+투기과열지구,경기,구리시,ALL,,2020-06-19,2022-11-14,6.17 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+투기과열지구,경기,군포시,ALL,,2020-06-19,2022-11-14,6.17 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+투기과열지구,경기,의왕시,ALL,,2020-06-19,2022-11-14,6.17 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+투기과열지구,경기,의왕시,ALL,,2025-10-16,,10.15 대책,https://www.molit.go.kr/USR/NEWS/m_71/dtl.jsp?id=95091308,VERIFIED,
+투기과열지구,경기,용인시 수지구,ALL,,2020-06-19,2022-11-14,6.17 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+투기과열지구,경기,용인시 수지구,ALL,,2025-10-16,,10.15 대책,https://www.molit.go.kr/USR/NEWS/m_71/dtl.jsp?id=95091308,VERIFIED,
+투기과열지구,경기,용인시 기흥구,ALL,,2020-06-19,2022-11-14,6.17 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+투기과열지구,경기,화성시,INCLUDE,동탄2 택지개발지구(청계동|영천동|오산동|신동|중동|목동|산척동|장지동|송동|방교동|금곡동),2020-06-19,2022-11-14,6.17 대책(동탄2 → 법정동 근사),https://www.korea.kr/special/policyCurationView.do?newsId=148868829,PROXY,
+투기과열지구,인천,연수구,ALL,,2020-06-19,2022-09-26,6.17 대책 / 공고 제2022-1206호,https://xn--989a00af8jnslv3dba.com/wiki/투기과열지구,VERIFIED,
+투기과열지구,인천,남동구,ALL,,2020-06-19,2022-09-26,6.17 대책 / 공고 제2022-1206호,https://xn--989a00af8jnslv3dba.com/wiki/투기과열지구,VERIFIED,
+투기과열지구,인천,서구,ALL,,2020-06-19,2022-09-26,6.17 대책 / 공고 제2022-1206호,https://xn--989a00af8jnslv3dba.com/wiki/투기과열지구,VERIFIED,
+투기지역,서울,강남구,ALL,,2017-08-03,,8.2 대책(소득세법 시행령 지정지역),https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,2023-01-05 이후에도 강남3구·용산 유지
+투기지역,서울,서초구,ALL,,2017-08-03,,8.2 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+투기지역,서울,송파구,ALL,,2017-08-03,,8.2 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+투기지역,서울,강동구,ALL,,2017-08-03,2023-01-05,8.2 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+투기지역,서울,용산구,ALL,,2017-08-03,,8.2 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+투기지역,서울,성동구,ALL,,2017-08-03,2023-01-05,8.2 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+투기지역,서울,노원구,ALL,,2017-08-03,2023-01-05,8.2 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+투기지역,서울,마포구,ALL,,2017-08-03,2023-01-05,8.2 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+투기지역,서울,양천구,ALL,,2017-08-03,2023-01-05,8.2 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+투기지역,서울,영등포구,ALL,,2017-08-03,2023-01-05,8.2 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+투기지역,서울,강서구,ALL,,2017-08-03,2023-01-05,8.2 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+투기지역,서울,종로구,ALL,,2018-08-28,2023-01-05,8.27 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+투기지역,서울,중구,ALL,,2018-08-28,2023-01-05,8.27 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+투기지역,서울,동대문구,ALL,,2018-08-28,2023-01-05,8.27 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+투기지역,서울,동작구,ALL,,2018-08-28,2023-01-05,8.27 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+분양가상한제,서울,강남구,INCLUDE,개포동|대치동|도곡동|삼성동|압구정동|역삼동|일원동|청담동,2019-11-08,2019-12-17,국토교통부공고 제2019-1539호(11.6 민간택지 분양가상한제 적용지역 지정),https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,27개동 1차 지정
+분양가상한제,서울,서초구,INCLUDE,잠원동|반포동|방배동|서초동,2019-11-08,2019-12-17,국토교통부공고 제2019-1539호,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+분양가상한제,서울,송파구,INCLUDE,잠실동|가락동|마천동|송파동|신천동|문정동|방이동|오금동,2019-11-08,2019-12-17,국토교통부공고 제2019-1539호,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+분양가상한제,서울,강동구,INCLUDE,길동|둔촌동,2019-11-08,2019-12-17,국토교통부공고 제2019-1539호,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+분양가상한제,서울,영등포구,INCLUDE,여의도동,2019-11-08,2019-12-17,국토교통부공고 제2019-1539호,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+분양가상한제,서울,마포구,INCLUDE,아현동,2019-11-08,2019-12-17,국토교통부공고 제2019-1539호,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+분양가상한제,서울,용산구,INCLUDE,한남동|보광동,2019-11-08,2019-12-17,국토교통부공고 제2019-1539호,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+분양가상한제,서울,성동구,INCLUDE,성수동1가,2019-11-08,2019-12-17,국토교통부공고 제2019-1539호,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+분양가상한제,서울,강남구,ALL,,2019-12-17,,12.16 주택시장 안정화 방안(13개구 전역),https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,2022-11-14 이후에도 강남·서초·송파·용산 유지
+분양가상한제,서울,서초구,ALL,,2019-12-17,,12.16 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+분양가상한제,서울,송파구,ALL,,2019-12-17,,12.16 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+분양가상한제,서울,용산구,ALL,,2019-12-17,,12.16 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+분양가상한제,서울,강동구,ALL,,2019-12-17,2022-11-14,12.16 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+분양가상한제,서울,영등포구,ALL,,2019-12-17,2022-11-14,12.16 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+분양가상한제,서울,마포구,ALL,,2019-12-17,2022-11-14,12.16 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+분양가상한제,서울,성동구,ALL,,2019-12-17,2022-11-14,12.16 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+분양가상한제,서울,동작구,ALL,,2019-12-17,2022-11-14,12.16 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+분양가상한제,서울,양천구,ALL,,2019-12-17,2022-11-14,12.16 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+분양가상한제,서울,중구,ALL,,2019-12-17,2022-11-14,12.16 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+분양가상한제,서울,광진구,ALL,,2019-12-17,2022-11-14,12.16 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+분양가상한제,서울,서대문구,ALL,,2019-12-17,2022-11-14,12.16 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,VERIFIED,
+분양가상한제,서울,강서구,INCLUDE,방화동|공항동|마곡동|등촌동|화곡동,2019-12-17,2022-11-14,12.16 대책(5개구 37개동),https://www.korea.kr/special/policyCurationView.do?newsId=148868829,PROXY,동 목록은 정책자료 기준 — 고시문 대조 필요
+분양가상한제,서울,노원구,INCLUDE,상계동|월계동|중계동|하계동,2019-12-17,2022-11-14,12.16 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,PROXY,
+분양가상한제,서울,동대문구,INCLUDE,이문동|휘경동|제기동|용두동|청량리동|답십리동|회기동|전농동,2019-12-17,2022-11-14,12.16 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,PROXY,
+분양가상한제,서울,성북구,INCLUDE,성북동|정릉동|장위동|돈암동|길음동|동소문동2가|동소문동3가|보문동1가|안암동3가|동선동4가|삼선동1가|삼선동2가|삼선동3가,2019-12-17,2022-11-14,12.16 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,PROXY,
+분양가상한제,서울,은평구,INCLUDE,불광동|갈현동|수색동|신사동|증산동|대조동|역촌동,2019-12-17,2022-11-14,12.16 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,PROXY,
+분양가상한제,경기,광명시,INCLUDE,광명동|소하동|철산동|하안동,2019-12-17,2022-11-14,12.16 대책(경기 3개시 13개동),https://www.korea.kr/special/policyCurationView.do?newsId=148868829,PROXY,
+분양가상한제,경기,하남시,INCLUDE,창우동|신장동|덕풍동|풍산동,2019-12-17,2022-11-14,12.16 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,PROXY,
+분양가상한제,경기,과천시,INCLUDE,별양동|부림동|원문동|주암동|중앙동,2019-12-17,2022-11-14,12.16 대책,https://www.korea.kr/special/policyCurationView.do?newsId=148868829,PROXY,
