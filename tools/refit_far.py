@@ -25,6 +25,7 @@ from apt_engine.collectors import kapt  # noqa: E402
 from apt_engine.db.connection import get_conn  # noqa: E402
 
 K = 1.15
+SOURCE_TIER = __import__("sqlite3").connect(str(ROOT / "apt_invest.db")).execute("SELECT MIN(tier) FROM source_tier").fetchone()[0] or 1
 SRC = "K-apt privArea × 1.15 ÷ V-World 대지 (PROXY, tools/refit_far.py)"
 
 
@@ -37,13 +38,23 @@ def main() -> int:
                             "WHERE canonical_id IS NULL AND apt_households >= 1000 AND kapt_code IS NOT NULL ORDER BY id").fetchall()
     if a.limit:
         rows = rows[: a.limit]
+    import json
+    cache_p = ROOT / "logs" / "_kapt_priv_cache.json"
+    cache = json.loads(cache_p.read_text(encoding="utf-8")) if cache_p.exists() else {}
     t0 = time.time(); done = fail = 0; changes = []
     for i, r in enumerate(rows, 1):
-        try:
-            b = kapt.fetch_basis(r["kapt_code"])
-        except Exception as e:  # noqa: BLE001
-            b = None; err = str(e)[:120]
-        raw = (b or {}).get("raw") or {}
+        if r["kapt_code"] in cache:
+            raw = cache[r["kapt_code"]]
+        else:
+            try:
+                b = kapt.fetch_basis(r["kapt_code"])
+            except Exception as e:  # noqa: BLE001
+                b = None
+            raw0 = (b or {}).get("raw") or {}
+            raw = {"privArea": raw0.get("privArea"), "kaptMarea": raw0.get("kaptMarea"), "kaptTarea": raw0.get("kaptTarea"), "kaptdPcntu": raw0.get("kaptdPcntu")}
+            cache[r["kapt_code"]] = raw
+            if i % 50 == 0:
+                cache_p.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
         priv = raw.get("privArea"); marea = raw.get("kaptMarea")
         try:
             priv = float(priv) if priv not in (None, "") else None
@@ -61,6 +72,7 @@ def main() -> int:
         changes.append((r["id"], priv, marea, far_est, r["current_far"], new_far, bool(ov)))
         if i % 100 == 0 or i == len(rows):
             print(f"  {i}/{len(rows)} priv 확보 {done} 실패 {fail} ({time.time()-t0:.0f}s)", flush=True)
+    cache_p.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
     if a.dry:
         for c in changes[:20]:
             print(c)
@@ -70,10 +82,11 @@ def main() -> int:
         for cid, priv, marea, far_est, far_prev, new_far, is_ov in changes:
             for key, val, unit in (("priv_area_m2", priv, "㎡"), ("kapt_marea_m2", marea, "㎡"), ("far_est_priv", far_est, "%"), ("far_prev_tarea", far_prev, "%")):
                 if val is not None:
-                    conn.execute("INSERT INTO complex_attribute(complex_id, attr_key, value_num, unit, as_of, source_name, confidence, verification, note) "
-                                 "VALUES (?,?,?,?,?,?,?,?,?)",
-                                 (cid, key, float(val), unit, "2026-09-05", "K-apt 기본정보" if key in ("priv_area_m2", "kapt_marea_m2") else SRC,
-                                  "PROXY" if key == "far_est_priv" else ("LOW" if key == "far_prev_tarea" else "VERIFIED"), "UNVERIFIED",
+                    conn.execute("INSERT OR REPLACE INTO complex_attribute(complex_id, attr_key, value_num, unit, as_of, source_name, source_tier, confidence, verification, note) "
+                                 "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                                 (cid, key, float(val), unit, "2026-09-05", "K-apt 기본정보" if key in ("priv_area_m2", "kapt_marea_m2") else SRC, SOURCE_TIER,
+                                  "MEDIUM" if key == "far_est_priv" else ("LOW" if key == "far_prev_tarea" else "HIGH"),
+                                  "VERIFIED" if key in ("priv_area_m2", "kapt_marea_m2") else "ESTIMATED",
                                   "지하 포함 연면적(kaptTarea) 기반 과대 추정값 — 참고용" if key == "far_prev_tarea" else None))
             if new_far is not None:
                 conn.execute("UPDATE complex SET current_far = ?, land_area_source = CASE WHEN land_area_source LIKE '%FAR override%' THEN land_area_source ELSE COALESCE(land_area_source,'') || ' | ' || ? END, "

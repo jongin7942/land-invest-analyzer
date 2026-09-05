@@ -23,9 +23,11 @@ RULES = ROOT / "rules"
 CASHES = ["1", "2", "3", "4", "5", "7", "10"]
 # 모델 3종 — base(v0.8 채택) / stable(안정형) / aggr(공격형). 변형은 reports/tw_all_<model>_<cash>eok.csv 가 있을 때만 앱에 실린다.
 MODELS = {
-    "base": {"name": "기본(v0.8)", "desc": "E 변수 + 부스팅. 승자 포착률 44%(전체행 2016~21), 최근 3년 61%.", "file": "tw_all_{c}eok.csv", "stab": "tw_stability_all_{c}eok.json"},
-    "stable": {"name": "안정형", "desc": "예측 상위 20% 가운데 '시장 평균 이상' 비율과 '하위 20% 회피'를 최대화한 모델(§26).", "file": "tw_all_stable_{c}eok.csv", "stab": "tw_stability_all_stable_{c}eok.json"},
-    "aggr": {"name": "공격형", "desc": "실제 상위 10% 승자를 가장 많이 잡는(Recall@20) 모델(§26).", "file": "tw_all_aggr_{c}eok.csv", "stab": "tw_stability_all_aggr_{c}eok.json"},
+    # 예측 모델은 하나(v0.8 E-부스팅). §26: 변수집합 11종×모델 3종, 게이트 11종 어느 것도 선택·확인 구간을 동시에 이기지 못했다.
+    # 그래서 안정형·공격형은 '같은 예측을 어떤 결과로 줄 세우나' 의 차이다 — 새 예측이 아니라 의사결정 규칙.
+    "base": {"name": "기본", "key": "tw", "desc": "기대 순이익(운 나쁨 25%·기준 50%·운 좋음 25% 가중) 순. 승자 포착률 44%(2016~21 전체행), 최근 3년 61%."},
+    "stable": {"name": "안정형", "key": "fl", "desc": "'운 나쁘면 남는 돈'(Bear 시나리오·walk-forward 잔차 하위 20%) 순. 방어력(Downside Floor)을 먼저 보는 사람용 — 예측 상위 20%의 하위 20% 비율은 기본과 같은 6.8%."},
+    "aggr": {"name": "공격형", "key": "nu", "desc": "'운 좋으면 남는 돈'(Bull 시나리오·잔차 상위 20%) 순. 상승폭이 큰 후보를 앞에 두되, 운 나쁠 때 손실도 같은 화면에서 확인할 것."},
 }
 YEARS = list(range(2007, 2027))
 
@@ -125,16 +127,16 @@ def main() -> int:
     profiles = {}
     data = {}
     meta = {}
-    for mkey, mdef in MODELS.items():
-      data[mkey] = {}; meta[mkey] = {}
-      for c in CASHES:
-        if not (R / mdef["file"].format(c=c)).exists():
+    for mkey in MODELS:
+        data[mkey] = {}; meta[mkey] = {}
+    for c in CASHES:
+        if not (R / f"tw_all_{c}eok.csv").exists():
             continue
-        rows = [r for r in read_csv(R / mdef["file"].format(c=c)) if r.get("tw_rank")]
+        rows = [r for r in read_csv(R / f"tw_all_{c}eok.csv") if r.get("tw_rank")]
         if not rows:
             continue
         st = {}
-        stp = R / mdef["stab"].format(c=c)
+        stp = R / f"tw_stability_all_{c}eok.json"
         if stp.exists():
             for s in json.loads(stp.read_text(encoding="utf-8"))["rows"]:
                 st[s["name"] + s["band"]] = s
@@ -161,8 +163,19 @@ def main() -> int:
                 "rk": int(r["tw_rank"]), "pred": not r["exit_model"].startswith("NONE"), "g": grade,
                 "mr": s.get("mean_rank"), "sv": s.get("top10_survival"), "p90": s.get("p90_rank"), "irr": round(fnum(r["irr_base"], 0) * 100, 1) if fnum(r["irr_base"]) is not None else None,
             })
-        data[mkey][c] = out
-        meta[mkey][c] = {"n": len(out), "pos": sum(1 for x in out if (x["tw"] or 0) > 0), "A": sum(1 for x in out if x["g"] == "A")}
+        for mkey, mdef in MODELS.items():
+            k = mdef["key"]
+            ranked = sorted(out, key=lambda x: -((x.get(k) if x.get(k) is not None else -1e9)))
+            rows_m = []
+            for i2, x in enumerate(ranked, 1):
+                y = dict(x); y["rk"] = i2
+                if mkey == "stable":      # 안정형 등급: 운 나쁠 때도 플러스면 A, 기대 플러스면 B
+                    y["g"] = "D" if not y["pred"] else ("A" if (y["fl"] or 0) > 0 else ("B" if (y["tw"] or 0) > 0 else "C"))
+                elif mkey == "aggr":      # 공격형 등급: 운 좋을 때 실투자금의 30% 이상 남고 기대 플러스면 A
+                    y["g"] = "D" if not y["pred"] else ("A" if ((y["nu"] or 0) >= 0.3 * max(y["sc"], 0.01) and (y["tw"] or 0) > 0) else ("B" if (y["tw"] or 0) > 0 else "C"))
+                rows_m.append(y)
+            data[mkey][c] = rows_m
+            meta[mkey][c] = {"n": len(rows_m), "pos": sum(1 for x in rows_m if (x["tw"] or 0) > 0), "A": sum(1 for x in rows_m if x["g"] == "A")}
     # 단지×면적 공통 정보(투자금 무관)
     keys = {(x["id"], x["b"]) for md in data.values() for rows in md.values() for x in rows}
     info = {}
@@ -197,7 +210,7 @@ def main() -> int:
     now = next((r for r in mt.get("rows", []) if r.get("ym") == "202606"), {})
     bt = json.loads((R / "exit_price_backtest_relative.json").read_text(encoding="utf-8")) if (R / "exit_price_backtest_relative.json").exists() else {}
     e = (bt.get("backtest") or {}).get("E_+theory2|lam=3.0") or {}
-    payload = {"data": data, "meta": meta, "models": {k: {"name": v["name"], "desc": v["desc"], "cashes": sorted(data.get(k, {}).keys(), key=int)} for k, v in MODELS.items() if data.get(k)}, "info": info, "years": YEARS, "scenario": scen, "asof": "2026-09-05",
+    payload = {"data": data, "meta": meta, "models": {k: {"name": v["name"], "desc": v["desc"], "key": v["key"], "cashes": sorted(data.get(k, {}).keys(), key=int)} for k, v in MODELS.items() if data.get(k)}, "info": info, "years": YEARS, "scenario": scen, "asof": "2026-09-05",
                "market": {"jr": now.get("metro_jeonse_ratio"), "rate": now.get("bok_rate"), "vol": now.get("metro_vol_ratio"), "dd": now.get("metro_dd_peak"), "mom12": now.get("metro_mom1")},
                "model": _model_card(e),
                "conv": {f"{k[0]}|{k[1]}": {"p": fnum(v["p_next_within_5y"]), "m": fnum(v["dwell_median_months"])} for k, v in conv.items()}}

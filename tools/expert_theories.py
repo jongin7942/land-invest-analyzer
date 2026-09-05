@@ -32,7 +32,7 @@ SELECT_YEARS = [2016, 2017, 2018]
 HOLDOUT_YEARS = [2019, 2020, 2021]
 ALL_YEARS = SELECT_YEARS + HOLDOUT_YEARS
 LAM = 3.0
-CACHE = ROOT / "logs" / "_exit_panel_expert.pkl"
+CACHE = ROOT / "logs" / "_exit_panel_policy.pkl"   # 전문가+정책 변수 포함 최신 패널
 OUT = ROOT / "reports" / "expert_theories.json"
 T0 = time.time()
 
