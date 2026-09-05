@@ -50,9 +50,9 @@ def main() -> int:
         jeonse = store.load_jeonse(conn, set(prices))
         stations = panel_mod.load_stations(conn)
         jobs = jobs_mod.Jobs(cx, conn)
+        cx_all = store.load_complexes(conn, min_households=0)
+        prices_all = store.load_prices(conn, cx_all, bands)
     print(f"[일자리] 스냅샷 {jobs.yms} · 법정동 코드 매핑 {len(jobs.code_of)}")
-    cx_all = store.load_complexes(conn, min_households=0)
-    prices_all = store.load_prices(conn, cx_all, bands)
     print(f"[급지 지도] 전체 단지 {len(cx_all)} · 단지×면적 {len(prices_all)} (행은 1,000세대 이상 {len(cx)} 만)", flush=True)
     pb = panel_mod.PanelBuilder(cx, prices, jeonse, stations, jobs=jobs if jobs.available else None,
                                 tier_complexes=cx_all, tier_prices=prices_all)
