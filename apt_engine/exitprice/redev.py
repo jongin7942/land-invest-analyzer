@@ -42,7 +42,7 @@ def load() -> dict[int, list[tuple[int, str]]]:
                     continue
                 src = stages_by_project.get(r.get("project", ""), r) if name.startswith("seoul") else r
                 for col, stage in STAGE_COLS:
-                    ym = _ym(src.get(col))
+                    ym = _ym(src.get(col)) or _ym(src.get(col + "_approx"))   # 정확 일자 없으면 근사 일자(정보몽땅 추진경과 텍스트)
                     if ym:
                         out.setdefault(cid, []).append((stage, ym))
     for cid in out:

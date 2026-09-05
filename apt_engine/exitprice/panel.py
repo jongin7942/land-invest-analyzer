@@ -337,8 +337,16 @@ class PanelBuilder:
         own_pct = sum(1 for v in hist if v <= p0) / len(hist) if len(hist) >= 24 else None
         gumed = self.gu_median_price(c.lawd_cd, band, t)
         jr = self.jeonse.get((cid, band))
-        j0 = jr[t] if jr else None
-        j1 = jr[t - 12] if jr and t >= 12 else None
+        # 전세는 거래가 드문 달이 많다 → 진입 시점 이전 6개월 안의 마지막 값을 쓴다(미래 정보 아님). 결측 절반이 이걸로 채워진다.
+        def _last(arr, at, back=6):
+            if not arr:
+                return None
+            for i in range(at, max(-1, at - back - 1), -1):
+                if i >= 0 and arr[i]:
+                    return arr[i]
+            return None
+        j0 = _last(jr, t)
+        j1 = _last(jr, t - 12) if t >= 12 else None
         st_km, planned = self.station_feats(c, entry_ym)
         year = int(entry_ym[:4])
         x = {
