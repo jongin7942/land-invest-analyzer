@@ -58,9 +58,9 @@ def main() -> int:
         cur = sets.get(name)
         if cur is None or (v.get("ic_mean") or -9) > (cur[1].get("ic_mean") or -9):
             sets[name] = (lam, v)
-    label = {"A_market": "A. 시장만(시군구·수도권 흐름)", "B_+own": "B. + 단지 자기 상태", "C_+theory": "C. + 가격 이론(급지·중심거리·학원·역·공급)", "D_+jobs": "D. + 직장(국민연금 일자리)"}
+    label = {"A_market": "A. 시장만(시군구·수도권 흐름)", "B_+own": "B. + 단지 자기 상태", "C_+theory": "C. + 가격 이론(급지·중심거리·학원·역·공급)", "D_+jobs": "D. + 직장(국민연금 일자리)", "E_+theory2": "E. + 비선형(연식 구간·급지×국면·덜 오른 곳·공급)", "E2_+relmom": "E2. + 상대 위치 변화 속도·확산", "F_+cycle": "F. + 사이클(고점대비·전세가율·금리)", "G_+diffusion": "G. + 확산 전체"}
     rows_bt = ""
-    for name in ("A_market", "B_+own", "C_+theory", "D_+jobs"):
+    for name in ("A_market", "B_+own", "C_+theory", "D_+jobs", "E_+theory2", "E2_+relmom", "F_+cycle", "G_+diffusion"):
         if name in sets:
             lam, v = sets[name]
             rows_bt += f"<tr><td>{esc(label.get(name, name))}</td><td>{v.get('ic_mean')}</td><td>{rate(v.get('recall_mean'))}</td><td>{v.get('mae_mean')}</td><td>{v.get('mae_market_only_mean')}</td></tr>"
@@ -138,17 +138,17 @@ ul{{padding-left:18px;margin:6px 0;}} li{{margin:3px 0;}}
 </style>
 <div class="wrap">
 <h1>아파트 엔진 오늘의 보고</h1>
-<div class="date">2026-09-05 · 1,000세대 이상 단지만 집계·추천 · 5년 뒤 가격 엔진 v0.3(하락기 포함) · 투자 시점 · 확산 계급 · Terminal Wealth</div>
+<div class="date">2026-09-05 · 1,000세대 이상 단지만 집계·추천 · 5년 뒤 가격 엔진 v0.4(하락기 포함·전세가율 조건부 시장) · 투자 시점 · 확산 계급 · Terminal Wealth</div>
 
 <div class="card"><h2>한 줄 결론</h2><div class="big">
 ① 5년 뒤 가격을 맞히는 힘은 <b>{esc(label.get(sel.get('set',''), sel.get('set','')))}</b>이 가장 컸습니다(순위 정확도 IC {sel.get('ic')}). 시장 흐름만 보는 것보다 이론 변수를 넣었을 때 더 잘 맞는지는 아래 표에서 바로 비교됩니다.<br>
 ② 급지 사이 가격 차이는 데이터가 정했고, 5년 안에 급지가 한 단계 오르는 확률은 {rate(base_rate)}입니다. 그 확률을 실제로 올리는 조건만 '호재'로 인정합니다.<br>
-③ 부평 동아1단지 74㎡: 같은 시기 수도권 평균보다 <b>{pct(float(d74.get('pred_log5y')) if d74.get('pred_log5y') is not None else None)}</b> 더 오를 것으로 예측(시장 평균과 거의 같음). 시장 전체가 과거처럼 움직이면 5년 뒤 Bear {float(d74.get('bear_factor')):.2f}배 · Base {float(d74.get('base_factor')):.2f}배 · Bull {float(d74.get('bull_factor')):.2f}배 — 시장 수준은 예측이 아니라 과거 분포(최저·중앙·상위 20%)입니다.
+③ 부평 동아1단지 74㎡: 같은 시기 수도권 평균보다 <b>{pct(float(d74.get('pred_log5y')) if d74.get('pred_log5y') is not None else None)}</b> 더 오를 것으로 예측(시장 평균과 거의 같음). 지금과 전세가율이 비슷했던 해(2011·12·21)처럼 시장이 움직이면 5년 뒤 Bear {float(d74.get('bear_factor')):.2f}배 · Base {float(d74.get('base_factor')):.2f}배 · Bull {float(d74.get('bull_factor')):.2f}배 — 시장 수준은 예측이 아니라 '비슷한 국면의 과거' 가정입니다.
 </div></div>
 
 <div class="card"><h2>종인님이 하실 일</h2><div class="todo"><b>지금은 없습니다.</b> 보유 vs 갈아타기의 최종 답은 여전히 계약일·대출·전세·거주형태·처분시점·중개사 과세유형·공시가격이 오면 냅니다.</div></div>
 
-<div class="card"><h2>5년 뒤 가격 엔진 성적표 (2016~2021 테스트, 미래 정보 없이)</h2>
+<div class="card"><h2>5년 뒤 가격 엔진 성적표 (2013~2021 테스트 · 1,000세대 이상 · 미래 정보 없이)</h2>
 <div class="tbl"><table><tr><th>변수군</th><th>순위 정확도 IC</th><th>승자 포착률</th><th>오차 MAE</th><th>시장중앙값만</th></tr>{rows_bt}</table></div>
 <p class="muted">IC = 예측 순위와 실제 순위의 상관(0이면 무작위). 승자 포착률 = 실제 상위 10%를 예측 상위 20%가 잡은 비율. MAE = 5년 log 수익률 오차(0.10 ≈ 10%p).</p>
 <details><summary>어떤 변수가 가장 크게 작용했나</summary><div class="tbl"><table><tr><th>변수</th><th>표준화 계수</th></tr>{coef_rows}</table></div>
