@@ -1,0 +1,197 @@
+<title>아파트 엔진</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@600;700&family=Noto+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+:root{--bg:#f4f1ea;--paper:#fffdf8;--ink:#1c2a22;--muted:#6a736b;--line:#ddd7c9;--accent:#0f3d2e;--accent2:#b08d57;--soft:#e9efe9;--gold:#f3ead8;--bad:#9a3b2e;--good:#1f6f50;--warn:#8a5a12;--chip:#efece4;--shadow:0 10px 30px rgba(20,40,30,.08)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#111614;--paper:#1a2119;--ink:#e9e9e2;--muted:#9ea69c;--line:#2f3a32;--accent:#8fd0b0;--accent2:#d6b57a;--soft:#1f2b24;--gold:#2b261a;--bad:#e2907f;--good:#8fd0b0;--warn:#e0b063;--chip:#232b25;--shadow:0 10px 30px rgba(0,0,0,.35)}}
+:root[data-theme="dark"]{--bg:#111614;--paper:#1a2119;--ink:#e9e9e2;--muted:#9ea69c;--line:#2f3a32;--accent:#8fd0b0;--accent2:#d6b57a;--soft:#1f2b24;--gold:#2b261a;--bad:#e2907f;--good:#8fd0b0;--warn:#e0b063;--chip:#232b25;--shadow:0 10px 30px rgba(0,0,0,.35)}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:"Noto Sans KR",system-ui,sans-serif;font-size:15px;line-height:1.5;margin:0}
+.wrap{max-width:760px;margin:0 auto;padding:12px 12px 120px}
+header.top{display:flex;justify-content:space-between;align-items:flex-end;gap:10px;padding:8px 2px 12px;border-bottom:1px solid var(--line);margin-bottom:12px}
+header.top h1{font-family:"Noto Serif KR",serif;font-size:1.45rem;margin:0;letter-spacing:-.01em}
+header.top .brand{font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--accent2);font-weight:700}
+header.top .fresh{font-size:.78rem;color:var(--muted);text-align:right}
+.mkt{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}
+.mkt div{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:8px 10px}
+.mkt b{display:block;font-size:.7rem;color:var(--muted);font-weight:500}
+.mkt span{font-family:"IBM Plex Mono",monospace;font-size:1rem;font-weight:500}
+.panel{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:10px;box-shadow:var(--shadow)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+.lbl{font-size:.8rem;color:var(--muted);min-width:44px}
+.seg{display:flex;gap:4px;flex-wrap:wrap}
+.seg button{border:1px solid var(--line);background:var(--chip);color:var(--ink);border-radius:999px;padding:6px 12px;font-size:.9rem;cursor:pointer;transition:all .15s}
+.seg button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.seg button:focus-visible{outline:2px solid var(--accent2)}
+select,input[type=text]{border:1px solid var(--line);background:var(--paper);color:var(--ink);border-radius:8px;padding:7px 9px;font-size:.9rem}
+input[type=text]{flex:1;min-width:120px}
+input[type=range]{flex:1;min-width:140px;accent-color:var(--accent)}
+label.chk{font-size:.84rem;display:flex;gap:4px;align-items:center;cursor:pointer}
+.kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px}
+.kpi div{background:var(--soft);border-radius:10px;padding:8px 10px}
+.kpi b{display:block;font-size:.7rem;color:var(--muted);font-weight:500}
+.kpi span{font-family:"IBM Plex Mono",monospace;font-size:1.05rem;font-weight:500}
+table{width:100%;border-collapse:collapse;font-size:.85rem;font-variant-numeric:tabular-nums}
+th,td{padding:8px 6px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap;vertical-align:middle}
+th{background:var(--soft);font-weight:500;position:sticky;top:0;z-index:1;font-size:.78rem;color:var(--muted)}
+tr.r{cursor:pointer} tr.r:hover{background:var(--soft)}
+.tbl{overflow-x:auto;border-radius:10px}
+.good{color:var(--good);font-weight:700}.bad{color:var(--bad);font-weight:700}
+.grade{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:8px;font-weight:700;font-size:.85rem;color:#fff}
+.gA{background:#1f6f50}.gB{background:#5f8f3a}.gC{background:#9a7a2e}.gD{background:#7b7b7b}
+.tag{display:inline-block;font-size:.7rem;padding:1px 6px;border-radius:6px;background:var(--chip);color:var(--muted);margin-left:4px}
+.warn{background:var(--gold);border-left:4px solid var(--accent2);padding:8px 10px;border-radius:8px;font-size:.86rem;margin-bottom:10px}
+.star{border:0;background:none;cursor:pointer;font-size:1rem;color:var(--accent2)}
+.spark{width:90px;height:26px;vertical-align:middle}
+.sheet{position:fixed;left:0;right:0;bottom:0;max-height:88vh;overflow:auto;background:var(--paper);border-top:3px solid var(--accent2);border-radius:18px 18px 0 0;padding:14px 16px 28px;box-shadow:0 -12px 40px rgba(0,0,0,.25);z-index:20}
+.sheet h3{margin:0 0 4px;font-family:"Noto Serif KR",serif;font-size:1.15rem}
+.sheet .sub{color:var(--muted);font-size:.82rem;margin-bottom:8px}
+.verdict{background:var(--soft);border-radius:12px;padding:10px 12px;margin:8px 0;font-size:.95rem}
+.tabs{display:flex;gap:4px;flex-wrap:wrap;margin:8px 0}
+.tabs button{border:1px solid var(--line);background:var(--chip);color:var(--ink);border-radius:8px;padding:5px 10px;font-size:.82rem;cursor:pointer}
+.tabs button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.kv{display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:.86rem}
+.kv div{background:var(--soft);border-radius:8px;padding:6px 8px}
+.kv b{display:block;font-size:.7rem;color:var(--muted);font-weight:500}
+.mono{font-family:"IBM Plex Mono",monospace}
+.x{float:right;border:0;background:var(--chip);color:var(--ink);border-radius:8px;padding:5px 10px;cursor:pointer}
+.act{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
+.act button{border:1px solid var(--line);background:var(--paper);color:var(--ink);border-radius:8px;padding:6px 10px;font-size:.84rem;cursor:pointer}
+.act button.pri{background:var(--accent);color:#fff;border-color:var(--accent)}
+.muted{color:var(--muted);font-size:.82rem}
+.more{width:100%;border:1px dashed var(--line);background:var(--paper);color:var(--accent);padding:9px;border-radius:8px;cursor:pointer;margin-top:6px}
+details summary{cursor:pointer;color:var(--accent);font-weight:500}
+.tray{position:fixed;left:0;right:0;bottom:0;background:var(--accent);color:#fff;padding:8px 14px;display:flex;gap:10px;align-items:center;justify-content:space-between;z-index:15;font-size:.86rem}
+.tray button{border:1px solid rgba(255,255,255,.5);background:transparent;color:#fff;border-radius:8px;padding:5px 10px;cursor:pointer}
+.cmp{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}
+.cmp .card{background:var(--soft);border-radius:10px;padding:8px 10px;font-size:.84rem}
+.cmp .card h4{margin:0 0 4px;font-size:.92rem}
+svg text{font-family:"IBM Plex Mono",monospace}
+@media print{.panel,.mkt div{box-shadow:none}.tray,.sheet .x,.act,header.top .fresh{display:none}.sheet{position:static;max-height:none;box-shadow:none}}
+</style>
+<div class="wrap">
+<header class="top"><div><div class="brand">Apartment Engine · Consulting Edition</div><h1>아파트 엔진</h1></div><div class="fresh" id="fresh"></div></header>
+<div class="mkt" id="mkt"></div>
+
+<div class="panel">
+  <div class="row"><span class="lbl">투자금</span><div class="seg" id="cash"></div></div>
+  <div class="row"><span class="lbl"></span><input type="range" id="cashRange" min="0" max="6" step="1" value="2" aria-label="투자금 슬라이더"><span class="mono" id="cashLabel"></span></div>
+  <div class="row"><span class="lbl">지역</span><select id="sido"><option value="">전체</option><option value="11">서울</option><option value="41">경기</option><option value="28">인천</option></select><select id="gu"><option value="">시군구 전체</option></select><span class="lbl">면적</span><div class="seg" id="band"></div></div>
+  <div class="row"><span class="lbl">등급</span><div class="seg" id="grade"></div><span class="lbl">정렬</span><select id="sort"><option value="tw">기대 순이익</option><option value="fl">최악 시나리오</option><option value="sv">순위 안정성</option><option value="bx">5년 뒤 배율</option><option value="irr">세후 IRR</option><option value="p">가격 낮은 순</option></select></div>
+  <div class="row"><input type="text" id="q" placeholder="단지명 · 동네 검색"><label class="chk"><input type="checkbox" id="pos"> 순이익 양수만</label><label class="chk"><input type="checkbox" id="dedupe"> 동네별 1개</label><label class="chk"><input type="checkbox" id="fav"> 즐겨찾기만</label></div>
+</div>
+
+<div class="kpi"><div><b>매수 가능</b><span id="k1">—</span></div><div><b>순이익 양수</b><span id="k2">—</span></div><div><b>A등급</b><span id="k3">—</span></div><div><b>표시</b><span id="k4">—</span></div></div>
+<div class="warn" id="conc" hidden></div>
+<div class="panel tbl"><table><thead><tr><th></th><th>#</th><th>등급</th><th>단지</th><th>지역</th><th>㎡</th><th>가격</th><th>실투자</th><th>20년 추이</th><th>5년 Base</th><th>기대 순이익</th><th>최악</th><th>생존</th></tr></thead><tbody id="tb"></tbody></table><button class="more" id="more" hidden>더 보기</button></div>
+
+<div class="panel"><details><summary>등급·숫자 읽는 법</summary><ul class="muted">
+<li><b>등급</b> A = 순이익 양수 · 최악이 실투자금의 −30% 안 · 가정을 300번 흔들어도 상위권 유지(TOP10 생존 50%↑ 또는 평균 20위 안 또는 불리할 때 60위 안). B = 순이익 양수. C = 예측은 있으나 비용을 못 넘음. D = 자료 결측으로 예측 없음(무성장 계산).</li>
+<li><b>기대 순이익(TW)</b> 5년 뒤 예측 매도가에서 취득세·복비·이자·보유세·양도세를 뺀 순이익. 표준 조건(비거주 임대·금리 4%·공시가 = 매매가×0.65). <b>최악</b>은 시장이 지금과 비슷했던 과거 중 가장 나빴던 경로.</li>
+<li><b>5년 Base</b> 예측 매도가 ÷ 현재가. 시장 수준은 예측이 아니라 "전세가율·금리가 지금과 비슷했던 과거 분기"의 가정. <b>생존</b> 시장·예측·금리·확률을 흔들어도 TOP10에 남는 비율.</li>
+<li>모델 E: 급지·1급지 거리·급지×국면·최근 덜 오른 정도·전세·연식·세대수·공급. 2013~2021 검증에서 실제 상위 10%를 예측 상위 20%가 43%(최근 4년 52%) 포착, 예측 상위 20%의 68%가 평균 이상.</li>
+<li>연구 후보이며 매수 목록이 아닙니다. 실제 매물·전세·현장 확인 후 판단하세요.</li></ul></details></div>
+</div>
+<div class="tray" id="tray" hidden><span id="trayTxt"></span><span><button id="cmpOpen">비교 보기</button><button id="cmpClear">비우기</button></span></div>
+<div class="sheet" id="sheet" hidden></div>
+<script>
+const D = __DATA__;
+const $ = id => document.getElementById(id);
+const LV = Object.keys(D.data).sort((a,b)=>+a-+b);
+let cash = LV.includes("3") ? "3" : LV[0], band = "", grade = "", shown = 50, tab = "요약";
+let favs = new Set(), cmp = [];
+try { favs = new Set(JSON.parse(localStorage.getItem("ae_favs") || "[]")); } catch(e) {}
+const saveFavs = () => { try { localStorage.setItem("ae_favs", JSON.stringify([...favs])); } catch(e) {} };
+const won = v => v == null ? "—" : v.toFixed(2) + "억";
+const cls = v => v == null ? "" : (v > 0 ? "good" : "bad");
+const pct = v => v == null ? "—" : (v*100).toFixed(0) + "%";
+const info = k => D.info[k] || {};
+const key = x => x.id + "|" + x.b;
+
+function segs(id, opts, cur, onpick){ const el = $(id); el.innerHTML = ""; opts.forEach(([v, lab]) => { const b = document.createElement("button"); b.type = "button"; b.textContent = lab; if (v === cur) b.classList.add("on"); b.addEventListener("click", () => onpick(v)); el.appendChild(b); }); }
+function setCash(v){ cash = v; $("cashRange").value = LV.indexOf(v); $("cashLabel").textContent = "선택 투자금 " + v + "억"; segs("cash", LV.map(c => [c, c + "억"]), cash, setCash); fillGu(); shown = 50; render(); }
+function setBand(v){ band = v; segs("band", [["", "전체"], ["59", "59"], ["74", "74"], ["84", "84"]], band, setBand); shown = 50; render(); }
+function setGrade(v){ grade = v; segs("grade", [["", "전체"], ["A", "A"], ["B", "B"], ["C", "C"], ["D", "D"]], grade, setGrade); shown = 50; render(); }
+
+function spark(hist, w=90, h=26){ const pts = hist.map((v,i)=>[i,v]).filter(p=>p[1]!=null); if (pts.length < 3) return ""; const xs = pts.map(p=>p[0]), ys = pts.map(p=>p[1]); const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys); const X = x => 2 + (x - x0) / Math.max(1, x1 - x0) * (w - 4), Y = y => h - 2 - (y - y0) / Math.max(1e-9, y1 - y0) * (h - 4); const d = pts.map((p,i)=>(i?"L":"M") + X(p[0]).toFixed(1) + " " + Y(p[1]).toFixed(1)).join(" "); const last = pts[pts.length-1]; return `<svg class="spark" viewBox="0 0 ${w} ${h}" aria-hidden="true"><path d="${d}" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".8"/><circle cx="${X(last[0]).toFixed(1)}" cy="${Y(last[1]).toFixed(1)}" r="2" fill="currentColor"/></svg>`; }
+
+function rows(){ let r = D.data[cash] || []; const sido = $("sido").value, gu = $("gu").value, q = $("q").value.trim();
+  r = r.filter(x => { const i = info(key(x)); if (sido && !i.lawd.startsWith(sido)) return false; if (gu && i.lawd !== gu) return false; if (band && x.b !== band) return false; if (grade && x.g !== grade) return false;
+    if (q && !(i.n.includes(q) || i.reg.includes(q) || (i.emd||"").includes(q))) return false; if ($("pos").checked && !((x.tw||0) > 0)) return false; if ($("fav").checked && !favs.has(key(x))) return false; return true; });
+  const s = $("sort").value; const k = {tw: x => -(x.tw ?? -1e9), fl: x => -(x.fl ?? -1e9), sv: x => -(x.sv ?? -1), bx: x => -((x.ex||0)/x.p), irr: x => -(x.irr ?? -1e9), p: x => x.p}[s]; r = [...r].sort((a,b) => k(a) - k(b));
+  if ($("dedupe").checked){ const seen = new Set(); r = r.filter(x => { const i = info(key(x)); const kk = i.lawd + "|" + i.emd; if (seen.has(kk)) return false; seen.add(kk); return true; }); }
+  return r; }
+
+function render(){ const all = D.data[cash] || []; const r = rows(); const m = D.meta[cash] || {};
+  $("k1").textContent = m.n ?? all.length; $("k2").textContent = m.pos ?? 0; $("k3").textContent = m.A ?? 0; $("k4").textContent = r.length;
+  const top = r.slice(0, 10); const byEmd = {}; top.forEach(x => { const i = info(key(x)); const kk = i.reg + " " + (i.emd||""); byEmd[kk] = (byEmd[kk]||0) + 1; });
+  const hot = Object.entries(byEmd).filter(([,n]) => n >= 4); $("conc").hidden = !hot.length || $("dedupe").checked;
+  if (hot.length) $("conc").textContent = "상위 10개 중 " + hot.map(([kk,n]) => `${kk} ${n}개`).join(", ") + " — 한 동네에 몰린 순위입니다. '동네별 1개'로 분산해 보세요.";
+  const tb = $("tb"); tb.innerHTML = "";
+  r.slice(0, shown).forEach((x, idx) => { const i = info(key(x)); const tr = document.createElement("tr"); tr.className = "r";
+    tr.innerHTML = `<td><button class="star" aria-label="즐겨찾기">${favs.has(key(x)) ? "★" : "☆"}</button></td><td>${idx+1}</td><td><span class="grade g${x.g}">${x.g}</span></td><td>${i.n}${x.pred ? "" : '<span class="tag">예측없음</span>'}</td><td>${i.reg} ${i.emd||""}</td><td>${x.b}</td><td class="mono">${x.p.toFixed(2)}</td><td class="mono">${x.sc.toFixed(2)}</td><td>${spark(i.hist||[])}</td><td class="mono">${x.ex ? "×" + (x.ex/x.p).toFixed(2) : "—"}</td><td class="mono ${cls(x.tw)}">${won(x.tw)}</td><td class="mono ${cls(x.fl)}">${won(x.fl)}</td><td class="mono">${x.sv != null ? pct(x.sv) : "—"}</td>`;
+    tr.querySelector(".star").addEventListener("click", ev => { ev.stopPropagation(); const kk = key(x); favs.has(kk) ? favs.delete(kk) : favs.add(kk); saveFavs(); render(); });
+    tr.addEventListener("click", () => openSheet(x)); tb.appendChild(tr); });
+  $("more").hidden = r.length <= shown; }
+
+function chart(hist, w=640, h=160){ const pts = hist.map((v,i)=>[D.years[i],v]).filter(p=>p[1]!=null); if (pts.length < 3) return '<p class="muted">가격 이력 부족</p>'; const ys = pts.map(p=>p[1]); const y0 = Math.floor(Math.min(...ys)*0.95*10)/10, y1 = Math.ceil(Math.max(...ys)*1.05*10)/10; const X = yr => 44 + (yr - D.years[0]) / (D.years.length-1) * (w - 60), Y = v => h - 24 - (v - y0) / Math.max(1e-9, y1 - y0) * (h - 40);
+  const d = pts.map((p,i)=>(i?"L":"M") + X(p[0]).toFixed(1) + " " + Y(p[1]).toFixed(1)).join(" "); let g = "";
+  for (let k=0;k<=4;k++){ const v = y0 + (y1-y0)*k/4; g += `<line x1="44" x2="${w-16}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" stroke="currentColor" opacity=".12"/><text x="4" y="${(Y(v)+4).toFixed(1)}" font-size="10" fill="currentColor" opacity=".7">${v.toFixed(1)}</text>`; }
+  const yrs = [2008, 2012, 2016, 2020, 2024]; yrs.forEach(yr => { g += `<text x="${X(yr).toFixed(1)}" y="${h-6}" font-size="10" text-anchor="middle" fill="currentColor" opacity=".7">${yr}</text>`; });
+  const last = pts[pts.length-1];
+  return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto" role="img" aria-label="연도별 6월 대표가(억)">${g}<path d="${d}" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="${X(last[0]).toFixed(1)}" cy="${Y(last[1]).toFixed(1)}" r="3.5" fill="currentColor"/><text x="${(X(last[0])-6).toFixed(1)}" y="${(Y(last[1])-8).toFixed(1)}" font-size="11" text-anchor="end" fill="currentColor">${last[1].toFixed(2)}억</text></svg>`; }
+
+function verdict(x, i){ const parts = [];
+  parts.push(x.g === "A" ? "가정을 흔들어도 상위에 남는 후보" : x.g === "B" ? "표준 조건에서 비용을 넘기지만 순위는 흔들림" : x.g === "C" ? "표준 조건에서는 비용을 못 넘음" : "자료 결측으로 예측 불가");
+  if (i.rel === "FALSE_CHEAP") parts.push("대장 대비 싸 보이지만 구조적 이유가 있는 가격차(Value Trap 주의)"); else if (i.rel === "LAG_CANDIDATE") parts.push("대장이 먼저 올랐고 아직 덜 따라간 후보");
+  if (i.diff === "후행") parts.push("확산 계급 '후행' — 과거 후행지는 5년 뒤에도 시장 대비 −7%"); if (i.diff === "빠른추종") parts.push("확산 계급 '빠른추종' — 상승국면 승자 계급");
+  if (i.crash != null && i.crash < -0.35) parts.push(`2022~23 하락기 ${pct(i.crash)} — 방어력 약함`); if (i.jr != null && i.jr < 0.5) parts.push(`전세가율 ${pct(i.jr)} — 전세가 가격을 받치지 못함`);
+  if (i.ost >= 3) parts.push(`정비사업 Stage ${i.ost}` + (i.op != null ? ` · 5년 내 다음 단계 ${pct(i.op)}` : "")); return parts.join(" · "); }
+
+function openSheet(x){ const i = info(key(x)); const s = $("sheet"); s.hidden = false; const inCmp = cmp.some(c => key(c) === key(x));
+  const tabs = ["요약","시나리오","가격 추이","대장 대비","정비·위험"];
+  const body = () => { if (tab === "요약") return `<div class="kv">
+    <div><b>현재 대표가 · 분포(P25~P75)</b><span class="mono">${x.p.toFixed(2)}억</span> · ${i.p25 ?? "—"}~${i.p75 ?? "—"}억 <span class="muted">(${i.asof || ""}, 최근 6개월 ${i.vol ?? "—"}건)</span></div>
+    <div><b>실투자금(${cash}억 프로필)</b><span class="mono">${x.sc.toFixed(2)}억</span></div>
+    <div><b>기대 순이익 / 최악</b><span class="mono ${cls(x.tw)}">${won(x.tw)}</span> / <span class="mono ${cls(x.fl)}">${won(x.fl)}</span></div>
+    <div><b>세후 IRR(Base)</b><span class="mono">${x.irr != null ? x.irr.toFixed(1) + "%/년" : "—"}</span></div>
+    <div><b>순위 안정성</b>평균 ${x.mr ?? "—"}위 · 생존 ${x.sv != null ? pct(x.sv) : "—"} · 불리할 때 ${x.p90 ?? "—"}위</div>
+    <div><b>시장 대비 5년 예측</b><span class="mono">${i.relm != null ? (i.relm*100).toFixed(1) + "%p" : "—"}</span> · 모델 ${i.model || "—"}</div>
+    <div><b>급지 · 1~2급지 중심까지</b>${i.tier != null ? i.tier + "급" : "—"} · ${i.dc != null ? i.dc + "km" : "—"}</div>
+    <div><b>전세 · 전세가율</b>${i.jd != null ? i.jd + "억" : "—"} · ${i.jr != null ? pct(i.jr) : "—"}</div>
+    <div><b>세대수 · 준공 · 동수</b>${i.hh ?? "—"} · ${i.yr ?? "—"} · ${i.bld ?? "—"}</div>
+    <div><b>세대당 대지 · 용적률</b>${i.ls != null ? i.ls + "㎡" : "—"} · ${i.far != null ? i.far.toFixed(0) + "%" : "—"}</div>
+    <div><b>시공 · 난방 · 주차</b>${i.builder || "—"} · ${i.heat || "—"} · ${i.park ?? "—"}</div>
+    <div><b>학원(500m) · 역까지</b>${i.acad ?? "—"}개 · ${i.stn != null ? i.stn + "m" : "—"}</div></div>`;
+    if (tab === "시나리오") return `<table><tr><th>시나리오</th><th>5년 뒤 매도가</th><th>배율</th><th>순이익</th></tr>
+    <tr><td>Bear(최악)</td><td class="mono">${x.eb}억</td><td class="mono">×${(x.eb/x.p).toFixed(2)}</td><td class="mono ${cls(x.nb)}">${won(x.nb)}</td></tr>
+    <tr><td>Base(기준)</td><td class="mono">${x.ex}억</td><td class="mono">×${(x.ex/x.p).toFixed(2)}</td><td class="mono ${cls(x.nx)}">${won(x.nx)}</td></tr>
+    <tr><td>Bull(강세)</td><td class="mono">${x.eu}억</td><td class="mono">×${(x.eu/x.p).toFixed(2)}</td><td class="mono ${cls(x.nu)}">${won(x.nu)}</td></tr></table>
+    <p class="muted">기대 순이익 = 0.25×Bear + 0.5×Base + 0.25×Bull. 매도가 차익과 순이익의 차이가 비용(취득세·복비·5년 이자·보유세·양도세)입니다: Base 기준 차익 ${(x.ex - x.p).toFixed(2)}억 → 순이익 ${won(x.nx)} (비용 약 ${(x.ex - x.p - (x.nx||0)).toFixed(2)}억). 시장 가정: ${D.scenario}</p>`;
+    if (tab === "가격 추이") return chart(i.hist || []) + `<p class="muted">매년 6월 대표가(억). 2022~23 하락기 낙폭 ${i.crash != null ? pct(i.crash) : "—"}.</p>`;
+    if (tab === "대장 대비") return (i.pairs && i.pairs.length ? `<table><tr><th>비교 대장</th><th>종류</th><th>정상비율</th><th>현재</th><th>덜 따라간 폭</th><th>과거 전달확률</th></tr>` + i.pairs.map(p => `<tr><td>${p.leader} ${p.lband}</td><td>${p.kind}</td><td class="mono">${p.normal != null ? p.normal.toFixed(3) : "—"}</td><td class="mono">${p.cur != null ? p.cur.toFixed(3) : "—"}</td><td class="mono ${cls(p.gap)}">${p.gap != null ? (p.gap*100).toFixed(1) + "%" : "—"}</td><td class="mono">${p.p != null ? pct(p.p) : "—"}</td></tr>`).join("") + `</table><p class="muted">라벨 ${i.rel || "—"} · 합의 ${i.cons || "—"}${i.mis != null ? " · Mispricing " + (i.mis*100).toFixed(1) + "%" : ""}. 구조 플래그: ${[...new Set(i.pairs.flatMap(p => (p.flags||"").split("|").filter(Boolean)))].join(", ") || "없음"}</p>` : '<p class="muted">비교 대장 없음(생활권 대장 후보 부족)</p>');
+    return `<div class="kv"><div><b>정비사업 단계</b>${i.ost != null ? "Stage " + i.ost : "등록 없음"}</div><div><b>5년 내 다음 단계 확률 · 체류</b>${i.op != null ? pct(i.op) : "—"} · ${i.ody != null ? i.ody + "년" : "—"}</div><div><b>주변 신축 대비 완료 후 ㎡단가</b>${i.post != null ? "×" + i.post.toFixed(2) + (i.post < 1 ? " (이미 반영)" : "") : "—"}</div><div><b>확산 계급(선행성)</b>${i.diff || "—"}${i.lead != null ? " (" + i.lead + "개월)" : ""}</div><div><b>하락기 방어(2022~23)</b>${i.crash != null ? pct(i.crash) : "—"}</div><div><b>자료 상태</b>${x.pred ? "예측 있음" : "예측 없음(결측)"}</div></div><p class="muted">옵션 가치는 분담금·기간이 없어 순자산에 넣지 않았습니다(N/A). 단계 확률은 지역별 실측 전환율(완공 확률 아님).</p>`; };
+  s.innerHTML = `<button class="x" id="closeSheet">닫기</button><h3><span class="grade g${x.g}">${x.g}</span> ${i.n} ${x.b}㎡</h3><div class="sub">${i.reg} ${i.emd||""} · ${cash}억 프로필 · TW ${x.rk}위</div><div class="verdict">${verdict(x, i)}</div><div class="tabs" id="tabs"></div><div id="tabBody">${body()}</div><div class="act"><button class="pri" id="cmpAdd">${inCmp ? "비교함에서 빼기" : "비교함에 담기"}</button><button id="favBtn">${favs.has(key(x)) ? "★ 즐겨찾기 해제" : "☆ 즐겨찾기"}</button><button id="printBtn">리포트 인쇄</button></div>`;
+  const tb = $("tabs"); tabs.forEach(t => { const b = document.createElement("button"); b.type="button"; b.textContent = t; if (t === tab) b.classList.add("on"); b.addEventListener("click", () => { tab = t; openSheet(x); }); tb.appendChild(b); });
+  $("closeSheet").addEventListener("click", () => { s.hidden = true; });
+  $("cmpAdd").addEventListener("click", () => { if (inCmp) cmp = cmp.filter(c => key(c) !== key(x)); else if (cmp.length < 3) cmp.push(x); else alert("비교함은 3개까지"); tray(); openSheet(x); });
+  $("favBtn").addEventListener("click", () => { const kk = key(x); favs.has(kk) ? favs.delete(kk) : favs.add(kk); saveFavs(); render(); openSheet(x); });
+  $("printBtn").addEventListener("click", () => window.print()); }
+
+function tray(){ const t = $("tray"); t.hidden = cmp.length === 0; $("trayTxt").textContent = "비교함 " + cmp.map(c => info(key(c)).n + " " + c.b).join(" · "); }
+function openCmp(){ const s = $("sheet"); s.hidden = false; const cell = (lab, f) => `<tr><th>${lab}</th>${cmp.map(f).map(v => `<td class="mono">${v}</td>`).join("")}</tr>`;
+  s.innerHTML = `<button class="x" id="closeSheet">닫기</button><h3>비교 (${cash}억 프로필)</h3><div class="tbl"><table><tr><th></th>${cmp.map(c => `<th>${info(key(c)).n} ${c.b}</th>`).join("")}</tr>
+  ${cell("등급", c => c.g)}${cell("가격", c => c.p.toFixed(2) + "억")}${cell("실투자", c => c.sc.toFixed(2) + "억")}${cell("5년 Base", c => "×" + (c.ex/c.p).toFixed(2))}${cell("기대 순이익", c => won(c.tw))}${cell("최악", c => won(c.fl))}${cell("세후 IRR", c => c.irr != null ? c.irr + "%" : "—")}${cell("생존율", c => c.sv != null ? pct(c.sv) : "—")}
+  ${cell("급지", c => info(key(c)).tier ?? "—")}${cell("전세가율", c => { const j = info(key(c)).jr; return j != null ? pct(j) : "—"; })}${cell("하락기", c => { const v = info(key(c)).crash; return v != null ? pct(v) : "—"; })}${cell("세대수·준공", c => (info(key(c)).hh ?? "—") + " · " + (info(key(c)).yr ?? "—"))}${cell("확산 계급", c => info(key(c)).diff || "—")}${cell("정비 Stage", c => info(key(c)).ost ?? "—")}${cell("대장 대비", c => info(key(c)).rel || "—")}</table></div>`;
+  $("closeSheet").addEventListener("click", () => { s.hidden = true; }); }
+
+function fillGu(){ const sido = $("sido").value; const all = D.data[cash] || []; const gus = {}; all.forEach(x => { const i = info(key(x)); if (!sido || i.lawd.startsWith(sido)) gus[i.lawd] = i.reg; });
+  const sel = $("gu"); const cur = sel.value; sel.innerHTML = '<option value="">시군구 전체</option>'; Object.entries(gus).sort((a,b) => a[1].localeCompare(b[1])).forEach(([k,v]) => { const o = document.createElement("option"); o.value = k; o.textContent = v; sel.appendChild(o); }); if (gus[cur]) sel.value = cur; }
+
+$("cashRange").max = LV.length - 1; $("cashRange").addEventListener("input", e => setCash(LV[+e.target.value]));
+["sido","gu","q","pos","dedupe","fav","sort"].forEach(id => $(id).addEventListener(id === "q" ? "input" : "change", () => { if (id === "sido") fillGu(); shown = 50; render(); }));
+$("more").addEventListener("click", () => { shown += 50; render(); });
+$("cmpOpen").addEventListener("click", openCmp); $("cmpClear").addEventListener("click", () => { cmp = []; tray(); });
+const mk = D.market || {}; $("mkt").innerHTML = `<div><b>수도권 전세가율</b><span>${mk.jr != null ? (mk.jr*100).toFixed(0) + "%" : "—"}</span></div><div><b>기준금리</b><span>${mk.rate ?? "—"}%</span></div><div><b>거래량(12m/36m)</b><span>${mk.vol != null ? mk.vol.toFixed(2) : "—"}</span></div><div><b>고점 대비</b><span>${mk.dd != null ? (mk.dd*100).toFixed(0) + "%" : "—"}</span></div>`;
+const md = D.model || {}; $("fresh").innerHTML = `데이터 ${D.asof} · 모델 E<br>포착률 ${md.recall != null ? (md.recall*100).toFixed(0) : "—"}% (최근 4년 52%) · 평균이상 ${md.above != null ? (md.above*100).toFixed(0) : "—"}%`;
+setBand(""); setGrade(""); setCash(cash); tray();
+</script>
