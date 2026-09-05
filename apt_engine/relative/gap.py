@@ -227,8 +227,29 @@ def episodes_of(leader: Series, follower: Series, ratio: list) -> tuple[list[dic
     return complete, len(eps)
 
 
+LEAD_TABLE: dict[int, float] = {}       # complex_id → 법정동 선행성(개월). rules/exit_price_2026.csv 에서 적재
+LAG_THRESHOLD = -3.0                    # 3개월 이상 후행이면 '후행지' 플래그 (§35.6 · 확산 계급 검증: 후행지 5년 상대수익 −7%)
+
+
+def load_lead_table() -> int:
+    import csv as _csv
+    p = store.RULES / "exit_price_2026.csv"
+    LEAD_TABLE.clear()
+    if not p.exists():
+        return 0
+    with p.open(encoding="utf-8", newline="") as fh:
+        for r in _csv.DictReader(fh):
+            v = r.get("emd_lead_months")
+            if v not in (None, "", "None"):
+                LEAD_TABLE[int(r["complex_id"])] = float(v)
+    return len(LEAD_TABLE)
+
+
 def structural_flags(f: Complex, l: Complex) -> list[str]:
     flags: list[str] = []
+    lead = LEAD_TABLE.get(f.id)
+    if lead is not None and lead <= LAG_THRESHOLD:
+        flags.append("후행지(확산 계급: 5년 뒤에도 덜 오름)")
     if f.academies_500m is not None and l.academies_500m is not None and l.academies_500m >= 10:
         if l.academies_500m >= ACADEMY_GAP_RATIO * max(1, f.academies_500m):
             flags.append("학군(학원가 밀도 격차)")
@@ -393,8 +414,11 @@ def aggregate(fid: int, band: str, pairs: list[PairResult], *, zone: str | None,
         if not moving:
             why.append("Follower 무반응(Persistent Cheapness)")
         reason = " · ".join(why)
-    elif m is not None and m > 0.03 and cons in ("STRONG", "OK") and leader_ok and moving:
+    elif m is not None and m > 0.03 and cons in ("STRONG", "OK") and leader_ok and moving and not any("후행지" in fl for p in pairs for fl in p.structural_flags):
         label, reason = "LAG_CANDIDATE", f"합의 {cons} · Leader 이동 확인 · 후행 움직임 {'/'.join(sorted({s for p in pairs for s in p.follower_start}))}"
+        lead = LEAD_TABLE.get(fid)
+        if lead is not None and 0 <= lead <= 3:
+            reason += " · 빠른추종 계급"
     elif m is not None and m > 0.03:
         label, reason = "LAG_WATCH", f"Mispricing 은 있으나 합의 {cons} / Leader {'확인' if leader_ok else '미확인'} / 후행 {'움직임' if moving else '무반응'}"
     return FollowerResult(fid, band, zone, tier, price_now, pairs, cons, cgap, m, mstatus, label, reason)

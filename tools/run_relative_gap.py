@@ -51,13 +51,17 @@ def main() -> int:
     t0 = time.time()
 
     with get_conn() as conn:
-        complexes = store.load_complexes(conn)
+        complexes = store.load_complexes(conn)                       # 1,000세대 이상 — 대장·Follower·Pair 대상
         prices = store.load_prices(conn, complexes, bands)
+        cx_all = store.load_complexes(conn, min_households=0)       # 급지·생활권 지도(참조 지리)는 전체 단지로
+        prices_all = store.load_prices(conn, cx_all, bands)
+        n_lead = gap_mod.load_lead_table()
+        print(f"[게이트] 대상 단지 {len(complexes)} (전체 {len(cx_all)}) · 후행 플래그용 선행성 표 {n_lead}건")
         n_acad = store.attach_academies(complexes)
         n_st = store.attach_stations(conn, complexes)
         print(f"[적재] 단지 {len(complexes)} · 단지×면적 {len(prices)} · 학원 {n_acad} · 역 {n_st} ({time.time()-t0:.0f}s)")
 
-        units = zones_mod.build_units(complexes, prices)
+        units = zones_mod.build_units(cx_all, prices_all)
         breaks = zones_mod.assign_tiers(units)
         zones = zones_mod.assign_zones(units)
         leaders: list[zones_mod.Leader] = []

@@ -44,7 +44,9 @@ def main() -> int:
         jeonse = store.load_jeonse(conn, set(prices))
         stations = panel_mod.load_stations(conn)
         jobs = jobs_mod.Jobs(cx, conn)
-    pb = panel_mod.PanelBuilder(cx, prices, jeonse, stations, jobs=jobs)
+        cx_all = store.load_complexes(conn, min_households=0)
+        prices_all = store.load_prices(conn, cx_all, ("84", "59", "74"))
+    pb = panel_mod.PanelBuilder(cx, prices, jeonse, stations, jobs=jobs, tier_complexes=cx_all, tier_prices=prices_all)
     rows = pickle.loads((ROOT / "logs" / "_exit_panel_84_59_74.pkl").read_bytes())
     by_y: dict = {}
     for r in rows:
@@ -55,7 +57,24 @@ def main() -> int:
         if r.target is not None:
             r.target -= lvl[r.entry_ym]
     mk = sorted(lvl.values())
-    bear_mk, base_mk, bull_mk = min(mk), percentile(mk, 0.5), percentile(mk, 0.8)
+    # 시장 수준 시나리오: 전세가율 조건부(§6) — 지금(2026-06) 전세가율과 ±0.08 안의 과거 진입연도만 쓴다(최소 3개, 없으면 전체)
+    mt_path = ROOT / "reports" / "market_timing.json"
+    cond_years, jr_now = [], None
+    if mt_path.exists():
+        mt = json.loads(mt_path.read_text(encoding="utf-8"))
+        now_row = next((r for r in mt["rows"] if r["year"] == 2026), None)
+        jr_now = now_row.get("metro_jeonse_ratio") if now_row else None
+        if jr_now is not None:
+            cond_years = [f"{r['year']}06" for r in mt["rows"] if r.get("metro_jeonse_ratio") is not None
+                          and abs(r["metro_jeonse_ratio"] - jr_now) <= 0.08 and f"{r['year']}06" in lvl]
+    if len(cond_years) >= 3:
+        mk_c = sorted(lvl[y] for y in cond_years)
+        bear_mk, base_mk, bull_mk = min(mk_c), percentile(mk_c, 0.5), max(mk_c)
+        scen_note = f"전세가율 조건부(지금 {jr_now:.2f}, 유사 진입연도 {sorted(cond_years)})"
+    else:
+        bear_mk, base_mk, bull_mk = min(mk), percentile(mk, 0.5), percentile(mk, 0.8)
+        scen_note = "전체 진입연도 분포(조건부 표본 부족)"
+    print("[시장 시나리오]", scen_note, f"log {bear_mk:.3f}/{base_mk:.3f}/{bull_mk:.3f}", flush=True)
     print(f"[적재] {len(rows)}행 · 시장 시나리오 log {bear_mk:.3f}/{base_mk:.3f}/{bull_mk:.3f} ({time.time()-t0:.0f}s)", flush=True)
 
     now = [r for k in prices for r in [pb.row(k[0], k[1], NOW_YM)] if r]
@@ -83,6 +102,8 @@ def main() -> int:
                 "bull_factor": round(math.exp(p + bull_mk + f.resid_q[0.8]), 4),
                 "market_scenario_log": json.dumps({"bear": round(bear_mk, 4), "base": round(base_mk, 4), "bull": round(bull_mk, 4)}),
                 "tier": r.x.get("tier"),
+                "emd_lead_months": r.x.get("emd_lead_months"),
+                "market_scenario_note": scen_note,
                 "dist_center_km": round(r.x["dist_center_km"], 2) if r.x.get("dist_center_km") is not None else None,
                 "model": f"{name}|lam={LAM}|relative",
                 "status": "SCENARIO_WALKFORWARD_v0.1" if name == "D" else "SCENARIO_FALLBACK_v0.1",

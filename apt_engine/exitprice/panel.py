@@ -56,6 +56,7 @@ FEATURE_SETS = {
     "D_+jobs": FEATURES + JOB_FEATURES,
     "E_+theory2": FEATURES + JOB_FEATURES + THEORY2,
     "F_+cycle": FEATURES + JOB_FEATURES + THEORY2 + CYCLE,
+    "E2_+relmom": FEATURES + JOB_FEATURES + THEORY2 + ["rel_gu_mom3", "vol_lead", "emd_lead_months"],
     "G_+diffusion": FEATURES + JOB_FEATURES + THEORY2 + DIFFUSION,
     "H_all": FEATURES + JOB_FEATURES + THEORY2 + DIFFUSION + CYCLE,
 }
@@ -92,10 +93,13 @@ class Row:
 class PanelBuilder:
     def __init__(self, complexes: dict[int, Complex], prices: dict[tuple[int, str], Series],
                  jeonse: dict[tuple[int, str], list], stations: list[tuple[float, float, str, str | None]],
-                 jobs=None):
-        """stations: (lat, lon, opened_ym or None, status_date 'YYYY-MM-DD' or None); jobs: exitprice.jobs.Jobs"""
+                 jobs=None, tier_complexes=None, tier_prices=None):
+        """stations: (lat, lon, opened_ym or None, status_date 'YYYY-MM-DD' or None); jobs: exitprice.jobs.Jobs
+        tier_complexes/tier_prices: 급지·중심거리 지도를 만들 때 쓸 전체 단지(없으면 complexes/prices). 행은 complexes 만."""
         self.cx, self.prices, self.jeonse, self.stations = complexes, prices, jeonse, stations
         self.jobs = jobs
+        self.tier_cx = tier_complexes or complexes
+        self.tier_prices = tier_prices or prices
         self.by_gu: dict[str, list[tuple[int, str]]] = {}
         for (cid, band) in prices:
             self.by_gu.setdefault(complexes[cid].lawd_cd, []).append((cid, band))
@@ -179,8 +183,8 @@ class PanelBuilder:
                 j = self.jeonse.get(k)
                 if j and j[t] and s.p50[t]:
                     jr.append(j[t] / s.p50[t])
-            v_recent = sum(sum(s.n[t - 11:t + 1]) for s in self.prices.values())
-            v_prior = sum(sum(s.n[t - 47:t - 11]) for s in self.prices.values()) / 3.0
+            v_recent = sum(sum(s.n[max(0, t - 11):t + 1]) for s in self.prices.values())
+            v_prior = (sum(sum(s.n[max(0, t - 47):t - 11]) for s in self.prices.values()) / 3.0) if t >= 47 else 0.0
             self._cache[key] = {
                 "metro_dd_peak": (lv - peak) if lv is not None and peak is not None else None,
                 "metro_vs_ma5": (lv - sum(ma5) / len(ma5)) if lv is not None and len(ma5) >= 10 else None,
@@ -222,8 +226,8 @@ class PanelBuilder:
     def metro_vol_ratio12(self, t: int) -> float | None:
         key = ("mvol12", t)
         if key not in self._cache:
-            rec = sum(sum(s.n[t - 11:t + 1]) for s in self.prices.values())
-            pri = sum(sum(s.n[t - 47:t - 11]) for s in self.prices.values()) / 3.0
+            rec = sum(sum(s.n[max(0, t - 11):t + 1]) for s in self.prices.values())
+            pri = (sum(sum(s.n[max(0, t - 47):t - 11]) for s in self.prices.values()) / 3.0) if t >= 47 else 0.0
             self._cache[key] = (rec / pri) if pri > 0 else None
         return self._cache[key]
 
@@ -245,8 +249,8 @@ class PanelBuilder:
             if len(c12) < 3:
                 self._cache[key] = None
             else:
-                v_recent = sum(sum(s.n[t - 2:t + 1]) for s in series)
-                v_prior = sum(sum(s.n[t - 14:t - 2]) for s in series) / 4.0
+                v_recent = sum(sum(s.n[max(0, t - 2):t + 1]) for s in series)
+                v_prior = (sum(sum(s.n[max(0, t - 14):t - 2]) for s in series) / 4.0) if t >= 14 else 0.0
                 name, _ = regime_mod.classify(price_12m=median(c12), price_3m=median(c3) if len(c3) >= 3 else None,
                                               volume_ratio=(v_recent / v_prior) if v_prior > 0 else None)
                 self._cache[key] = float(regime_mod.REGIME_INDEX.get(name, -1)) if name in regime_mod.REGIME_INDEX else None
@@ -265,15 +269,15 @@ class PanelBuilder:
         key = ("tiers", t)
         if key not in self._cache:
             levels: dict[str, list[float]] = {}
-            for (cid, band), s in self.prices.items():
+            for (cid, band), s in self.tier_prices.items():
                 vals = [v for v in s.p50[max(0, t - 23):t + 1] if v]
                 if len(vals) >= 6:
-                    levels.setdefault(self.cx[cid].emd_key, []).append(math.log(median(vals) / store.BAND_M2[band]))
+                    levels.setdefault(self.tier_cx[cid].emd_key, []).append(math.log(median(vals) / store.BAND_M2[band]))
             lv = {k: median(v) for k, v in levels.items() if len(v) >= 2}
             breaks = sorted(zones_mod.jenks_breaks(list(lv.values()), zones_mod.N_TIERS)) if len(lv) > 8 else []
             tiers = {k: zones_mod.N_TIERS - sum(1 for b in breaks if v >= b) for k, v in lv.items()}
             cent: dict[str, list] = {}
-            for c in self.cx.values():
+            for c in self.tier_cx.values():
                 if c.emd_key in tiers:
                     cent.setdefault(c.emd_key, []).append((c.lat, c.lon))
             info = {k: (sum(p[0] for p in v) / len(v), sum(p[1] for p in v) / len(v), tiers[k]) for k, v in cent.items()}
@@ -341,7 +345,9 @@ class PanelBuilder:
             "mom3": math.log(p0 / smooth_price(s, t - 36)) if smooth_price(s, t - 36) else None,
             "own_pct": own_pct,
             "rel_gu": math.log(p0 / gumed) if gumed else None,
-            "log_vol": math.log1p(sum(s.n[t - 11:t + 1])),
+            "rel_gu_mom3": (math.log(p0 / gumed) - math.log(smooth_price(s, t - 36) / self.gu_median_price(c.lawd_cd, band, t - 36)))
+                           if gumed and t >= 36 and smooth_price(s, t - 36) and self.gu_median_price(c.lawd_cd, band, t - 36) else None,
+            "log_vol": math.log1p(sum(s.n[max(0, t - 11):t + 1])),
             "jeonse_ratio": (j0 / p0) if j0 else None,
             "jeonse_mom1": math.log(j0 / j1) if j0 and j1 else None,
             "tier": float(tier),
@@ -378,7 +384,7 @@ class PanelBuilder:
         # ── v0.3 확산(얼리어답터/후행) 변수 ──
         lead = self.emd_lead_months(c.emd_key, t)
         mm1 = x["metro_mom1"] if "metro_mom1" in x else self.metro_mom(t, 12)
-        own_vol = sum(s.n[t - 11:t + 1]); own_pri = sum(s.n[t - 47:t - 11]) / 3.0
+        own_vol = sum(s.n[max(0, t - 11):t + 1]); own_pri = (sum(s.n[max(0, t - 47):t - 11]) / 3.0) if t >= 47 else 0.0
         mv = self.metro_vol_ratio12(t)
         x.update({
             "emd_lead_months": lead,
