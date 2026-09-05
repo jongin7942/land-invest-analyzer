@@ -77,6 +77,14 @@ KOSIS_GROUPS = {
     "소득": ["gu_income_pc_log", "gu_income_growth3", "gu_income_rel_sido"],           # 시군구 1인당 총급여(log, 2년 전 연도), 3년 성장, 시도 대비
 }
 KOSIS = [f for fs in KOSIS_GROUPS.values() for f in fs]
+TRANSIT_GROUPS = {
+    # 2026-09-06 종인님: 지하철·GTX 의 '어디와 이어지느냐'(목적지 등급) + 선점효과를 가격 이론에 대입
+    "교통접근": ["stn_t1_km", "stn_t2_km", "access_score"],
+    "교통계획": ["planned_t1", "planned_t2"],
+    "교통선점": ["t1_new5y"],
+}
+TRANSIT = [f for fs in TRANSIT_GROUPS.values() for f in fs]
+TIER_W = {1: 1.0, 2: 0.5, 3: 0.25}
 BRAND_BUILDERS = ("삼성물산", "현대건설", "GS건설", "대우건설", "대림산업", "DL이앤씨", "포스코", "롯데건설", "현대산업개발", "HDC", "SK에코", "SK건설", "한화건설", "현대엔지니어링")
 JOB_GROWTH = ["jobs_growth5"]                       # 5년 전 스냅샷이 있는 진입연도(2021~)만
 FEATURE_SETS = {
@@ -93,6 +101,7 @@ FEATURE_SETS = {
     "X_expert": FEATURES + JOB_FEATURES + THEORY2 + EXPERT,
     "P_policy": FEATURES + JOB_FEATURES + THEORY2 + POLICY,
     "K_kosis": FEATURES + JOB_FEATURES + THEORY2 + KOSIS,
+    "T_transit": FEATURES + JOB_FEATURES + THEORY2 + TRANSIT,
 }
 BOK: dict[int, float] = {}
 # ── 정책·공급 자료 (rules/) ──
@@ -232,7 +241,8 @@ class PanelBuilder:
         for c in complexes.values():
             self._grid.setdefault(self._gk(c.lat, c.lon), []).append(c.id)
         self._sgrid: dict[tuple[int, int], list[int]] = {}
-        for i, (la, lo, _, _) in enumerate(stations):
+        for i, st_ in enumerate(stations):
+            la, lo = st_[0], st_[1]
             self._sgrid.setdefault(self._gk(la, lo), []).append(i)
         self._cache: dict = {}
 
@@ -465,7 +475,7 @@ class PanelBuilder:
         best, planned = None, 0.0
         yidx = store._ym_index(ym)
         for i in self._near(self._sgrid, c.lat, c.lon):
-            la, lo, opened, sdate = self.stations[i]
+            la, lo, opened, sdate = self.stations[i][:4]
             d = haversine_m(c.lat, c.lon, la, lo)
             if opened and store._ym_index(opened) <= yidx:
                 if best is None or d < best:
@@ -473,6 +483,26 @@ class PanelBuilder:
             elif d <= 1500 and sdate and sdate[:7].replace("-", "") <= ym:
                 planned = 1.0      # 진입 시점에 이미 공표(착공·계획)된 미개통 역
         return (best / 1000.0 if best is not None else None), planned
+
+    def transit_feats(self, c: Complex, ym: str) -> dict:
+        """목적지 등급별 접근성(진입 시점 기준). 역 목록이 4-tuple(등급 없음)이면 None."""
+        yidx = store._ym_index(ym)
+        best = {1: 5.0, 2: 5.0, 3: 5.0}; planned = {1: 0.0, 2: 0.0}; new5 = 0.0
+        for i in self._near(self._sgrid, c.lat, c.lon, r=3):
+            st = self.stations[i]
+            if len(st) < 5 or st[4] is None:
+                continue
+            la, lo, opened, sdate, tier = st
+            d = haversine_m(c.lat, c.lon, la, lo) / 1000.0
+            if opened and store._ym_index(opened) <= yidx:
+                if d < best[tier]:
+                    best[tier] = d
+                if tier == 1 and d <= 1.0 and yidx - store._ym_index(opened) <= 60 and opened != "200001":
+                    new5 = 1.0
+            elif tier in planned and d <= 1.5 and sdate and sdate[:7].replace("-", "") <= ym:
+                planned[tier] = 1.0
+        access = sum(TIER_W[t] / (1.0 + best[t]) for t in (1, 2, 3))
+        return {"stn_t1_km": best[1], "stn_t2_km": best[2], "access_score": access, "planned_t1": planned[1], "planned_t2": planned[2], "t1_new5y": new5}
 
     # ── 행 ──
     def row(self, cid: int, band: str, entry_ym: str) -> Row | None:
@@ -699,6 +729,7 @@ class PanelBuilder:
             "gu_income_growth3": math.log(inc / inc3) if (inc and inc3) else None,
             "gu_income_rel_sido": math.log(inc / inc_sd) if (inc and inc_sd) else None,
         })
+        x.update(self.transit_feats(c, entry_ym))
         x.update(self.cycle_feats(t, year))
         t1 = t + HORIZON
         p1 = smooth_price(s, t1) if t1 < N_MONTHS else None
@@ -717,11 +748,12 @@ class PanelBuilder:
 
 
 def load_stations(conn) -> list[tuple[float, float, str | None, str | None]]:
-    rows = conn.execute("SELECT lat, lon, opened_ym, status_date, status FROM transit_station WHERE lat IS NOT NULL").fetchall()
+    rows = conn.execute("SELECT s.lat, s.lon, s.opened_ym, s.status_date, s.status, p.destination_tier FROM transit_station s "
+                        "LEFT JOIN transit_project p ON p.id = s.project_id WHERE s.lat IS NOT NULL").fetchall()
     out = []
     for r in rows:
         opened = str(r["opened_ym"]) if r["opened_ym"] else None
         if opened is None and r["status"] == "운영중":
             opened = "200001"          # 자료 시작 전부터 운영 중
-        out.append((float(r["lat"]), float(r["lon"]), opened, r["status_date"]))
+        out.append((float(r["lat"]), float(r["lon"]), opened, r["status_date"], int(r["destination_tier"]) if r["destination_tier"] else None))
     return out

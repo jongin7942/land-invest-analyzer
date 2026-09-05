@@ -86,6 +86,32 @@ def _cmpet(lawd: str):
             return {"rate": round(req / sup, 1) if sup else None, "supply": sup, "n": len(rows)}
     return None
 
+
+_STN: list = []
+
+
+def _transit(c) -> dict | None:
+    """가장 가까운 1급·2급 노선 역(개통)과 1.5km 안 계획 1급 역 — RULE_TRANSIT_BY_DESTINATION."""
+    global _STN
+    if not _STN:
+        with get_conn() as conn:
+            _STN = [(float(r["lat"]), float(r["lon"]), r["name"], r["line_id"], int(r["destination_tier"]) if r["destination_tier"] else None, r["status"], r["opened_ym"], r["destination"])
+                    for r in conn.execute("SELECT s.lat, s.lon, s.name, p.line_id, p.destination_tier, s.status, s.opened_ym, p.destination FROM transit_station s LEFT JOIN transit_project p ON p.id=s.project_id WHERE s.lat IS NOT NULL")]
+    best = {}
+    planned = None
+    for la, lo, nm, line, tier, status, opened, dest in _STN:
+        if tier is None:
+            continue
+        d = store.haversine_m(c.lat, c.lon, la, lo) / 1000.0
+        if d > 6:
+            continue
+        if status in ("개통", "운영중"):
+            if tier not in best or d < best[tier]["km"]:
+                best[tier] = {"km": round(d, 2), "name": nm, "line": line, "dest": dest}
+        elif d <= 1.5 and tier == 1 and (planned is None or d < planned["km"]):
+            planned = {"km": round(d, 2), "name": nm, "line": line, "dest": dest}
+    return {"t1": best.get(1), "t2": best.get(2), "planned_t1": planned}
+
 def _model_card(e: dict) -> dict:
     """모델 성적표 — v0.8(E 변수 + 부스팅 ×3시드, §24) 가 있으면 그 walk-forward 성적(전체행·2016~2021), 없으면 ridge 백테스트."""
     fu = R / "expert_theories_followup.json"
@@ -235,6 +261,7 @@ def main() -> int:
             "crash": crash.get((cid, band)),
             "regz": _regz(c) if c else None,
             "cmpet": _cmpet(c.lawd_cd) if c else None,
+            "tr": _transit(c) if c else None,
         }
     scen = next(iter(preds.values()), {}).get("market_scenario_note", "")
     mt = json.loads((R / "market_timing.json").read_text(encoding="utf-8")) if (R / "market_timing.json").exists() else {}
