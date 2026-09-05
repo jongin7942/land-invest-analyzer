@@ -148,7 +148,7 @@ ul{{padding-left:18px;margin:6px 0;}} li{{margin:3px 0;}}
 </style>
 <div class="wrap">
 <h1>아파트 엔진 오늘의 보고</h1>
-<div class="date">2026-09-05 · 1,000세대 이상 단지만 집계·추천 · 5년 뒤 가격 엔진 v0.4(하락기 포함·전세가율 조건부 시장) · 투자 시점 · 확산 계급 · Terminal Wealth</div>
+<div class="date">2026-09-05 · 1,000세대 이상 단지만 집계·추천 · 5년 뒤 가격 엔진 v0.6(하락기 포함·전세가율 조건부 시장·전세 룩백) · 투자 시점 · 확산 계급 · Terminal Wealth</div>
 
 <div class="card"><h2>한 줄 결론</h2><div class="big">
 ① 5년 뒤 가격을 맞히는 힘은 <b>{esc(label.get(sel.get('set',''), sel.get('set','')))}</b>이 가장 컸습니다(순위 정확도 IC {sel.get('ic')}). 시장 흐름만 보는 것보다 이론 변수를 넣었을 때 더 잘 맞는지는 아래 표에서 바로 비교됩니다.<br>
