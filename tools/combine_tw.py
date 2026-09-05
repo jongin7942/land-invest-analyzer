@@ -77,13 +77,23 @@ def main() -> int:
     t0 = time.time()
     profile = replace(Profile(name="balanced"), available_cash=int(float(args.cash) * 1e8),
                       interest_rate=args.rate)
-    pool = json.loads(Path(args.pool).read_text(encoding="utf-8"))["rows"]
+    if args.pool == "all":
+        # 수도권 전역: Exit Price 예측이 있는 모든 1,000세대 이상 단지×면적(rules/exit_price_2026.csv). 실투자금 Gate 는 아래 one() 뒤에서 적용.
+        pool = [{"complex_id": int(r["complex_id"]), "area_band": r["band"], "name": r["name"], "rank": None, "score": None}
+                for r in csv.DictReader((ROOT / "rules" / "exit_price_2026.csv").open(encoding="utf-8", newline=""))]
+        print(f"전역 풀 {len(pool)}개 (예측 있는 1,000세대 이상 단지×면적)")
+    else:
+        pool = json.loads(Path(args.pool).read_text(encoding="utf-8"))["rows"]
     rel, opt, pred = exit_price.load_relative(), exit_price.load_options(), exit_price.load_predictions()
     print(f"Exit Price 예측 {len(pred)}건 적재")
     rows = []
     with get_conn() as conn:
         for it in pool:
             got = one(conn, int(it["complex_id"]), str(it["area_band"]), profile=profile, rel=rel, opt=opt, pred=pred)
+            if got and args.pool == "all":
+                # 실투자금 Gate: 자기자본으로 못 사는 후보는 전역 순위에서 제외(§24 Stage B)
+                if got.get("self_capital") is None or got["self_capital"] > profile.available_cash:
+                    got = None
             if got:
                 got["name"] = it["name"]; got["score_rank"] = it["rank"]; got["score"] = it["score"]
                 rows.append(got)
@@ -107,7 +117,7 @@ def main() -> int:
         "top20_by_tw": [{k: r[k] for k in ("tw_rank", "score_rank", "name", "band", "price", "self_capital", "relative_uplift", "relative_status", "relative_label", "option_stage", "expected_tw", "wealth_floor", "exit_model", "exit_base")} for r in ranked[:20]],
         "model_priced": sum(1 for r in ranked if not r["exit_model"].startswith("NONE")),
         "positive_tw": sum(1 for r in ranked if (r["expected_tw"] or 0) > 0),
-        "biggest_movers": sorted([{"name": r["name"], "band": r["band"], "score_rank": r["score_rank"], "tw_rank": r["tw_rank"], "move": r["score_rank"] - r["tw_rank"], "relative_uplift": r["relative_uplift"]} for r in ranked], key=lambda x: -abs(x["move"]))[:15],
+        "biggest_movers": sorted([{"name": r["name"], "band": r["band"], "score_rank": r["score_rank"], "tw_rank": r["tw_rank"], "move": r["score_rank"] - r["tw_rank"], "relative_uplift": r["relative_uplift"]} for r in ranked if r.get("score_rank") is not None], key=lambda x: -abs(x["move"]))[:15],
         "uplift_applied": sum(1 for r in ranked if r["relative_uplift"] > 0),
         "option_applied": sum(1 for r in ranked if r["option_applied"]),
         "probe": probe,
