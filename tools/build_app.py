@@ -37,6 +37,19 @@ def fnum(v, d=None):
         return d
 
 
+
+def _model_card(e: dict) -> dict:
+    """모델 성적표 — v0.8(E 변수 + 부스팅 ×3시드, §24) 가 있으면 그 walk-forward 성적(전체행·2016~2021), 없으면 ridge 백테스트."""
+    fu = R / "expert_theories_followup.json"
+    if fu.exists():
+        try:
+            b = json.loads(fu.read_text(encoding="utf-8"))["boost3/E"]["all"]
+            return {"name": "E-boost v0.8", "ic": b["all"]["ic"], "recall": b["all"]["recall"], "recall_recent": b["holdout"]["recall"],
+                    "above": b["all"]["above_median"], "years": "2016~2021"}
+        except Exception:
+            pass
+    return {"name": "E", "ic": e.get("ic_mean"), "recall": e.get("recall_mean"), "recall30": e.get("recall30_mean"), "above": e.get("precision_mean"), "recall_recent": 0.52}
+
 def main() -> int:
     with get_conn() as conn:
         region = {r["lawd_cd"]: r["name"] for r in conn.execute("SELECT lawd_cd, name FROM region")}
@@ -162,7 +175,7 @@ def main() -> int:
     e = (bt.get("backtest") or {}).get("E_+theory2|lam=3.0") or {}
     payload = {"data": data, "meta": meta, "info": info, "years": YEARS, "scenario": scen, "asof": "2026-09-05",
                "market": {"jr": now.get("metro_jeonse_ratio"), "rate": now.get("bok_rate"), "vol": now.get("metro_vol_ratio"), "dd": now.get("metro_dd_peak")},
-               "model": {"ic": e.get("ic_mean"), "recall": e.get("recall_mean"), "recall30": e.get("recall30_mean"), "above": e.get("precision_mean"), "recall_recent": 0.52},
+               "model": _model_card(e),
                "conv": {f"{k[0]}|{k[1]}": {"p": fnum(v["p_next_within_5y"]), "m": fnum(v["dwell_median_months"])} for k, v in conv.items()}}
     js = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
     tpl = (ROOT / "tools" / "app_template.html").read_text(encoding="utf-8")
