@@ -191,8 +191,31 @@ def build() -> list[dict]:
     return sorted(rows.values(), key=lambda r: (-int(r["option_stage"]), r["region"], r["complex_name"]))
 
 
+def _conversion() -> dict[tuple[str, int], dict]:
+    """지역×단계 → 5년 내 다음 단계 확률·체류기간 (tools/measure_stage_conversion.py, §14.3)."""
+    out = {}
+    p = RULES / "stage_conversion.csv"
+    if p.exists():
+        with p.open(encoding="utf-8", newline="") as f:
+            for r in csv.DictReader(f):
+                out[(r["region"], int(r["from_stage"]))] = r
+    return out
+
+
 def main() -> int:
     rows = build()
+    conv = _conversion()
+    filled = 0
+    for r in rows:
+        st = int(r["option_stage"])
+        c = conv.get((r["region"], st))
+        if c and st >= 2 and c.get("p_next_within_5y") not in (None, "", "None"):
+            r["project_probability"] = c["p_next_within_5y"]          # = P(다음 단계 이상 도달 | 현 단계, 5년) — 완공 확률 아님
+            r["probability_status"] = c["status"]
+            r["years_to_next_stage"] = round(float(c["dwell_median_months"]) / 12, 1) if c.get("dwell_median_months") not in (None, "", "None") else NA
+            r["option_research_status"] = "STAGE_MAPPED+CONVERSION_RATE"
+            filled += 1
+    print(f"  단계 전환율 채움: {filled}건 (Stage≥2, 지역별 실측 · 완공 확률이 아니라 다음 단계 도달 확률)")
     with OUT.open("w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=OUTPUT_COLS)
         w.writeheader()

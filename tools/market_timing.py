@@ -23,6 +23,7 @@ from apt_engine.relative import store  # noqa: E402
 from apt_engine.relative.store import median  # noqa: E402
 
 YEARS = list(range(2007, 2027))
+QUARTERS = ("03", "06", "09", "12")   # 분기 진입으로 표본 15 → ~60 (겹치는 5년 창이라 독립 표본은 아님)
 
 
 def main() -> int:
@@ -35,9 +36,10 @@ def main() -> int:
     pb = panel_mod.PanelBuilder(cx, prices, jeonse, stations)
     rows = []
     for y in YEARS:
-        ym = f"{y}06"
+      for q in QUARTERS:
+        ym = f"{y}{q}"
         t = panel_mod.ym_idx(ym)
-        if t < 0 or t >= store.N_MONTHS:
+        if t < 0 or t >= store.N_MONTHS or ym > "202606":
             continue
         cyc = pb.cycle_feats(t, y)
         # 이후 5년 시장 수익 = 단지×면적별 log(P+5/P0) 의 중앙값
@@ -48,7 +50,7 @@ def main() -> int:
                 p0 = panel_mod.smooth_price(s, t); p1 = panel_mod.smooth_price(s, t1)
                 if p0 and p1:
                     fwd.append(math.log(p1 / p0))
-        rows.append({"year": y, **{k: (round(v, 4) if isinstance(v, float) else v) for k, v in cyc.items()},
+        rows.append({"year": y, "ym": ym, **{k: (round(v, 4) if isinstance(v, float) else v) for k, v in cyc.items()},
                      "fwd5_log": round(median(fwd), 4) if len(fwd) >= 100 else None, "n": len(fwd)})
     # 단순 규칙 평가: 각 변수 상위/하위 절반의 이후 5년 수익 중앙값
     hist = [r for r in rows if r["fwd5_log"] is not None]
@@ -68,9 +70,9 @@ def main() -> int:
     out = {"rows": rows, "rules": rules, "seconds": round(time.time() - t0)}
     (ROOT / "reports").mkdir(exist_ok=True)
     (ROOT / "reports" / "market_timing.json").write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
-    print("연도 | 고점대비 | MA5대비 | 전세가율 | 거래량비 | 금리 | 금리Δ | 1y | 3y | → 5년 수익(log)")
+    print("시점 | 고점대비 | MA5대비 | 전세가율 | 거래량비 | 금리 | 금리Δ | 1y | 3y | → 5년 수익(log)")
     for r in rows:
-        print(f"{r['year']} | {r.get('metro_dd_peak')} | {r.get('metro_vs_ma5')} | {r.get('metro_jeonse_ratio')} | {r.get('metro_vol_ratio')} | {r.get('bok_rate')} | {r.get('bok_rate_chg1')} | {r.get('metro_mom1')} | {r.get('metro_mom3')} | {r['fwd5_log']}")
+        print(f"{r['ym']} | {r.get('metro_dd_peak')} | {r.get('metro_vs_ma5')} | {r.get('metro_jeonse_ratio')} | {r.get('metro_vol_ratio')} | {r.get('bok_rate')} | {r.get('bok_rate_chg1')} | {r.get('metro_mom1')} | {r.get('metro_mom3')} | {r['fwd5_log']}")
     print(json.dumps(rules, ensure_ascii=False, indent=1))
     return 0
 

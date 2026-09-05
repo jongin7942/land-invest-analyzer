@@ -62,18 +62,20 @@ def main() -> int:
     cond_years, jr_now = [], None
     if mt_path.exists():
         mt = json.loads(mt_path.read_text(encoding="utf-8"))
-        now_row = next((r for r in mt["rows"] if r["year"] == 2026), None)
+        now_row = next((r for r in mt["rows"] if r.get("ym", f"{r['year']}06") == "202606"), None)
         jr_now = now_row.get("metro_jeonse_ratio") if now_row else None
         rate_now = now_row.get("bok_rate") if now_row else None
         if jr_now is not None:
-            cand = [r for r in mt["rows"] if r.get("metro_jeonse_ratio") is not None
-                    and abs(r["metro_jeonse_ratio"] - jr_now) <= 0.08 and f"{r['year']}06" in lvl]
+            cand = [r for r in mt["rows"] if r.get("metro_jeonse_ratio") is not None and r.get("fwd5_log") is not None
+                    and abs(r["metro_jeonse_ratio"] - jr_now) <= 0.08]
             # 전세가율 × 금리 두 조건(금리 ±1.0%p) — 3개 이상이면 그것을, 아니면 전세가율만
             cand2 = [r for r in cand if rate_now is not None and r.get("bok_rate") is not None and abs(r["bok_rate"] - rate_now) <= 1.0]
-            cond_years = [f"{r['year']}06" for r in (cand2 if len(cand2) >= 3 else cand)]
-            cond_kind = "전세가율×금리" if len(cand2) >= 3 else "전세가율"
+            use = cand2 if len(cand2) >= 5 else cand
+            cond_years = [r.get("ym", f"{r['year']}06") for r in use]
+            cond_vals = [r["fwd5_log"] for r in use]
+            cond_kind = "전세가율×금리" if len(cand2) >= 5 else "전세가율"
     if len(cond_years) >= 3:
-        mk_c = sorted(lvl[y] for y in cond_years)
+        mk_c = sorted(cond_vals)
         bear_mk, base_mk, bull_mk = min(mk_c), percentile(mk_c, 0.5), max(mk_c)
         scen_note = f"{cond_kind} 조건부(지금 전세가율 {jr_now:.2f}·금리 {rate_now}, 유사 진입연도 {sorted(cond_years)})"
     else:
