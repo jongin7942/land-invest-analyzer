@@ -68,6 +68,24 @@ def _macro_now() -> dict:
     except Exception:
         return {}
 
+
+_CMPET: dict = {}
+
+
+def _cmpet(lawd: str):
+    """시군구 최근 12개월 1순위 해당지역 청약경쟁률(공급 가중)·공급세대 — 청약홈(2020-02~). 구 자료 없으면 시 코드."""
+    if not _CMPET:
+        fp = RULES / "applyhome_competition_sigungu_monthly.csv"
+        if fp.exists():
+            for r in read_csv(fp):
+                _CMPET.setdefault(r["lawd_cd"], []).append((r["ym"], int(r["supply_hh"]), int(r["req_cnt"])))
+    for code in (lawd, lawd[:4] + "0"):
+        rows = [x for x in _CMPET.get(code, []) if x[0] >= "202507"]
+        if rows:
+            sup = sum(x[1] for x in rows); req = sum(x[2] for x in rows)
+            return {"rate": round(req / sup, 1) if sup else None, "supply": sup, "n": len(rows)}
+    return None
+
 def _model_card(e: dict) -> dict:
     """모델 성적표 — v0.8(E 변수 + 부스팅 ×3시드, §24) 가 있으면 그 walk-forward 성적(전체행·2016~2021), 없으면 ridge 백테스트."""
     fu = R / "expert_theories_followup.json"
@@ -216,6 +234,7 @@ def main() -> int:
             "jd": round(jeonse[(cid, band)] / 1e8, 2) if (cid, band) in jeonse else None,
             "crash": crash.get((cid, band)),
             "regz": _regz(c) if c else None,
+            "cmpet": _cmpet(c.lawd_cd) if c else None,
         }
     scen = next(iter(preds.values()), {}).get("market_scenario_note", "")
     mt = json.loads((R / "market_timing.json").read_text(encoding="utf-8")) if (R / "market_timing.json").exists() else {}
