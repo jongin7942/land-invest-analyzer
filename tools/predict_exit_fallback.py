@@ -38,10 +38,44 @@ LADDER = [
 SEEDS = (7, 11, 13)
 
 
+def _rank_target(rows):
+    """연도 내 백분위(−0.5~0.5) 목표 — tools/expert_theories.rank_target 과 동일."""
+    by = {}
+    for r in rows:
+        if r.target is not None:
+            by.setdefault(r.entry_ym, []).append(r.target)
+    srt = {k: sorted(v) for k, v in by.items()}
+    class _S:
+        __slots__ = ("complex_id", "band", "entry_ym", "price", "target", "x")
+    out = []
+    for r in rows:
+        o = _S(); o.complex_id, o.band, o.entry_ym, o.price, o.x = r.complex_id, r.band, r.entry_ym, r.price, r.x
+        if r.target is None:
+            o.target = None
+        else:
+            v = srt[r.entry_ym]; lo, hi = 0, len(v)
+            while lo < hi:
+                m = (lo + hi) // 2
+                if v[m] < r.target: lo = m + 1
+                else: hi = m
+            o.target = lo / max(1, len(v) - 1) - 0.5
+        out.append(o)
+    return out
+
+
 def main() -> int:
     import argparse
     ap = argparse.ArgumentParser(); ap.add_argument("--boost", action="store_true", help="E-boost3(결측 인지 부스팅 ×3시드, §24 채택) 로 예측")
+    ap.add_argument("--features", default="E", help="model_select.FEATURE_SETS 키 (E, E+거래량, ...)")
+    ap.add_argument("--rank", action="store_true", help="목표 백분위화(boost-rank)")
+    ap.add_argument("--out", default=str(ROOT / "rules" / "exit_price_2026.csv"))
+    ap.add_argument("--label", default="")
     args = ap.parse_args()
+    global D
+    if args.features != "E":
+        sys.path.insert(0, str(ROOT / "tools"))
+        import model_select as _ms
+        D = _ms.FEATURE_SETS[args.features]
     t0 = time.time()
     with get_conn() as conn:
         cx = store.load_complexes(conn)
@@ -101,13 +135,14 @@ def main() -> int:
         for T in range(2016, 2022):
             tr = [r for r in rows if int(r.entry_ym[:4]) <= T - 5]
             te = [r for r in rows if int(r.entry_ym[:4]) == T and r.target is not None]
-            ms = [m for m in (boost_mod.fit_boost(tr, D, rounds=150, seed=sd) for sd in SEEDS) if m]
+            trr = _rank_target(tr) if args.rank else tr
+            ms = [m for m in (boost_mod.fit_boost(trr, D, rounds=150, seed=sd) for sd in SEEDS) if m]
             if not ms:
                 continue
             resid += [t.target - sum(m.predict(t.x) for m in ms) / len(ms) for t in te]
             print(f"  잔차 walk-forward T={T} 누적 {len(resid)} ({time.time()-t0:.0f}s)", flush=True)
         rq = {q: percentile(resid, q) for q in (0.2, 0.5, 0.8)}
-        ms = [m for m in (boost_mod.fit_boost(rows, D, rounds=150, seed=sd) for sd in SEEDS) if m]
+        ms = [m for m in (boost_mod.fit_boost(_rank_target(rows) if args.rank else rows, D, rounds=150, seed=sd) for sd in SEEDS) if m]
         print(f"  최종 적합 E-boost3 n={ms[0].n} · 잔차 분위 p20 {rq[0.2]:.3f} p50 {rq[0.5]:.3f} p80 {rq[0.8]:.3f} ({time.time()-t0:.0f}s)", flush=True)
         out = []
         for r in now:
@@ -123,10 +158,10 @@ def main() -> int:
                 "emd_lead_months": r.x.get("emd_lead_months"),
                 "market_scenario_note": scen_note,
                 "dist_center_km": round(r.x["dist_center_km"], 2) if r.x.get("dist_center_km") is not None else None,
-                "model": "E-boost3|depth2|r150|relative",
+                "model": (args.label or f"{args.features}-boost3{'-rank' if args.rank else ''}") + "|depth2|r150|relative",
                 "status": "SCENARIO_WALKFORWARD_v0.8",
             })
-        with (ROOT / "rules" / "exit_price_2026.csv").open("w", encoding="utf-8", newline="") as fo:
+        with Path(args.out).open("w", encoding="utf-8", newline="") as fo:
             w = csv.DictWriter(fo, fieldnames=list(out[0].keys()))
             w.writeheader(); w.writerows(out)
         print(f"[예측] E-boost3 커버리지 {len(out)}/{len(now)} (결측 행 포함, 폴백 사다리 불필요) ({time.time()-t0:.0f}s)")

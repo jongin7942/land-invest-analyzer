@@ -71,6 +71,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--cash", default="3")
     ap.add_argument("--pool", default=str(ROOT / "reports" / "top100_before_combine_2026-09-04.json"))
+    ap.add_argument("--exit", default=str(ROOT / "rules" / "exit_price_2026.csv"), help="Exit Price 예측 CSV(모델 변형용)")
+    ap.add_argument("--out-tag", default="2026-09-04", help="reports/tw_combined_<tag>.{csv,json}")
     ap.add_argument("--rate", type=float, default=0.04,
                     help="후보 비교용 표준 대출금리(HEURISTIC). 종인님 실제 조건이 아니다 — 보유 vs 갈아타기에는 쓰지 않는다")
     args = ap.parse_args()
@@ -80,11 +82,11 @@ def main() -> int:
     if args.pool == "all":
         # 수도권 전역: Exit Price 예측이 있는 모든 1,000세대 이상 단지×면적(rules/exit_price_2026.csv). 실투자금 Gate 는 아래 one() 뒤에서 적용.
         pool = [{"complex_id": int(r["complex_id"]), "area_band": r["band"], "name": r["name"], "rank": None, "score": None}
-                for r in csv.DictReader((ROOT / "rules" / "exit_price_2026.csv").open(encoding="utf-8", newline=""))]
+                for r in csv.DictReader(Path(args.exit).open(encoding="utf-8", newline=""))]
         print(f"전역 풀 {len(pool)}개 (예측 있는 1,000세대 이상 단지×면적)")
     else:
         pool = json.loads(Path(args.pool).read_text(encoding="utf-8"))["rows"]
-    rel, opt, pred = exit_price.load_relative(), exit_price.load_options(), exit_price.load_predictions()
+    rel, opt, pred = exit_price.load_relative(), exit_price.load_options(), exit_price.load_predictions(args.exit)
     print(f"Exit Price 예측 {len(pred)}건 적재")
     rows = []
     with get_conn() as conn:
@@ -108,7 +110,7 @@ def main() -> int:
     if probe:
         out_rows.append(probe)
     (ROOT / "reports").mkdir(exist_ok=True)
-    with (ROOT / "reports" / "tw_combined_2026-09-04.csv").open("w", encoding="utf-8", newline="") as f:
+    with (ROOT / "reports" / f"tw_combined_{args.out_tag}.csv").open("w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(out_rows[0].keys()))
         w.writeheader(); w.writerows(out_rows)
     summary = {
@@ -124,7 +126,7 @@ def main() -> int:
         "unknown_common": sorted({u for r in rows for u in r["unknown"].split("|") if u})[:12],
         "seconds": round(time.time() - t0),
     }
-    (ROOT / "reports" / "tw_combined_2026-09-04.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
+    (ROOT / "reports" / f"tw_combined_{args.out_tag}.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
     print(json.dumps({k: v for k, v in summary.items() if k not in ("top20_by_tw", "biggest_movers")}, ensure_ascii=False, indent=1))
     for r in summary["top20_by_tw"]:
         print(" ", r)

@@ -16,10 +16,17 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from apt_engine.db.connection import get_conn  # noqa: E402
 from apt_engine.relative import store  # noqa: E402
+from apt_engine.exitprice import panel as panel_mod  # noqa: E402  (규제지역 상태 reg_status)
 
 R = ROOT / "reports"
 RULES = ROOT / "rules"
 CASHES = ["1", "2", "3", "4", "5", "7", "10"]
+# 모델 3종 — base(v0.8 채택) / stable(안정형) / aggr(공격형). 변형은 reports/tw_all_<model>_<cash>eok.csv 가 있을 때만 앱에 실린다.
+MODELS = {
+    "base": {"name": "기본(v0.8)", "desc": "E 변수 + 부스팅. 승자 포착률 44%(전체행 2016~21), 최근 3년 61%.", "file": "tw_all_{c}eok.csv", "stab": "tw_stability_all_{c}eok.json"},
+    "stable": {"name": "안정형", "desc": "예측 상위 20% 가운데 '시장 평균 이상' 비율과 '하위 20% 회피'를 최대화한 모델(§26).", "file": "tw_all_stable_{c}eok.csv", "stab": "tw_stability_all_stable_{c}eok.json"},
+    "aggr": {"name": "공격형", "desc": "실제 상위 10% 승자를 가장 많이 잡는(Recall@20) 모델(§26).", "file": "tw_all_aggr_{c}eok.csv", "stab": "tw_stability_all_aggr_{c}eok.json"},
+}
 YEARS = list(range(2007, 2027))
 
 
@@ -37,6 +44,15 @@ def fnum(v, d=None):
         return d
 
 
+
+
+_REG_SHARE: dict = {}
+
+
+def _regz(c) -> dict:
+    """2026-09 기준 규제 상태 + 시도 규제 비중(풍선효과 후보 판정은 앱에서: 비규제 & 비중 ≥0.7 & 상승국면, §25.2)."""
+    st = panel_mod.reg_status(c.lawd_cd, c.emd, "20260905")
+    return {"adj": st["adj"], "hot": st["hot"], "cap": st["cap"], "from": st["adj_from"], "share": _REG_SHARE.get(c.lawd_cd[:2])}
 
 def _model_card(e: dict) -> dict:
     """모델 성적표 — v0.8(E 변수 + 부스팅 ×3시드, §24) 가 있으면 그 walk-forward 성적(전체행·2016~2021), 없으면 ridge 백테스트."""
@@ -56,6 +72,9 @@ def main() -> int:
         cxrows = {int(r["id"]): dict(r) for r in conn.execute(
             "SELECT id, name, apt_households, approval_year, builder, heat_type, parking_count, land_area_m2, building_count FROM complex")}
         cx = store.load_complexes(conn, min_households=1000)
+        for _sd in ('11', '41', '28'):
+            _ids = [o for o in cx.values() if o.lawd_cd[:2] == _sd]
+            _REG_SHARE[_sd] = round(sum(1 for o in _ids if panel_mod.reg_status(o.lawd_cd, o.emd, '20260905')['adj']) / len(_ids), 2) if _ids else 0.0
         store.attach_academies(cx)
         store.attach_stations(conn, cx)
         # 연도별(6월) 가격·전세 이력 + 하락기 낙폭
@@ -106,12 +125,16 @@ def main() -> int:
     profiles = {}
     data = {}
     meta = {}
-    for c in CASHES:
-        rows = [r for r in read_csv(R / f"tw_all_{c}eok.csv") if r.get("tw_rank")]
+    for mkey, mdef in MODELS.items():
+      data[mkey] = {}; meta[mkey] = {}
+      for c in CASHES:
+        if not (R / mdef["file"].format(c=c)).exists():
+            continue
+        rows = [r for r in read_csv(R / mdef["file"].format(c=c)) if r.get("tw_rank")]
         if not rows:
             continue
         st = {}
-        stp = R / f"tw_stability_all_{c}eok.json"
+        stp = R / mdef["stab"].format(c=c)
         if stp.exists():
             for s in json.loads(stp.read_text(encoding="utf-8"))["rows"]:
                 st[s["name"] + s["band"]] = s
@@ -138,10 +161,10 @@ def main() -> int:
                 "rk": int(r["tw_rank"]), "pred": not r["exit_model"].startswith("NONE"), "g": grade,
                 "mr": s.get("mean_rank"), "sv": s.get("top10_survival"), "p90": s.get("p90_rank"), "irr": round(fnum(r["irr_base"], 0) * 100, 1) if fnum(r["irr_base"]) is not None else None,
             })
-        data[c] = out
-        meta[c] = {"n": len(out), "pos": sum(1 for x in out if (x["tw"] or 0) > 0), "A": sum(1 for x in out if x["g"] == "A")}
+        data[mkey][c] = out
+        meta[mkey][c] = {"n": len(out), "pos": sum(1 for x in out if (x["tw"] or 0) > 0), "A": sum(1 for x in out if x["g"] == "A")}
     # 단지×면적 공통 정보(투자금 무관)
-    keys = {(x["id"], x["b"]) for rows in data.values() for x in rows}
+    keys = {(x["id"], x["b"]) for md in data.values() for rows in md.values() for x in rows}
     info = {}
     for cid, band in keys:
         c = cx.get(cid); base = cxrows.get(cid, {}); p = preds.get((cid, band), {}); rl = rel.get((cid, band), {}); o = opt.get(cid, {}); po = post.get(cid, {})
@@ -167,14 +190,15 @@ def main() -> int:
             "jr": round(jeonse[(cid, band)] / lt["price_p50"], 3) if (cid, band) in jeonse and lt.get("price_p50") else None,
             "jd": round(jeonse[(cid, band)] / 1e8, 2) if (cid, band) in jeonse else None,
             "crash": crash.get((cid, band)),
+            "regz": _regz(c) if c else None,
         }
     scen = next(iter(preds.values()), {}).get("market_scenario_note", "")
     mt = json.loads((R / "market_timing.json").read_text(encoding="utf-8")) if (R / "market_timing.json").exists() else {}
     now = next((r for r in mt.get("rows", []) if r.get("ym") == "202606"), {})
     bt = json.loads((R / "exit_price_backtest_relative.json").read_text(encoding="utf-8")) if (R / "exit_price_backtest_relative.json").exists() else {}
     e = (bt.get("backtest") or {}).get("E_+theory2|lam=3.0") or {}
-    payload = {"data": data, "meta": meta, "info": info, "years": YEARS, "scenario": scen, "asof": "2026-09-05",
-               "market": {"jr": now.get("metro_jeonse_ratio"), "rate": now.get("bok_rate"), "vol": now.get("metro_vol_ratio"), "dd": now.get("metro_dd_peak")},
+    payload = {"data": data, "meta": meta, "models": {k: {"name": v["name"], "desc": v["desc"], "cashes": sorted(data.get(k, {}).keys(), key=int)} for k, v in MODELS.items() if data.get(k)}, "info": info, "years": YEARS, "scenario": scen, "asof": "2026-09-05",
+               "market": {"jr": now.get("metro_jeonse_ratio"), "rate": now.get("bok_rate"), "vol": now.get("metro_vol_ratio"), "dd": now.get("metro_dd_peak"), "mom12": now.get("metro_mom1")},
                "model": _model_card(e),
                "conv": {f"{k[0]}|{k[1]}": {"p": fnum(v["p_next_within_5y"]), "m": fnum(v["dwell_median_months"])} for k, v in conv.items()}}
     js = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")

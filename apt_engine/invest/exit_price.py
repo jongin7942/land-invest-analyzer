@@ -98,10 +98,10 @@ class Prediction:
     status: str
 
 
-def load_predictions() -> dict[tuple[int, str], Prediction]:
-    """Exit Price Engine(§12, tools/run_exit_price.py) 의 5년 배율. 없으면 빈 dict → 무성장 Base."""
+def load_predictions(path=None) -> dict[tuple[int, str], Prediction]:
+    """Exit Price Engine(§12, tools/run_exit_price.py) 의 5년 배율. 없으면 빈 dict → 무성장 Base. path 로 모델 변형(안정형·공격형) 파일 지정 가능."""
     out: dict[tuple[int, str], Prediction] = {}
-    p = RULES / "exit_price_2026.csv"
+    p = Path(path) if path else RULES / "exit_price_2026.csv"
     if not p.exists():
         return out
     with p.open(encoding="utf-8", newline="") as f:

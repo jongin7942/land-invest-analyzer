@@ -101,6 +101,8 @@ svg text{font-family:"IBM Plex Mono",monospace}
 </div>
 
 <div class="panel">
+  <div class="row"><span class="lbl">모델</span><div class="seg" id="model"></div></div>
+  <p class="muted" id="modelDesc" style="margin:-2px 0 8px 48px"></p>
   <div class="row"><span class="lbl">내 돈</span><div class="seg" id="cash"></div></div>
   <div class="row"><span class="lbl"></span><input type="range" id="cashRange" min="0" max="6" step="1" value="2" aria-label="투자금 슬라이더"><span class="mono" id="cashLabel"></span></div>
   <div class="row"><span class="lbl">지역</span><select id="sido"><option value="">전체</option><option value="11">서울</option><option value="41">경기</option><option value="28">인천</option></select><select id="gu"><option value="">시군구 전체</option></select><span class="lbl">평형</span><div class="seg" id="band"></div></div>
@@ -123,8 +125,13 @@ svg text{font-family:"IBM Plex Mono",monospace}
 <script>
 const D = __DATA__;
 const $ = id => document.getElementById(id);
-const LV = Object.keys(D.data).sort((a,b)=>+a-+b);
+const MODELS = D.models || {base: {name: "기본", desc: "", cashes: Object.keys(D.data.base || D.data)}};
+let model = MODELS.base ? "base" : Object.keys(MODELS)[0];
+const dataOf = () => (D.data[model] || {});
+const metaOf = () => (D.meta[model] || {});
+let LV = Object.keys(dataOf()).sort((a,b)=>+a-+b);
 let cash = LV.includes("3") ? "3" : LV[0], band = "", grade = "", shown = 50, tab = "한눈에";
+function setModel(v){ model = v; LV = Object.keys(dataOf()).sort((a,b)=>+a-+b); if (!LV.includes(cash)) cash = LV.includes("3") ? "3" : LV[0]; segs("model", Object.entries(MODELS).map(([k, m]) => [k, m.name]), model, setModel); $("modelDesc").textContent = (MODELS[model] || {}).desc || ""; $("cashRange").max = LV.length - 1; setCash(cash); }
 let favs = new Set(), cmp = [];
 try { favs = new Set(JSON.parse(localStorage.getItem("ae_favs") || "[]")); } catch(e) {}
 const saveFavs = () => { try { localStorage.setItem("ae_favs", JSON.stringify([...favs])); } catch(e) {} };
@@ -142,14 +149,14 @@ function setGrade(v){ grade = v; segs("grade", [["", "전체"], ["A", "A"], ["B"
 
 function spark(hist, w=90, h=26){ const pts = hist.map((v,i)=>[i,v]).filter(p=>p[1]!=null); if (pts.length < 3) return ""; const xs = pts.map(p=>p[0]), ys = pts.map(p=>p[1]); const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys); const X = x => 2 + (x - x0) / Math.max(1, x1 - x0) * (w - 4), Y = y => h - 2 - (y - y0) / Math.max(1e-9, y1 - y0) * (h - 4); const d = pts.map((p,i)=>(i?"L":"M") + X(p[0]).toFixed(1) + " " + Y(p[1]).toFixed(1)).join(" "); const last = pts[pts.length-1]; return `<svg class="spark" viewBox="0 0 ${w} ${h}" aria-hidden="true"><path d="${d}" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".8"/><circle cx="${X(last[0]).toFixed(1)}" cy="${Y(last[1]).toFixed(1)}" r="2" fill="currentColor"/></svg>`; }
 
-function rows(){ let r = D.data[cash] || []; const sido = $("sido").value, gu = $("gu").value, q = $("q").value.trim();
+function rows(){ let r = dataOf()[cash] || []; const sido = $("sido").value, gu = $("gu").value, q = $("q").value.trim();
   r = r.filter(x => { const i = info(key(x)); if (sido && !i.lawd.startsWith(sido)) return false; if (gu && i.lawd !== gu) return false; if (band && x.b !== band) return false; if (grade && x.g !== grade) return false;
     if (q && !(i.n.includes(q) || i.reg.includes(q) || (i.emd||"").includes(q))) return false; if ($("pos").checked && !((x.tw||0) > 0)) return false; if ($("fav").checked && !favs.has(key(x))) return false; return true; });
   const s = $("sort").value; const k = {tw: x => -(x.tw ?? -1e9), fl: x => -(x.fl ?? -1e9), sv: x => -(x.sv ?? -1), bx: x => -((x.ex||0)/x.p), irr: x => -(x.irr ?? -1e9), p: x => x.p}[s]; r = [...r].sort((a,b) => k(a) - k(b));
   if ($("dedupe").checked){ const seen = new Set(); r = r.filter(x => { const i = info(key(x)); const kk = i.lawd + "|" + i.emd; if (seen.has(kk)) return false; seen.add(kk); return true; }); }
   return r; }
 
-function render(){ const all = D.data[cash] || []; const r = rows(); const m = D.meta[cash] || {};
+function render(){ const all = dataOf()[cash] || []; const r = rows(); const m = metaOf()[cash] || {};
   $("k1").textContent = m.n ?? all.length; $("k2").textContent = m.pos ?? 0; $("k3").textContent = m.A ?? 0; $("k4").textContent = r.length;
   const top = r.slice(0, 10); const byEmd = {}; top.forEach(x => { const i = info(key(x)); const kk = i.reg + " " + (i.emd||""); byEmd[kk] = (byEmd[kk]||0) + 1; });
   const hot = Object.entries(byEmd).filter(([,n]) => n >= 4); $("conc").hidden = !hot.length || $("dedupe").checked;
@@ -184,6 +191,9 @@ function outlook(x, i){ const good = [], risk = [];
   if (i.jr != null && i.jr >= 0.7) good.push(`<b>전세가율 ${pct(i.jr)}</b> — 전세가 가격을 두껍게 받쳐 하락 방어에 유리.${S("전월세 실거래")}`);
   if (i.relm != null && i.relm >= 0.08) good.push(`<b>모델 예측: 시장보다 ${(i.relm*100).toFixed(0)}%p 더 오름</b> — 급지·1급지 거리·최근 덜 오른 정도가 만든 값.${S("모델 E")}`);
   if (i.crash != null && i.crash > -0.2) good.push(`<b>2022~23 하락기 낙폭 ${pct(i.crash)}</b> — 같은 시군구보다 덜 빠진 편(방어력).${S("실거래")}`);
+  const rz = i.regz || {}; const mkUp = (D.market && D.market.mom12 != null) ? D.market.mom12 > 0 : true;
+  if (!rz.adj && rz.share != null && rz.share >= 0.7 && mkUp) good.push(`<b>풍선효과 후보</b> — 같은 시도의 ${(rz.share*100).toFixed(0)}%가 규제지역인데 이 단지는 비규제. 2020년 6·11월에 같은 조건의 비규제 지역이 12~24개월 시장보다 +10~32%p 더 올랐습니다(2017~18년에는 없었음).${S("규제 사건연구")}`);
+  if (rz.adj && rz.from) good.push(`<b>규제지역 지정(${rz.from.slice(0,4)}.${rz.from.slice(4,6)}~)</b> — 규제는 이미 오른 곳을 뒤따라 표시하는 후행 지표였고, 지정 뒤에도 비규제보다 더 올랐습니다(2016·2017 사건). 하락 신호가 아닙니다.${S("규제 사건연구")}`);
   // ── 위험 ──
   if (i.diff === "후행") risk.push(`<b>확산 계급 '후행'</b> — 남들 다 오른 뒤에야 움직이는 동네. 과거 후행 동네는 5년 뒤에도 시장보다 7% 덜 올랐습니다.${S("확산 분석")}`);
   if (i.rel === "FALSE_CHEAP") risk.push(`<b>싸 보이지만 이유가 있는 가격차</b> — 대장 대비 싼 이유가 학군·상품성 같은 구조적 요인(Value Trap 주의).${S("상대가격 엔진")}`);
@@ -194,6 +204,7 @@ function outlook(x, i){ const good = [], risk = [];
   if (i.vol != null && i.vol < 5) risk.push(`<b>최근 6개월 거래 ${i.vol}건</b> — 표본이 적어 가격이 튈 수 있음.${S("실거래")}`);
   if (!x.pred) risk.push(`<b>예측 자료 결측</b> — 전세·모멘텀 자료가 부족해 오르지 않는다고 놓고 계산했습니다.`);
   if (x.sv != null && x.sv < 0.3) risk.push(`<b>순위가 잘 흔들림(TOP10 생존 ${pct(x.sv)})</b> — 한두 가정에 기대는 순위.`);
+  if (rz.adj || rz.hot) risk.push(`<b>${rz.hot ? "투기과열지구·조정대상지역" : "조정대상지역"}${rz.cap ? "·분양가상한제" : ""}</b> — LTV·DTI 축소, 다주택 양도세 중과, 자금조달계획서 제출, 전매 제한. 살 수 있는 사람의 범위(Buyer Depth)가 좁아집니다.${S("국토부 공고")}`);
   if (i.yr && (2026 - i.yr) >= 30 && (i.ost == null || i.ost < 2)) risk.push(`<b>준공 ${2026 - i.yr}년, 정비사업 공식 절차 없음</b> — 노후로 수선비·전세 경쟁력 저하가 먼저 옵니다.${S("K-apt·등록부")}`);
   const mk = D.market || {}; const market = `지금 수도권은 전세가율 ${mk.jr != null ? pct(mk.jr) : "—"}(시계열 최저권)·기준금리 ${mk.rate ?? "—"}%·거래량 회복(${mk.vol != null ? mk.vol.toFixed(2) : "—"}배). 과거 이와 비슷했던 시점(2011~2012)의 5년 시장 수익은 +11~+22%였고, 이 앱의 Bear/Base/Bull이 그 범위입니다. 전세가율이 65% 위로 회복되거나 금리가 더 내리면 모든 후보의 숫자가 통째로 올라가고, 반대면 내려갑니다.`;
   return {good, risk, market}; }
@@ -221,7 +232,7 @@ function openSheet(x){ const i = info(key(x)); const s = $("sheet"); s.hidden = 
     <p class="muted">기대값 = 운 나쁨 25% + 기준 50% + 운 좋음 25%. 기준 시나리오에서 매도가 차익은 ${(x.ex - x.p).toFixed(2)}억이지만 취득세·복비·5년 이자·보유세·양도세 약 ${(x.ex - x.p - (x.nx||0)).toFixed(2)}억이 빠져 ${won(x.nx)}이 남습니다. 시장 가정: ${D.scenario}</p>`;
     if (tab === "20년 가격") return chart(i.hist || []) + `<p class="muted">매년 6월 실거래 대표가(억). 2022~23 하락기 낙폭 ${i.crash != null ? pct(i.crash) : "—"}. ${S("국토부 실거래")}</p>`;
     if (tab === "대장 대비") return (i.pairs && i.pairs.length ? `<p class="muted">이 단지 가격을 같은 생활권·같은 급지·한 단계 위 급지의 대장 아파트와 비교한 것입니다. '덜 따라간 폭'이 플러스면 대장보다 덜 올랐다는 뜻이고, 과거에 그 차이가 실제로 좁혀진 비율이 '과거 전달확률'입니다.</p><table><tr><th>비교 대장</th><th>관계</th><th>정상 비율</th><th>지금</th><th>덜 따라간 폭</th><th>과거 전달확률</th></tr>` + i.pairs.map(p => `<tr><td>${p.leader} ${p.lband}</td><td>${({LOCAL:"같은 생활권",GRADE:"같은 급지",UPPER_GRADE:"한 단계 위",BUYER_CHOICE:"같은 예산 비교"})[p.kind] || p.kind}</td><td class="mono">${p.normal != null ? p.normal.toFixed(2) : "—"}</td><td class="mono">${p.cur != null ? p.cur.toFixed(2) : "—"}</td><td class="mono ${cls(p.gap)}">${p.gap != null ? (p.gap*100).toFixed(1) + "%" : "—"}</td><td class="mono">${p.p != null ? pct(p.p) : "—"}</td></tr>`).join("") + `</table><p class="muted">판정 ${({LAG_CANDIDATE:"덜 따라간 후보",FALSE_CHEAP:"싸 보이지만 이유 있음",LAG_WATCH:"관찰",NEUTRAL:"정상 범위",UNKNOWN:"자료 부족"})[i.rel] || i.rel || "—"} · 구조적 차이: ${[...new Set(i.pairs.flatMap(p => (p.flags||"").split("|").filter(Boolean)))].join(", ") || "없음"}</p>` : '<p class="muted">비교할 대장 아파트가 없습니다(생활권 안에 1,000세대 이상 대장 후보 부족).</p>');
-    return `<p class="muted">이 단지에 쓰인 원자료와 계산 상태입니다.</p><div class="kv"><div><b>가격 자료</b>실거래 ${i.asof || "—"} 기준, 최근 6개월 ${i.vol ?? "—"}건 ${S("국토부")}</div><div><b>예측 모델</b>${x.pred ? "모델 E 적용(" + (i.model || "") + ")" : "자료 결측 → 무성장"}</div><div><b>단지 정보</b>${i.builder || "—"} · ${i.heat || "—"} · 주차 ${i.park ?? "—"} · ${i.bld ?? "—"}개동 ${S("K-apt")}</div><div><b>세대당 대지 · 용적률</b>${i.ls != null ? i.ls + "㎡" : "—"} · ${i.far != null ? i.far.toFixed(0) + "%" : "—(등록부 없음)"}</div><div><b>정비사업</b>${i.ost != null ? "Stage " + i.ost + " (0=절차 없음 … 8=준공)" : "등록 없음"} ${S("정보몽땅·경기·인천")}</div><div><b>확산 계급(선행성)</b>${i.diff || "—"}${i.lead != null ? " · 수도권보다 " + (i.lead >= 0 ? i.lead + "개월 앞" : (-i.lead) + "개월 뒤") : ""}</div><div><b>학원 · 역</b>500m 안 ${i.acad ?? "—"}개 · 역까지 ${i.stn != null ? i.stn + "m" : "—"} ${S("NEIS·역 좌표")}</div><div><b>계산 조건</b>비거주 임대 · 금리 4% · 30년 원리금균등 · 공시가 = 매매가×0.65 · 세법 초안(원문 대조 전)</div></div><p class="muted">한계: 시장 전체 수준은 예측이 아니라 가정, 분담금·호가·학업성취도 자료는 아직 없음, 옵션 가치는 순자산에 미반영(N/A).</p>`; };
+    return `<p class="muted">이 단지에 쓰인 원자료와 계산 상태입니다.</p><div class="kv"><div><b>가격 자료</b>실거래 ${i.asof || "—"} 기준, 최근 6개월 ${i.vol ?? "—"}건 ${S("국토부")}</div><div><b>예측 모델</b>${x.pred ? "모델 E 적용(" + (i.model || "") + ")" : "자료 결측 → 무성장"}</div><div><b>단지 정보</b>${i.builder || "—"} · ${i.heat || "—"} · 주차 ${i.park ?? "—"} · ${i.bld ?? "—"}개동 ${S("K-apt")}</div><div><b>세대당 대지 · 용적률(추정)</b>${i.ls != null ? i.ls + "㎡" : "—"} · ${i.far != null ? i.far.toFixed(0) + "%" : "—(등록부 없음)"} <span class="muted">주거전용면적×1.15÷대지 (K-apt·V-World), 건축물대장 확정값 아님</span></div><div><b>규제 상태(2026.9)</b>${(i.regz && (i.regz.adj || i.regz.hot)) ? [(i.regz.hot ? "투기과열지구" : ""), (i.regz.adj ? "조정대상지역" : ""), (i.regz.cap ? "분양가상한제" : "")].filter(Boolean).join("·") + (i.regz.from ? " (" + i.regz.from.slice(0,4) + "." + i.regz.from.slice(4,6) + "~)" : "") : "비규제"} ${S("국토부 공고")}</div><div><b>정비사업</b>${i.ost != null ? "Stage " + i.ost + " (0=절차 없음 … 8=준공)" : "등록 없음"} ${S("정보몽땅·경기·인천")}</div><div><b>확산 계급(선행성)</b>${i.diff || "—"}${i.lead != null ? " · 수도권보다 " + (i.lead >= 0 ? i.lead + "개월 앞" : (-i.lead) + "개월 뒤") : ""}</div><div><b>학원 · 역</b>500m 안 ${i.acad ?? "—"}개 · 역까지 ${i.stn != null ? i.stn + "m" : "—"} ${S("NEIS·역 좌표")}</div><div><b>계산 조건</b>비거주 임대 · 금리 4% · 30년 원리금균등 · 공시가 = 매매가×0.65 · 세법 초안(원문 대조 전)</div></div><p class="muted">한계: 시장 전체 수준은 예측이 아니라 가정, 분담금·호가·학업성취도 자료는 아직 없음, 옵션 가치는 순자산에 미반영(N/A).</p>`; };
   s.innerHTML = `<button class="x" id="closeSheet">닫기</button><h3><span class="grade g${x.g}">${x.g}</span> ${i.n} ${x.b}㎡</h3><div class="sub">${i.reg} ${i.emd||""} · 내 돈 ${cash}억 기준 · 전체 ${x.rk}위</div><div class="verdict">${plainVerdict(x, i)}</div><div class="tabs" id="tabs"></div><div id="tabBody">${body()}</div><div class="act"><button class="pri" id="cmpAdd">${inCmp ? "비교함에서 빼기" : "비교함에 담기"}</button><button id="favBtn">${favs.has(key(x)) ? "★ 즐겨찾기 해제" : "☆ 즐겨찾기"}</button><button id="printBtn">리포트 인쇄</button></div>`;
   const tb = $("tabs"); tabs.forEach(t => { const b = document.createElement("button"); b.type="button"; b.textContent = t; if (t === tab) b.classList.add("on"); b.addEventListener("click", () => { tab = t; openSheet(x); }); tb.appendChild(b); });
   $("closeSheet").addEventListener("click", () => { s.hidden = true; });
@@ -236,7 +247,7 @@ function openCmp(){ const s = $("sheet"); s.hidden = false; const cell = (lab, f
   ${cell("급지", c => info(key(c)).tier ?? "—")}${cell("전세가율", c => { const j = info(key(c)).jr; return j != null ? pct(j) : "—"; })}${cell("하락기", c => { const v = info(key(c)).crash; return v != null ? pct(v) : "—"; })}${cell("세대수·준공", c => (info(key(c)).hh ?? "—") + " · " + (info(key(c)).yr ?? "—"))}${cell("확산 계급", c => info(key(c)).diff || "—")}${cell("정비 Stage", c => info(key(c)).ost ?? "—")}${cell("호재/위험 수", c => { const o = outlook(c, info(key(c))); return o.good.length + " / " + o.risk.length; })}</table></div>`;
   $("closeSheet").addEventListener("click", () => { s.hidden = true; }); }
 
-function fillGu(){ const sido = $("sido").value; const all = D.data[cash] || []; const gus = {}; all.forEach(x => { const i = info(key(x)); if (!sido || i.lawd.startsWith(sido)) gus[i.lawd] = i.reg; });
+function fillGu(){ const sido = $("sido").value; const all = dataOf()[cash] || []; const gus = {}; all.forEach(x => { const i = info(key(x)); if (!sido || i.lawd.startsWith(sido)) gus[i.lawd] = i.reg; });
   const sel = $("gu"); const cur = sel.value; sel.innerHTML = '<option value="">시군구 전체</option>'; Object.entries(gus).sort((a,b) => a[1].localeCompare(b[1])).forEach(([k,v]) => { const o = document.createElement("option"); o.value = k; o.textContent = v; sel.appendChild(o); }); if (gus[cur]) sel.value = cur; }
 
 $("cashRange").max = LV.length - 1; $("cashRange").addEventListener("input", e => setCash(LV[+e.target.value]));
@@ -246,5 +257,5 @@ $("cmpOpen").addEventListener("click", openCmp); $("cmpClear").addEventListener(
 const mk = D.market || {}; $("mkt").innerHTML = `<div><b>수도권 전세가율</b><span>${mk.jr != null ? (mk.jr*100).toFixed(0) + "%" : "—"}</span></div><div><b>기준금리</b><span>${mk.rate ?? "—"}%</span></div><div><b>거래량(1년/3년평균)</b><span>${mk.vol != null ? mk.vol.toFixed(2) + "배" : "—"}</span></div><div><b>고점 대비</b><span>${mk.dd != null ? (mk.dd*100).toFixed(0) + "%" : "—"}</span></div>`;
 $("mktText").textContent = `지금은 "거래는 살아났지만 전세가 가격을 받치지 못하는" 국면입니다. 과거 15년에서 5년 뒤 수익을 가장 잘 맞힌 시점 변수가 전세가율(0.70 이상이면 +27~59%, 0.61 이하면 +3~19%)이라, 이 앱은 지금과 비슷했던 2011~2012년의 실제 결과(+11 / +15 / +22%)를 시장 가정으로 씁니다.`;
 const md = D.model || {}; $("fresh").innerHTML = `자료 ${D.asof} · 모델 ${md.name || "E"}<br>검증 포착률 ${md.recall != null ? (md.recall*100).toFixed(0) : "—"}% (최근 3년 ${md.recall_recent != null ? (md.recall_recent*100).toFixed(0) : "—"}%) · 평균이상 ${md.above != null ? (md.above*100).toFixed(0) : "—"}%`; $("aboveTxt").textContent = md.above != null ? (md.above*100).toFixed(0) + "%" : "—";
-setBand(""); setGrade(""); setCash(cash); tray();
+setBand(""); setGrade(""); setModel(model); tray();
 </script>
