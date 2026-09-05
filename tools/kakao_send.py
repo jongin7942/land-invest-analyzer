@@ -20,13 +20,13 @@ def main() -> int:
     text = sys.argv[1] if len(sys.argv) > 1 else ""
     link = sys.argv[2] if len(sys.argv) > 2 else DEFAULT_LINK
     cfg = json.loads(CFG.read_text(encoding="utf-8"))
-    tok = refresh_access_token(cfg["kakao"]["rest_api_key"], cfg["kakao"]["refresh_token"])
-    if tok.get("refresh_token"):
-        cfg["kakao"]["refresh_token"] = tok["refresh_token"]
+    access, new_refresh = refresh_access_token(cfg["kakao"]["rest_api_key"], cfg["kakao"]["refresh_token"])
+    if new_refresh:
+        cfg["kakao"]["refresh_token"] = new_refresh
         CFG.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     out = []
     for i in range(0, max(1, len(text)), 1900):
-        out.append(send_memo(tok["access_token"], text[i:i + 1900], link))
+        out.append(send_memo(access, text[i:i + 1900], link))
     print(json.dumps(out, ensure_ascii=False))
     return 0 if all(o.get("result_code") == 0 for o in out) else 1
 
