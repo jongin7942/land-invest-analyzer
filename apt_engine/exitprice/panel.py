@@ -117,6 +117,12 @@ def is_express(line_id: str, station_name: str) -> bool:
     base = (station_name or "").split("(")[0].replace("역", "").strip()
     return any(base == n or base.startswith(n) for n in e[1])
 TRANSIT = [f for fs in TRANSIT_GROUPS.values() for f in fs]
+JONGIN_GROUPS = {
+    "선점(1급착공·급행)": ["planned_t1_c", "express_t1_km"],
+    "밀려나는수요": ["gu_interin_12m_per_1k", "cheap_x_access", "rel_sido_price"],
+    "재건축레이더": ["redev_ready", "redev_ready_station"],
+}
+JONGIN = [f for fs in JONGIN_GROUPS.values() for f in fs]
 TIER_W = {1: 1.0, 2: 0.5, 3: 0.25}
 BRAND_BUILDERS = ("삼성물산", "현대건설", "GS건설", "대우건설", "대림산업", "DL이앤씨", "포스코", "롯데건설", "현대산업개발", "HDC", "SK에코", "SK건설", "한화건설", "현대엔지니어링")
 JOB_GROWTH = ["jobs_growth5"]                       # 5년 전 스냅샷이 있는 진입연도(2021~)만
@@ -135,6 +141,7 @@ FEATURE_SETS = {
     "P_policy": FEATURES + JOB_FEATURES + THEORY2 + POLICY,
     "K_kosis": FEATURES + JOB_FEATURES + THEORY2 + KOSIS,
     "T_transit": FEATURES + JOB_FEATURES + THEORY2 + TRANSIT,
+    "J_jongin": FEATURES + JOB_FEATURES + THEORY2 + JONGIN,
 }
 BOK: dict[int, float] = {}
 # ── 정책·공급 자료 (rules/) ──
@@ -171,10 +178,10 @@ INCOME_SIDO: dict[tuple[str, int], float] = {}
 try:
     with (_R / "kosis_migration_sigungu_monthly.csv").open(encoding="utf-8") as _f:
         for _r in _csv2.DictReader(_f):
-            if _r["ITM_NM"] not in ("총전입", "총전출", "순이동") or not _r["DT"]:
+            if _r["ITM_NM"] not in ("총전입", "총전출", "순이동", "시도간전입") or not _r["DT"]:
                 continue
             d = MIG.setdefault((_r["C1"], _r["PRD_DE"]), {})
-            d[{"총전입": "in", "총전출": "out", "순이동": "net"}[_r["ITM_NM"]]] = float(_r["DT"])
+            d[{"총전입": "in", "총전출": "out", "순이동": "net", "시도간전입": "inter_in"}[_r["ITM_NM"]]] = float(_r["DT"])
     with (_R / "kosis_construction_cost_index.csv").open(encoding="utf-8") as _f:
         for _r in _csv2.DictReader(_f):
             if _r["C1_NM"] == "주거용건물" and _r["DT"]:
@@ -786,6 +793,18 @@ class PanelBuilder:
             "gu_income_rel_sido": math.log(inc / inc_sd) if (inc and inc_sd) else None,
         })
         x.update(self.transit_feats(c, entry_ym))
+        # ── 종인 이론 변수 ──
+        inter12 = _mig_sum(mcode, entry_ym, 12, "inter_in")
+        sido_lv2 = self._cache.get(("sidolv", c.lawd_cd[:2], t))
+        relsd = (math.log(p0 / store.BAND_M2[band]) - math.log(sido_lv2)) if sido_lv2 else None
+        rr = 1.0 if (age is not None and age >= 30 and far is not None and far < 200 and (c.households or 0) >= 1000) else (0.0 if (age is not None and far is not None) else None)
+        x.update({
+            "gu_interin_12m_per_1k": (inter12 / stock * 1000.0) if (inter12 is not None and stock > 0) else None,
+            "rel_sido_price": relsd,
+            "cheap_x_access": ((-relsd) / (1.0 + x["stn_t1_km"])) if (relsd is not None and x.get("stn_t1_km") is not None) else None,
+            "redev_ready": rr,
+            "redev_ready_station": (rr * (1.0 if x.get("stn_t1_km", 9) <= 0.5 else 0.0)) if rr is not None else None,
+        })
         x.update(self.cycle_feats(t, year))
         t1 = t + HORIZON
         p1 = smooth_price(s, t1) if t1 < N_MONTHS else None
