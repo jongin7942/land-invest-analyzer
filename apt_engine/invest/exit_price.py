@@ -45,6 +45,42 @@ class OptionInput:
 
 
 @dataclass
+class TransitInput:
+    """§30.3 교통 선점(착공된 1급 노선 역 1km & 미개통). 사건연구 실측: 착공~개통 상대수익 +5.1%p(급행 +8.6%p), 개통 뒤 되돌림.
+    표본 14·6건(PROXY) — 종인님 지시(2026-09-06)로 표본 30건 미만이어도 Bull 에만 반영한다."""
+    line: str
+    station: str
+    km: float
+    express: bool
+    expected_open_ym: str | None
+
+
+TRANSIT_PREOPEN_UPLIFT = {"local": 0.051, "express": 0.086}     # PROXY, 연구로그 §30.3
+
+
+def load_transit_preopen() -> dict[int, TransitInput]:
+    """DB transit_station(status='착공', 1급 노선) 1km 안 단지 → TransitInput. 개통 뒤에는 자동 소멸(status 가 개통으로 바뀌면 빠짐)."""
+    from apt_engine.db.connection import get_conn
+    from apt_engine.exitprice import panel as _pm
+    from apt_engine.relative import store as _st
+    out: dict[int, TransitInput] = {}
+    with get_conn() as conn:
+        st = [(float(r["lat"]), float(r["lon"]), r["name"], r["line_id"], r["expected_open_ym"]) for r in conn.execute(
+            "SELECT s.lat, s.lon, s.name, p.line_id, s.expected_open_ym FROM transit_station s JOIN transit_project p ON p.id=s.project_id "
+            "WHERE s.lat IS NOT NULL AND s.status='착공' AND p.destination_tier=1")]
+        cx = _st.load_complexes(conn)
+    for c in cx.values():
+        best = None
+        for la, lo, nm, line, exp in st:
+            d = _st.haversine_m(c.lat, c.lon, la, lo) / 1000.0
+            if d <= 1.0 and (best is None or d < best.km):
+                best = TransitInput(line, nm, round(d, 2), _pm.is_express(line, nm), exp)
+        if best:
+            out[c.id] = best
+    return out
+
+
+@dataclass
 class ExitSet:
     base_price: int
     prices: dict                      # {"Bear","Base","Bull"} → 매도가
@@ -112,7 +148,7 @@ def load_predictions(path=None) -> dict[tuple[int, str], Prediction]:
 
 
 def build(base_price: int, *, relative: RelativeInput | None, option: OptionInput | None,
-          adjust: dict[str, float] | None = None, prediction: Prediction | None = None) -> ExitSet:
+          adjust: dict[str, float] | None = None, prediction: Prediction | None = None, transit: TransitInput | None = None) -> ExitSet:
     if prediction is not None:
         factors = {"Bear": prediction.bear, "Base": prediction.base, "Bull": prediction.bull}
         notes: list[str] = [f"Base/Bear/Bull = Exit Price Engine 예측(잔차 P50/P20/P80) · {prediction.model} · {prediction.status}"]
@@ -141,6 +177,11 @@ def build(base_price: int, *, relative: RelativeInput | None, option: OptionInpu
         onote = f"정비사업 옵션: Stage {option.option_stage} · {option.option_value} → N/A, 매도가에 미반영(0 확정 아님)"
     notes.append(onote)
 
+    t_up = 0.0
+    if transit is not None:
+        t_up = TRANSIT_PREOPEN_UPLIFT["express" if transit.express else "local"]
+        notes.append(f"교통 선점(PROXY, §30.3): 착공된 1급 {transit.line} {transit.station} {transit.km}km{' 급행' if transit.express else ''}"
+                     f"{' · 개통예정 ' + str(transit.expected_open_ym) if transit.expected_open_ym else ''} → Bull 에만 {t_up:+.3f} (착공~개통 실측, 개통 뒤 되돌림이라 Base 미반영)")
     prices = {}
     for k in ("Bear", "Base", "Bull"):
         f = factors.get(k, 1.0)
@@ -148,6 +189,8 @@ def build(base_price: int, *, relative: RelativeInput | None, option: OptionInpu
             f *= (1.0 + uplift)
         if applied and k != "Bear":
             f *= (1.0 + float(option.option_value))
+        if k == "Bull":
+            f *= (1.0 + t_up)
         prices[k] = int(round(base_price * f / 1_000_000) * 1_000_000)
     return ExitSet(base_price, prices, uplift, rstatus, applied, onote, notes)
 

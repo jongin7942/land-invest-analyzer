@@ -33,13 +33,16 @@ OFFICIAL_RATIO = 0.65
 PROBE = {"complex_id": 482, "band": "74", "price": 460_000_000, "label": "회귀 예시 · 부평 동아1단지 74㎡ 저층 4.6억"}
 
 
+TRANSIT: dict = {}
+
+
 def one(conn, cid: int, band: str, *, profile: Profile, rel, opt, pred, price_override=None):
     cand = budget_mod.evaluate(conn, cid, profile=profile, as_of=AS_OF, area_band=band,
                                price_override=price_override, allow_unverified=True)
     if cand is None:
         return None
     price = cand.capital.purchase_price
-    es = exit_price.build(price, relative=rel.get((cid, band)), option=opt.get(cid), prediction=pred.get((cid, band)))
+    es = exit_price.build(price, relative=rel.get((cid, band)), option=opt.get(cid), prediction=pred.get((cid, band)), transit=TRANSIT.get(cid))
     region = profile.region or regions.sido_of(cand.lawd_cd)
     band_res = scenario_mod.band(
         conn, capital=cand.capital, as_of=AS_OF, holding_years=5, base_sale_price=price,
@@ -87,6 +90,7 @@ def main() -> int:
     else:
         pool = json.loads(Path(args.pool).read_text(encoding="utf-8"))["rows"]
     rel, opt, pred = exit_price.load_relative(), exit_price.load_options(), exit_price.load_predictions(args.exit)
+    TRANSIT.update(exit_price.load_transit_preopen()); print(f"교통 선점(착공 1급 역 1km) {len(TRANSIT)}단지")
     print(f"Exit Price 예측 {len(pred)}건 적재")
     rows = []
     with get_conn() as conn:
