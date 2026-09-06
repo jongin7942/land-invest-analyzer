@@ -525,7 +525,7 @@ class PanelBuilder:
             st = self.stations[i]
             if len(st) < 5 or st[4] is None:
                 continue
-            la, lo, opened, sdate, tier = st
+            la, lo, opened, sdate, tier = st[:5]
             d = haversine_m(c.lat, c.lon, la, lo) / 1000.0
             if opened and store._ym_index(opened) <= yidx:
                 if d < best[tier]:

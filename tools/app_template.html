@@ -190,7 +190,8 @@ function outlook(x, i){ const good = [], risk = [];
   const tr = i.tr || {};
   if (tr.t1 && tr.t1.km <= 1.0) good.push(`<b>${tr.t1.line} ${tr.t1.name}역 ${Math.round(tr.t1.km*1000)}m</b> — ${tr.t1.dest}로 이어지는 1급 노선. 교통은 '어디와 이어지느냐'로 먼저 봅니다(직장 근접 이론).${S("노선 등급표")}`);
   else if (tr.t2 && tr.t2.km <= 1.0 && !(tr.t1 && tr.t1.km <= 1.0)) good.push(`<b>${tr.t2.line} ${tr.t2.name}역 ${Math.round(tr.t2.km*1000)}m</b> — ${tr.t2.dest} 부도심 연결(2급 노선). 1급 직장중심은 환승 필요.${S("노선 등급표")}`);
-  if (tr.planned_t1) good.push(`<b>계획 1급 노선 ${tr.planned_t1.line} ${tr.planned_t1.name}역 ${Math.round(tr.planned_t1.km*1000)}m</b> — ${tr.planned_t1.dest} 직결 예정. 과거 117개 개통 사례에서 등급을 나눠도 '개통 자체' 상승은 0 근처였고, 계획 발표 뒤 가격에 먼저 반영되는지가 관건 → 점수에는 넣지 않고 관측만.${S("노선 등급표·사건연구")}`);
+  if (tr.planned_t1) { const p = tr.planned_t1; const started = p.status === "착공"; good.push(`<b>${started ? "착공된" : "계획"} 1급 노선 ${p.line} ${p.name}역 ${Math.round(p.km*1000)}m${p.open ? " (개통 예정 " + String(p.open).slice(0,4) + "." + String(p.open).slice(4,6) + ")" : ""}</b> — ${p.dest} 직결. 2015~24년 개통 1급 역 14건에서 1km 안 단지는 <b>착공~개통 사이</b> 같은 시군구보다 중앙 +5.1%p(12/14 우세${p.express ? ", 급행 정차역은 +8.6%p" : ""}) 더 올랐고, 개통 뒤 24개월은 되돌림(−0.5%p). 발표 단계는 +2%p로 약함.${started ? " 지금이 그 구간입니다." : " 착공 전이라 아직 약한 단계."} 점수에는 넣지 않고 표시만.${S("노선 등급표·착공~개통 사건연구")}`); }
+  if (tr.t1 && tr.t1.km <= 1.0 && tr.t1.express) good.push(`<b>급행 정차역</b> — ${tr.t1.line} ${tr.t1.name}역은 급행이 서는 역. 1급 노선 안에서도 급행 정차역 근처가 착공~개통 구간에서 더 올랐습니다(+8.6 vs +4.0%p).${S("급행 정차역표")}`);
   if (i.stn != null && i.stn <= 500 && !(tr.t1 && tr.t1.km <= 1.0)) good.push(`<b>역세권(역까지 ${i.stn}m)</b> — 500m 안 단지는 연 +0.13%p 씩 시군구보다 더 올랐습니다(개통 자체 효과는 0).${S("실측")}`);
   if (i.jr != null && i.jr >= 0.7) good.push(`<b>전세가율 ${pct(i.jr)}</b> — 전세가 가격을 두껍게 받쳐 하락 방어에 유리.${S("전월세 실거래")}`);
   if (i.relm != null && i.relm >= 0.08) good.push(`<b>모델 예측: 시장보다 ${(i.relm*100).toFixed(0)}%p 더 오름</b> — 급지·1급지 거리·최근 덜 오른 정도가 만든 값.${S("모델 E")}`);

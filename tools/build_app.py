@@ -95,11 +95,11 @@ def _transit(c) -> dict | None:
     global _STN
     if not _STN:
         with get_conn() as conn:
-            _STN = [(float(r["lat"]), float(r["lon"]), r["name"], r["line_id"], int(r["destination_tier"]) if r["destination_tier"] else None, r["status"], r["opened_ym"], r["destination"])
-                    for r in conn.execute("SELECT s.lat, s.lon, s.name, p.line_id, p.destination_tier, s.status, s.opened_ym, p.destination FROM transit_station s LEFT JOIN transit_project p ON p.id=s.project_id WHERE s.lat IS NOT NULL")]
+            _STN = [(float(r["lat"]), float(r["lon"]), r["name"], r["line_id"], int(r["destination_tier"]) if r["destination_tier"] else None, r["status"], r["opened_ym"], r["destination"], r["expected_open_ym"])
+                    for r in conn.execute("SELECT s.lat, s.lon, s.name, p.line_id, p.destination_tier, s.status, s.opened_ym, p.destination, s.expected_open_ym FROM transit_station s LEFT JOIN transit_project p ON p.id=s.project_id WHERE s.lat IS NOT NULL")]
     best = {}
     planned = None
-    for la, lo, nm, line, tier, status, opened, dest in _STN:
+    for la, lo, nm, line, tier, status, opened, dest, exp_open in _STN:
         if tier is None:
             continue
         d = store.haversine_m(c.lat, c.lon, la, lo) / 1000.0
@@ -107,9 +107,9 @@ def _transit(c) -> dict | None:
             continue
         if status in ("개통", "운영중"):
             if tier not in best or d < best[tier]["km"]:
-                best[tier] = {"km": round(d, 2), "name": nm, "line": line, "dest": dest}
+                best[tier] = {"km": round(d, 2), "name": nm, "line": line, "dest": dest, "express": panel_mod.is_express(line, nm)}
         elif d <= 1.5 and tier == 1 and (planned is None or d < planned["km"]):
-            planned = {"km": round(d, 2), "name": nm, "line": line, "dest": dest}
+            planned = {"km": round(d, 2), "name": nm, "line": line, "dest": dest, "status": status, "open": exp_open, "express": panel_mod.is_express(line, nm)}
     return {"t1": best.get(1), "t2": best.get(2), "planned_t1": planned}
 
 def _model_card(e: dict) -> dict:
