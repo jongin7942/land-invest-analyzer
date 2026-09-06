@@ -70,7 +70,7 @@ def main() -> int:
             res[T] = et.eval_pred([(sum(m.predict(t.x) for m in ms) / len(ms), t.target) for t in te])
         return et.pack(res)
     out["boost3"] = {}
-    for name, fs in [("E", E), ("E+교통접근", E + G["교통접근"]), ("E+교통계획", E + G["교통계획"]), ("E+교통전부", P), ("E-역거리+교통전부", [f for f in P if f not in ("station_km", "station_planned")])]:
+    for name, fs in [("E", E), ("E+교통계획2(착공)", E + G["교통계획2(착공기준 복원)"]), ("E+교통계획3(발표)", E + G["교통계획3(발표기준 복원)"]), ("E+급행", E + G["급행"]), ("E+접근+급행", E + G["교통접근"] + G["급행"]), ("E+계획2+급행+접근", E + G["교통계획2(착공기준 복원)"] + G["급행"] + G["교통접근"])]:
         out["boost3"][name] = boost3(fs, name); et.log(f"boost×3 {name}: {et.fmt(out['boost3'][name])}")
     (ROOT / "reports" / "transit_theories.json").write_text(json.dumps(out, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
     et.log("done")

@@ -23,7 +23,7 @@ from apt_engine.relative import store  # noqa: E402
 
 CACHE = ROOT / "logs" / "_exit_panel_transit.pkl"
 LEVEL = ["tier", "dist_tier1_km", "dist_center_km", "log_academy", "jobs_3km", "age", "log_hh"]
-TRANSIT = ["stn_t1_km", "stn_t2_km", "access_score", "planned_t1", "planned_t2", "t1_new5y"]
+TRANSIT = ["stn_t1_km", "stn_t2_km", "access_score", "planned_t1_c", "planned_t2_c", "planned_t1_a", "t1_new5y", "express_t1_km"]
 
 
 class R:
@@ -43,7 +43,7 @@ def r2(fit, rows):
 def main() -> int:
     rows = pickle.loads(CACHE.read_bytes())
     out = {"years": {}}
-    for y in ("2012", "2016", "2021"):
+    for y in ("2012", "2016", "2019", "2021"):
         sub = []
         for r in rows:
             if not r.entry_ym.startswith(y):
@@ -60,10 +60,12 @@ def main() -> int:
         sd = {f: round(fb.std[f], 3) for f in TRANSIT}
         # 1급 역 1km 접근 프리미엄(%) ≈ exp(−beta_std/sd × 1km) − 1
         prem_1km = round((math.exp(-coef["stn_t1_km"] / sd["stn_t1_km"] * 1.0) - 1) * 100, 1) if sd["stn_t1_km"] else None
-        planned_prem = round((math.exp(coef["planned_t1"] / sd["planned_t1"]) - 1) * 100, 1) if sd["planned_t1"] else None
+        planned_prem = round((math.exp(coef["planned_t1_c"] / sd["planned_t1_c"]) - 1) * 100, 1) if sd["planned_t1_c"] else None
+        planned_prem_a = round((math.exp(coef["planned_t1_a"] / sd["planned_t1_a"]) - 1) * 100, 1) if sd["planned_t1_a"] else None
+        express_prem = round((math.exp(-coef["express_t1_km"] / sd["express_t1_km"]) - 1) * 100, 1) if sd["express_t1_km"] else None
         out["years"][y] = {"n": ra[1], "r2_level": ra[0], "r2_level+transit": rb[0], "r2_gain": round(rb[0] - ra[0], 4),
-                           "coef_std": coef, "premium_t1_per_1km_pct": prem_1km, "planned_t1_premium_pct": planned_prem,
-                           "share_planned_t1": round(sum(1 for r in sub if r.x.get("planned_t1")) / len(sub), 3), "share_t1_new5y": round(sum(1 for r in sub if r.x.get("t1_new5y")) / len(sub), 3)}
+                           "coef_std": coef, "premium_t1_per_1km_pct": prem_1km, "planned_t1_construct_premium_pct": planned_prem, "planned_t1_announce_premium_pct": planned_prem_a, "express_t1_per_1km_pct": express_prem,
+                           "share_planned_t1_c": round(sum(1 for r in sub if r.x.get("planned_t1_c")) / len(sub), 3), "share_planned_t1_a": round(sum(1 for r in sub if r.x.get("planned_t1_a")) / len(sub), 3), "share_t1_new5y": round(sum(1 for r in sub if r.x.get("t1_new5y")) / len(sub), 3)}
         print(y, out["years"][y], flush=True)
     (ROOT / "reports" / "transit_price_formation.json").write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
     return 0
