@@ -123,6 +123,12 @@ JONGIN_GROUPS = {
     "재건축레이더": ["redev_ready", "redev_ready_station"],
 }
 JONGIN = [f for fs in JONGIN_GROUPS.values() for f in fs]
+SCARCITY_GROUPS = {
+    "신축희소성": ["new_prem_gu", "new_share10"],
+    "입지×노후": ["loc_old", "newtown"],
+    "이중희소성 결합": ["scarcity_combo", "scarcity_far"],
+}
+SCARCITY = [f for fs in SCARCITY_GROUPS.values() for f in fs]
 TIER_W = {1: 1.0, 2: 0.5, 3: 0.25}
 BRAND_BUILDERS = ("삼성물산", "현대건설", "GS건설", "대우건설", "대림산업", "DL이앤씨", "포스코", "롯데건설", "현대산업개발", "HDC", "SK에코", "SK건설", "한화건설", "현대엔지니어링")
 JOB_GROWTH = ["jobs_growth5"]                       # 5년 전 스냅샷이 있는 진입연도(2021~)만
@@ -142,6 +148,7 @@ FEATURE_SETS = {
     "K_kosis": FEATURES + JOB_FEATURES + THEORY2 + KOSIS,
     "T_transit": FEATURES + JOB_FEATURES + THEORY2 + TRANSIT,
     "J_jongin": FEATURES + JOB_FEATURES + THEORY2 + JONGIN,
+    "S_scarcity": FEATURES + JOB_FEATURES + THEORY2 + SCARCITY,
 }
 BOK: dict[int, float] = {}
 # ── 정책·공급 자료 (rules/) ──
@@ -470,6 +477,50 @@ class PanelBuilder:
             new = sum((c.households or 0) for c in self.cx.values() if c.approval_year and y0 < c.approval_year <= y1)
             self._cache[key] = (new / stock) if stock > 0 else None
         return self._cache[key]
+
+    def new_premium(self, key: str, t: int, year: int, level: str) -> float | None:
+        """신축(≤7년) ÷ 구축(≥20년) ㎡단가 중앙값의 log. level='gu'(시군구) 또는 'sido'."""
+        ck = ("newprem", level, key, t)
+        if ck not in self._cache:
+            new_, old_ = [], []
+            for (cid, band), s_ in self.tier_prices.items():
+                c2 = self.tier_cx[cid]
+                k2 = c2.lawd_cd if level == "gu" else c2.lawd_cd[:2]
+                if k2 != key or not c2.approval_year or not s_.p50[t]:
+                    continue
+                a = year - c2.approval_year
+                v = math.log(s_.p50[t] / store.BAND_M2[band])
+                if a <= 7:
+                    new_.append(v)
+                elif a >= 20:
+                    old_.append(v)
+            self._cache[ck] = (median(new_) - median(old_)) if (len(new_) >= 3 and len(old_) >= 5) else None
+        return self._cache[ck]
+
+    def new_share10(self, lawd: str, year: int) -> float | None:
+        ck = ("newshare", lawd, year)
+        if ck not in self._cache:
+            tot = rec = 0
+            for c2 in self.tier_cx.values():
+                if c2.lawd_cd != lawd or not c2.households:
+                    continue
+                tot += c2.households
+                if c2.approval_year and year - c2.approval_year <= 10:
+                    rec += c2.households
+            self._cache[ck] = (rec / tot) if tot > 0 else None
+        return self._cache[ck]
+
+    def newtown_flag(self, emd_key: str) -> float | None:
+        """법정동 계획개발 대리 — 준공연도 중앙 ≥1995 이고 사분위폭 ≤8년(동시 대량 개발)."""
+        ck = ("newtown", emd_key)
+        if ck not in self._cache:
+            ys = sorted(c2.approval_year for c2 in self.tier_cx.values() if c2.emd_key == emd_key and c2.approval_year)
+            if len(ys) < 4:
+                self._cache[ck] = None
+            else:
+                q1, q3, med = ys[len(ys) // 4], ys[len(ys) * 3 // 4], ys[len(ys) // 2]
+                self._cache[ck] = 1.0 if (med >= 1995 and (q3 - q1) <= 8) else 0.0
+        return self._cache[ck]
 
     # ── 계급(급지) at Y ──
     def tiers_at(self, t: int) -> tuple[dict[str, int], dict[str, tuple[float, float, int]]]:
@@ -804,6 +855,29 @@ class PanelBuilder:
             "cheap_x_access": ((-relsd) / (1.0 + x["stn_t1_km"])) if (relsd is not None and x.get("stn_t1_km") is not None) else None,
             "redev_ready": rr,
             "redev_ready_station": (rr * (1.0 if x.get("stn_t1_km", 9) <= 0.5 else 0.0)) if rr is not None else None,
+        })
+        # ── 이중 희소성 변수 (SCARCITY_GROUPS) ──
+        npg = self.new_premium(c.lawd_cd, t, year, "gu")
+        if npg is None:
+            npg = self.new_premium(c.lawd_cd[:2], t, year, "sido")
+        ck_med = ("npmed", t)
+        if ck_med not in self._cache:
+            vals = []
+            for lw in {c2.lawd_cd for c2 in self.tier_cx.values()}:
+                v = self.new_premium(lw, t, year, "gu")
+                if v is not None:
+                    vals.append(v)
+            self._cache[ck_med] = median(vals) if len(vals) >= 5 else None
+        np_med = self._cache[ck_med]
+        loc_old = (1.0 if (tier is not None and tier <= 3 and age is not None and age >= 35) else 0.0) if age is not None else None
+        combo = (loc_old * (1.0 if (npg is not None and np_med is not None and npg >= np_med) else 0.0)) if loc_old is not None else None
+        x.update({
+            "new_prem_gu": npg,
+            "new_share10": self.new_share10(c.lawd_cd, year),
+            "loc_old": loc_old,
+            "newtown": self.newtown_flag(c.emd_key),
+            "scarcity_combo": combo,
+            "scarcity_far": (combo * (1.0 if (far is not None and far < 200) else 0.0)) if combo is not None else None,
         })
         x.update(self.cycle_feats(t, year))
         t1 = t + HORIZON
