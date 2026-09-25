@@ -91,6 +91,9 @@ def init_db():
     with get_conn() as conn:
         conn.executescript(SCHEMA)
         _migrate(conn)
+    # 상가/개원 입지 모듈 테이블(별도 파일). 순환 import 방지를 위해 지연 import.
+    from db import shop as _shop
+    _shop.init()
 
 
 def _migrate(conn):

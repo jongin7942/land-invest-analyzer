@@ -52,3 +52,15 @@ def require_data_go_kr_key() -> str:
             "발급 방법은 README.md 참고."
         )
     return DATA_GO_KR_SERVICE_KEY
+
+# ---------------------------------------------------------------------------
+# 상가(개원 입지) 모듈 설정
+# ---------------------------------------------------------------------------
+# 네이버 부동산 매물 조회 엔드포인트: mobile(m.land.naver.com, 기본) | new(new.land.naver.com)
+NAVER_LAND_ENDPOINT = (os.getenv("NAVER_LAND_ENDPOINT", "mobile").strip() or "mobile").lower()
+# new.land 엔드포인트는 브라우저가 쓰는 Bearer 토큰이 필요한 경우가 있다(선택).
+NAVER_LAND_AUTH = os.getenv("NAVER_LAND_AUTH", "").strip()
+# 보증금 → 월세 환산율(연). 상가는 통상 6~12% 사이. 환산월세 = 월세 + 보증금×(환산율/12)
+RENT_CONVERSION_RATE = float(os.getenv("RENT_CONVERSION_RATE", "0.06") or 0.06)
+# 네이버 호출 간격(초). 너무 짧으면 IP 차단 위험.
+NAVER_LAND_SLEEP = float(os.getenv("NAVER_LAND_SLEEP", "1.2") or 1.2)
