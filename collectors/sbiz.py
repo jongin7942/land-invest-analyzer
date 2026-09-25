@@ -37,11 +37,15 @@ def stores_in_radius(lon: float, lat: float, radius_m: int = 300, max_pages: int
             "serviceKey": key, "pageNo": page, "numOfRows": 1000, "radius": radius_m,
             "cx": lon, "cy": lat, "type": "json",
         }, timeout=30)
-        r.raise_for_status()
         try:
             data = r.json()
         except ValueError as e:
-            raise SbizError(f"JSON 아님: {r.text[:200]}") from e
+            raise SbizError(f"JSON 아님(HTTP {r.status_code}): {r.text[:200]}") from e
+        hdr = (data.get("OpenAPI_ServiceResponse") or {}).get("cmmMsgHeader")
+        if hdr:  # 라이브 확인: 미등록 키면 HTTP 403 + returnReasonCode 30
+            raise SbizError(f"data.go.kr 오류 {hdr.get('returnReasonCode')}: {hdr.get('returnAuthMsg') or hdr.get('errMsg')}"
+                            " — '소상공인시장진흥공단_상가(상권)정보' 활용신청 여부 확인")
+        r.raise_for_status()
         body = data.get("body") or {}
         items = body.get("items") or []
         for it in items:

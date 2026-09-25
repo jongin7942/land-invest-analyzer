@@ -39,9 +39,30 @@ class HiraError(RuntimeError):
     pass
 
 
+def _auth_error(text: str) -> str | None:
+    """data.go.kr 공통 오류 헤더(cmmMsgHeader)면 사람이 읽을 메시지 반환. HTTP 403 + XML/JSON.
+    라이브 확인(2026-09-25): 미등록 키 → returnReasonCode 30 'SERVICE_KEY_IS_NOT_REGISTERED_ERROR'."""
+    if "cmmMsgHeader" not in text:
+        return None
+    if text.lstrip().startswith("{"):
+        h = (json.loads(text).get("OpenAPI_ServiceResponse") or {}).get("cmmMsgHeader") or {}
+        msg, code = h.get("returnAuthMsg") or h.get("errMsg"), h.get("returnReasonCode")
+    else:
+        root = ET.fromstring(text)
+        msg = root.findtext(".//returnAuthMsg") or root.findtext(".//errMsg")
+        code = root.findtext(".//returnReasonCode")
+    hint = ""
+    if str(code) == "30":
+        hint = " — data.go.kr 에서 이 데이터셋(병원정보서비스/약국정보서비스) 활용신청이 됐는지, .env 키가 Decoding 키인지 확인"
+    return f"data.go.kr 오류 {code}: {msg}{hint}"
+
+
 def _rows_from_response(text: str) -> tuple[list[dict], int]:
     """XML 또는 JSON 응답 → (items, totalCount)."""
     text = text.strip()
+    err = _auth_error(text)
+    if err:
+        raise HiraError(err)
     if text.startswith("{"):
         data = json.loads(text)
         body = (data.get("response") or {}).get("body") or {}
@@ -94,7 +115,8 @@ def _fetch_all(url: str, params: dict, is_pharmacy: bool, num_rows: int = 1000,
     while True:
         p = {"serviceKey": key, "pageNo": page, "numOfRows": num_rows, **params}
         r = requests.get(url, params=p, timeout=timeout)
-        r.raise_for_status()
+        if r.status_code != 200 and not _auth_error(r.text):
+            r.raise_for_status()
         items, total = _rows_from_response(r.text)
         out.extend(_normalize(it, is_pharmacy) for it in items)
         if progress:
